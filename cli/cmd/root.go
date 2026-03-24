@@ -119,6 +119,36 @@ func newClient() (*client.Client, error) {
 	return c, nil
 }
 
+// newUnauthenticatedClient creates a client without loading any credentials.
+// Used for login where we don't need (and don't want warnings about) existing tokens.
+func newUnauthenticatedClient() (*client.Client, error) {
+	apiURL := resolveAPIURL()
+	if apiURL == "" {
+		return nil, errNoAPIURL
+	}
+
+	c := client.New(apiURL)
+
+	// Insecure: flag > config
+	insecure := flagInsecure
+	if !insecure && cfg.CurrentCtx() != nil {
+		insecure = cfg.CurrentCtx().Insecure
+	}
+	if insecure {
+		if t, ok := http.DefaultTransport.(*http.Transport); ok {
+			clone := t.Clone()
+			clone.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-requested
+			c.HTTPClient.Transport = clone
+		} else {
+			c.HTTPClient.Transport = &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
+			}
+		}
+	}
+
+	return c, nil
+}
+
 // resolveAPIURL determines the API URL from flags, env, or config.
 func resolveAPIURL() string {
 	if flagAPIURL != "" {

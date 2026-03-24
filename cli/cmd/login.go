@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ Environment variables:
 			fmt.Fprint(cmd.OutOrStdout(), "Username: ")
 			reader := bufio.NewReader(cmd.InOrStdin())
 			line, err := reader.ReadString('\n')
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return fmt.Errorf("reading username: %w", err)
 			}
 			username = strings.TrimSpace(line)
@@ -66,7 +67,7 @@ Environment variables:
 			} else {
 				reader := bufio.NewReader(cmd.InOrStdin())
 				line, err := reader.ReadString('\n')
-				if err != nil {
+				if err != nil && err != io.EOF {
 					return fmt.Errorf("reading password: %w", err)
 				}
 				password = strings.TrimSpace(line)
@@ -76,7 +77,11 @@ Environment variables:
 			return fmt.Errorf("password is required")
 		}
 
-		c, err := newClient()
+		if cfg == nil || cfg.CurrentContext == "" {
+			return fmt.Errorf("no context configured. Run 'stackctl config use-context <name>' first")
+		}
+
+		c, err := newUnauthenticatedClient()
 		if err != nil {
 			return err
 		}
@@ -156,7 +161,8 @@ Examples:
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, user.Username)
+			// Quiet mode outputs IDs per global flag contract
+			fmt.Fprintln(printer.Writer, user.ID)
 			return nil
 		}
 

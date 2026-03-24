@@ -439,7 +439,7 @@ func TestWhoamiCmd_QuietOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := strings.TrimSpace(buf.String())
-	assert.Equal(t, "quietuser", out, "quiet mode should output only username")
+	assert.Equal(t, "1", out, "quiet mode should output only user ID")
 	assert.NotContains(t, out, "Role")
 }
 
@@ -525,7 +525,7 @@ func TestWhoamiCmd_OutputModes(t *testing.T) {
 			name:       "quiet mode",
 			format:     "table",
 			quiet:      true,
-			wantSubstr: []string{"admin"},
+			wantSubstr: []string{"1"},
 			wantAbsent: []string{"Role", "Created", "Username:"},
 		},
 	}

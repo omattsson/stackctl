@@ -324,7 +324,11 @@ func startE2EMockAuthServer(t *testing.T) *httptest.Server {
 		switch {
 		case r.URL.Path == "/api/v1/auth/login" && r.Method == http.MethodPost:
 			var body map[string]string
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+				return
+			}
 			if body["username"] == "e2euser" && body["password"] == "e2epass" {
 				w.WriteHeader(http.StatusOK)
 				resp := map[string]interface{}{
@@ -481,10 +485,10 @@ func TestE2E_WhoamiOutputFormats(t *testing.T) {
 	assert.Contains(t, stdout, "username: e2euser")
 	assert.Contains(t, stdout, "role: admin")
 
-	// Test quiet output
+	// Test quiet output (prints user ID per global --quiet contract)
 	stdout, _, err = runStackctl(t, dir, "whoami", "--quiet")
 	require.NoError(t, err)
-	assert.Equal(t, "e2euser\n", stdout)
+	assert.Equal(t, "1\n", stdout)
 
 	// Test table output (default)
 	stdout, _, err = runStackctl(t, dir, "whoami")

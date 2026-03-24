@@ -112,6 +112,26 @@ func TestAuthWorkflow_LoginWhoamiLogout(t *testing.T) {
 		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 	}
 
+	// Verify token file can be loaded back
+	var persisted struct {
+		Token     string    `json:"token"`
+		ExpiresAt time.Time `json:"expires_at"`
+		Username  string    `json:"username"`
+	}
+	readData, err := os.ReadFile(tokenPath)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(readData, &persisted))
+	assert.Equal(t, resp.Token, persisted.Token)
+	assert.Equal(t, resp.User.Username, persisted.Username)
+
+	// Whoami with a fresh client using the persisted token
+	freshClient := client.New(server.URL)
+	freshClient.Token = persisted.Token
+	freshUser, err := freshClient.Whoami()
+	require.NoError(t, err)
+	assert.Equal(t, "admin", freshUser.Username)
+	assert.Equal(t, "admin", freshUser.Role)
+
 	// 2. Whoami (using the token set by Login)
 	user, err := c.Whoami()
 	require.NoError(t, err)
