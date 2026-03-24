@@ -76,6 +76,17 @@ type User struct {
 	Role     string `json:"role" yaml:"role"`
 }
 
+// CreateStackRequest is the request body for POST /api/v1/stack-instances.
+// It contains only the writable fields — server-owned fields like ID, owner,
+// namespace, status are excluded to avoid backend validation errors.
+type CreateStackRequest struct {
+	Name              string `json:"name" yaml:"name"`
+	StackDefinitionID uint   `json:"stack_definition_id" yaml:"stack_definition_id"`
+	Branch            string `json:"branch,omitempty" yaml:"branch,omitempty"`
+	ClusterID         uint   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	TTLMinutes        int    `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
+}
+
 // LoginRequest is the request body for POST /api/v1/auth/login.
 type LoginRequest struct {
 	Username string `json:"username"`
@@ -153,10 +164,11 @@ type HealthResponse struct {
 
 // PodStatus represents the status of a Kubernetes pod.
 type PodStatus struct {
-	Name   string `json:"name" yaml:"name"`
-	Status string `json:"status" yaml:"status"`
-	Ready  bool   `json:"ready" yaml:"ready"`
-	Age    string `json:"age,omitempty" yaml:"age,omitempty"`
+	Name     string `json:"name" yaml:"name"`
+	Status   string `json:"status" yaml:"status"`
+	Ready    bool   `json:"ready" yaml:"ready"`
+	Restarts int    `json:"restarts" yaml:"restarts"`
+	Age      string `json:"age,omitempty" yaml:"age,omitempty"`
 }
 
 // InstanceStatus represents the full status of a stack instance.

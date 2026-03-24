@@ -523,3 +523,319 @@ func TestWhoami_WithAPIKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "apiuser", user.Username)
 }
+
+// ---------- Stack Instance client methods ----------
+
+func TestListStacks_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{
+			Data:       []types.StackInstance{{Base: types.Base{ID: 1}, Name: "stack-1"}},
+			Total:      1,
+			Page:       1,
+			PageSize:   20,
+			TotalPages: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ListStacks(nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, resp.Total)
+	assert.Len(t, resp.Data, 1)
+	assert.Equal(t, "stack-1", resp.Data[0].Name)
+}
+
+func TestListStacks_WithFilters(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "running", r.URL.Query().Get("status"))
+		assert.Equal(t, "me", r.URL.Query().Get("owner"))
+		assert.Equal(t, "2", r.URL.Query().Get("cluster_id"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	_, err := c.ListStacks(map[string]string{
+		"status":     "running",
+		"owner":      "me",
+		"cluster_id": "2",
+	})
+	require.NoError(t, err)
+}
+
+func TestGetStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.StackInstance{
+			Base:   types.Base{ID: 42},
+			Name:   "my-stack",
+			Status: "running",
+			Owner:  "admin",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	stack, err := c.GetStack(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint(42), stack.ID)
+	assert.Equal(t, "my-stack", stack.Name)
+	assert.Equal(t, "running", stack.Status)
+}
+
+func TestGetStack_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "instance not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	stack, err := c.GetStack(999)
+	require.Error(t, err)
+	assert.Nil(t, stack)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+func TestCreateStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances", r.URL.Path)
+
+		var body types.CreateStackRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "new-stack", body.Name)
+		assert.Equal(t, uint(3), body.StackDefinitionID)
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.StackInstance{
+			Base:              types.Base{ID: 50},
+			Name:              "new-stack",
+			StackDefinitionID: 3,
+			Status:            "draft",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	stack, err := c.CreateStack(&types.CreateStackRequest{
+		Name:              "new-stack",
+		StackDefinitionID: 3,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint(50), stack.ID)
+	assert.Equal(t, "new-stack", stack.Name)
+	assert.Equal(t, "draft", stack.Status)
+}
+
+func TestDeleteStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteStack(42)
+	require.NoError(t, err)
+}
+
+func TestDeleteStack_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteStack(999)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+func TestDeployStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/deploy", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLog{
+			Base:       types.Base{ID: 100},
+			InstanceID: 42,
+			Action:     "deploy",
+			Status:     "started",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	log, err := c.DeployStack(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint(100), log.ID)
+	assert.Equal(t, uint(42), log.InstanceID)
+	assert.Equal(t, "deploy", log.Action)
+}
+
+func TestStopStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/stop", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLog{
+			Base:       types.Base{ID: 101},
+			InstanceID: 42,
+			Action:     "stop",
+			Status:     "started",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	log, err := c.StopStack(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint(101), log.ID)
+	assert.Equal(t, "stop", log.Action)
+}
+
+func TestCleanStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/clean", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLog{
+			Base:       types.Base{ID: 102},
+			InstanceID: 42,
+			Action:     "clean",
+			Status:     "started",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	log, err := c.CleanStack(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint(102), log.ID)
+	assert.Equal(t, "clean", log.Action)
+}
+
+func TestGetStackStatus_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/status", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.InstanceStatus{
+			Status: "running",
+			Pods: []types.PodStatus{
+				{Name: "pod-1", Status: "Running", Ready: true, Restarts: 0, Age: "1h"},
+				{Name: "pod-2", Status: "Running", Ready: true, Restarts: 2, Age: "30m"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	status, err := c.GetStackStatus(42)
+	require.NoError(t, err)
+	assert.Equal(t, "running", status.Status)
+	assert.Len(t, status.Pods, 2)
+	assert.Equal(t, "pod-1", status.Pods[0].Name)
+	assert.True(t, status.Pods[0].Ready)
+	assert.Equal(t, 2, status.Pods[1].Restarts)
+}
+
+func TestGetStackLogs_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/deploy-log", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLog{
+			Base:       types.Base{ID: 200},
+			InstanceID: 42,
+			Action:     "deploy",
+			Status:     "completed",
+			Output:     "All charts installed successfully.",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	log, err := c.GetStackLogs(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint(200), log.ID)
+	assert.Equal(t, "deploy", log.Action)
+	assert.Equal(t, "completed", log.Status)
+	assert.Contains(t, log.Output, "All charts installed")
+}
+
+func TestCloneStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/clone", r.URL.Path)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.StackInstance{
+			Base:   types.Base{ID: 55},
+			Name:   "my-stack-clone",
+			Status: "draft",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	clone, err := c.CloneStack(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint(55), clone.ID)
+	assert.Equal(t, "my-stack-clone", clone.Name)
+	assert.Equal(t, "draft", clone.Status)
+}
+
+func TestExtendStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/extend", r.URL.Path)
+
+		var body map[string]int
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, 60, body["ttl_minutes"])
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.StackInstance{
+			Base:       types.Base{ID: 42},
+			Name:       "my-stack",
+			TTLMinutes: 120,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	stack, err := c.ExtendStack(42, 60)
+	require.NoError(t, err)
+	assert.Equal(t, uint(42), stack.ID)
+	assert.Equal(t, 120, stack.TTLMinutes)
+}
