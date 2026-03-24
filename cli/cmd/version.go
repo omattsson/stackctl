@@ -23,12 +23,16 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		versionInfo := map[string]string{
+			"version": buildVersion,
+			"commit":  buildCommit,
+			"date":    buildDate,
+		}
 		if flagOutput == "json" {
-			return printer.PrintJSON(map[string]string{
-				"version": buildVersion,
-				"commit":  buildCommit,
-				"date":    buildDate,
-			})
+			return printer.PrintJSON(versionInfo)
+		}
+		if flagOutput == "yaml" {
+			return printer.PrintYAML(versionInfo)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "stackctl %s (commit: %s, built: %s)\n", buildVersion, buildCommit, buildDate)
 		return nil

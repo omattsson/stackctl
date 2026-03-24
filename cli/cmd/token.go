@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/omattsson/stackctl/cli/pkg/config"
@@ -32,8 +33,9 @@ func saveToken(token, username string, expiresAt time.Time) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating token directory: %w", err)
 	}
-	// Enforce 0700 even if directory already existed with broader permissions
-	if err := os.Chmod(dir, 0700); err != nil {
+	// Enforce 0700 even if directory already existed with broader permissions.
+	// On Windows, Chmod is best-effort since POSIX permissions don't apply.
+	if err := os.Chmod(dir, 0700); err != nil && runtime.GOOS != "windows" {
 		return fmt.Errorf("setting token directory permissions: %w", err)
 	}
 
@@ -49,8 +51,9 @@ func saveToken(token, username string, expiresAt time.Time) error {
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing token file: %w", err)
 	}
-	// Enforce 0600 even if file already existed with broader permissions
-	if err := os.Chmod(path, 0600); err != nil {
+	// Enforce 0600 even if file already existed with broader permissions.
+	// On Windows, Chmod is best-effort since POSIX permissions don't apply.
+	if err := os.Chmod(path, 0600); err != nil && runtime.GOOS != "windows" {
 		return fmt.Errorf("setting token file permissions: %w", err)
 	}
 	return nil

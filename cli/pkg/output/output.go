@@ -104,17 +104,17 @@ func (p *Printer) TableWriter() *tabwriter.Writer {
 }
 
 // PrintTable writes a table with headers and rows.
-func (p *Printer) PrintTable(headers []string, rows [][]string) {
+func (p *Printer) PrintTable(headers []string, rows [][]string) error {
 	w := p.TableWriter()
 	fmt.Fprintln(w, strings.Join(headers, "\t"))
 	for _, row := range rows {
 		fmt.Fprintln(w, strings.Join(row, "\t"))
 	}
-	w.Flush()
+	return w.Flush()
 }
 
 // Print outputs data in the configured format. For table format, it uses the provided
-// headers and rowFn to extract rows. For JSON/YAML, it outputs the raw data.
+// headers and rows. For JSON/YAML, it outputs the raw data.
 func (p *Printer) Print(data interface{}, headers []string, rows [][]string, ids []uint) error {
 	if p.Quiet {
 		p.PrintIDs(ids)
@@ -126,8 +126,7 @@ func (p *Printer) Print(data interface{}, headers []string, rows [][]string, ids
 	case FormatYAML:
 		return p.PrintYAML(data)
 	default:
-		p.PrintTable(headers, rows)
-		return nil
+		return p.PrintTable(headers, rows)
 	}
 }
 

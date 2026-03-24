@@ -3,6 +3,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/omattsson/stackctl/cli/pkg/config"
@@ -128,7 +129,9 @@ func TestConfigFilePermissions(t *testing.T) {
 
 	info, err := os.Stat(configPath)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), info.Mode().Perm(), "config file should be owner-only readable/writable")
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm(), "config file should be owner-only readable/writable")
+	}
 }
 
 func TestConfigDirectoryCreation(t *testing.T) {

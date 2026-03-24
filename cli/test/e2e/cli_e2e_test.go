@@ -135,7 +135,9 @@ func TestE2E_ConfigWorkflow(t *testing.T) {
 	configPath := filepath.Join(dir, "config.yaml")
 	info, err := os.Stat(configPath)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	}
 
 	// 7. Add another context
 	stdout, _, err = runStackctl(t, dir, "config", "use-context", "production")

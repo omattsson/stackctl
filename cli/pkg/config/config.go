@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"gopkg.in/yaml.v3"
@@ -108,8 +109,9 @@ func (c *Config) SaveTo(path string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
-	// Enforce 0700 even if directory already existed with broader permissions
-	if err := os.Chmod(dir, 0700); err != nil {
+	// Enforce 0700 even if directory already existed with broader permissions.
+	// On Windows, Chmod is best-effort since POSIX permissions don't apply.
+	if err := os.Chmod(dir, 0700); err != nil && runtime.GOOS != "windows" {
 		return fmt.Errorf("setting config directory permissions: %w", err)
 	}
 
@@ -121,8 +123,9 @@ func (c *Config) SaveTo(path string) error {
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing config file: %w", err)
 	}
-	// Enforce 0600 even if file already existed with broader permissions
-	if err := os.Chmod(path, 0600); err != nil {
+	// Enforce 0600 even if file already existed with broader permissions.
+	// On Windows, Chmod is best-effort since POSIX permissions don't apply.
+	if err := os.Chmod(path, 0600); err != nil && runtime.GOOS != "windows" {
 		return fmt.Errorf("setting config file permissions: %w", err)
 	}
 	return nil

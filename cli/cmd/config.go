@@ -13,7 +13,9 @@ var configCmd = &cobra.Command{
 	Short: "Manage CLI configuration and contexts",
 	Long: `Manage stackctl configuration, including named contexts for different environments.
 
-Configuration is stored in ~/.stackmanager/config.yaml.`,
+By default, configuration is stored in ~/.stackmanager/config.yaml. This location can be
+overridden by setting STACKCTL_CONFIG_DIR, and the XDG_CONFIG_HOME environment variable
+is also honored when resolving the configuration directory.`,
 }
 
 var configSetCmd = &cobra.Command{
@@ -99,8 +101,7 @@ var configListCmd = &cobra.Command{
 			}
 			rows = append(rows, []string{marker, name, ctx.APIURL, apiKey, insecure})
 		}
-		printer.PrintTable(headers, rows)
-		return nil
+		return printer.PrintTable(headers, rows)
 	},
 }
 
