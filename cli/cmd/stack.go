@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const flagPageSize = "page-size"
+
 var stackCmd = &cobra.Command{
 	Use:   "stack",
 	Short: "Manage stack instances",
@@ -60,8 +62,8 @@ Examples:
 				params["page"] = strconv.Itoa(page)
 			}
 		}
-		if cmd.Flags().Changed("page-size") {
-			pageSize, _ := cmd.Flags().GetInt("page-size")
+		if cmd.Flags().Changed(flagPageSize) {
+			pageSize, _ := cmd.Flags().GetInt(flagPageSize)
 			if pageSize > 0 {
 				params["page_size"] = strconv.Itoa(pageSize)
 			}
@@ -550,7 +552,7 @@ func init() {
 	stackListCmd.Flags().Uint("cluster", 0, "Filter by cluster ID")
 	stackListCmd.Flags().Uint("definition", 0, "Filter by definition ID")
 	stackListCmd.Flags().Int("page", 0, "Page number")
-	stackListCmd.Flags().Int("page-size", 0, "Page size")
+	stackListCmd.Flags().Int(flagPageSize, 0, "Page size")
 	stackListCmd.MarkFlagsMutuallyExclusive("mine", "owner")
 
 	// stack create flags
