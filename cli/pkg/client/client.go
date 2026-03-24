@@ -42,7 +42,7 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return e.Message
+	return e.UserFacingError()
 }
 
 // UserFacingError returns a user-friendly error message based on the status code.
@@ -210,4 +210,110 @@ func (c *Client) Whoami() (*types.User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+// ListStacks returns a paginated list of stack instances, filtered by query params.
+func (c *Client) ListStacks(params map[string]string) (*types.ListResponse[types.StackInstance], error) {
+	var resp types.ListResponse[types.StackInstance]
+	err := c.GetWithQuery("/api/v1/stack-instances", params, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetStack returns a single stack instance by ID.
+func (c *Client) GetStack(id uint) (*types.StackInstance, error) {
+	var instance types.StackInstance
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d", id), &instance)
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// CreateStack creates a new stack instance.
+func (c *Client) CreateStack(instance *types.StackInstance) (*types.StackInstance, error) {
+	var created types.StackInstance
+	err := c.Post("/api/v1/stack-instances", instance, &created)
+	if err != nil {
+		return nil, err
+	}
+	return &created, nil
+}
+
+// DeleteStack deletes a stack instance by ID.
+func (c *Client) DeleteStack(id uint) error {
+	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%d", id))
+}
+
+// DeployStack triggers a deployment for a stack instance.
+func (c *Client) DeployStack(id uint) (*types.DeploymentLog, error) {
+	var log types.DeploymentLog
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/deploy", id), nil, &log)
+	if err != nil {
+		return nil, err
+	}
+	return &log, nil
+}
+
+// StopStack triggers a stop for a stack instance.
+func (c *Client) StopStack(id uint) (*types.DeploymentLog, error) {
+	var log types.DeploymentLog
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/stop", id), nil, &log)
+	if err != nil {
+		return nil, err
+	}
+	return &log, nil
+}
+
+// CleanStack triggers an undeploy and namespace removal for a stack instance.
+func (c *Client) CleanStack(id uint) (*types.DeploymentLog, error) {
+	var log types.DeploymentLog
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/clean", id), nil, &log)
+	if err != nil {
+		return nil, err
+	}
+	return &log, nil
+}
+
+// GetStackStatus returns the current status and pod states for a stack instance.
+func (c *Client) GetStackStatus(id uint) (*types.InstanceStatus, error) {
+	var status types.InstanceStatus
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/status", id), &status)
+	if err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+// GetStackLogs returns the latest deployment log for a stack instance.
+func (c *Client) GetStackLogs(id uint) (*types.DeploymentLog, error) {
+	var log types.DeploymentLog
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/deploy-log", id), &log)
+	if err != nil {
+		return nil, err
+	}
+	return &log, nil
+}
+
+// CloneStack clones a stack instance and returns the new instance.
+func (c *Client) CloneStack(id uint) (*types.StackInstance, error) {
+	var instance types.StackInstance
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/clone", id), nil, &instance)
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// ExtendStack extends the TTL of a stack instance by the given number of minutes.
+func (c *Client) ExtendStack(id uint, minutes int) (*types.StackInstance, error) {
+	var instance types.StackInstance
+	body := map[string]int{"ttl_minutes": minutes}
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/extend", id), body, &instance)
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
 }

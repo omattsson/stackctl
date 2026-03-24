@@ -153,10 +153,11 @@ type HealthResponse struct {
 
 // PodStatus represents the status of a Kubernetes pod.
 type PodStatus struct {
-	Name   string `json:"name" yaml:"name"`
-	Status string `json:"status" yaml:"status"`
-	Ready  bool   `json:"ready" yaml:"ready"`
-	Age    string `json:"age,omitempty" yaml:"age,omitempty"`
+	Name     string `json:"name" yaml:"name"`
+	Status   string `json:"status" yaml:"status"`
+	Ready    bool   `json:"ready" yaml:"ready"`
+	Restarts int    `json:"restarts" yaml:"restarts"`
+	Age      string `json:"age,omitempty" yaml:"age,omitempty"`
 }
 
 // InstanceStatus represents the full status of a stack instance.

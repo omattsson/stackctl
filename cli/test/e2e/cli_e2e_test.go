@@ -513,3 +513,193 @@ func TestE2E_LogoutWithoutLogin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "Logged out")
 }
+
+// ---------- Stack E2E Mock Server ----------
+
+// startE2EStackMockServer starts a mock API with stack endpoints for e2e tests.
+func startE2EStackMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	nextLogID := 100
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		// List stacks
+		case r.URL.Path == "/api/v1/stack-instances" && r.Method == http.MethodGet:
+			resp := map[string]interface{}{
+				"data": []map[string]interface{}{
+					{
+						"id": 1, "name": "e2e-stack-1", "status": "running",
+						"owner": "admin", "branch": "main", "namespace": "ns-1",
+						"stack_definition_id": 1, "cluster_name": "dev",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+					},
+					{
+						"id": 2, "name": "e2e-stack-2", "status": "stopped",
+						"owner": "dev", "branch": "feature/x", "namespace": "ns-2",
+						"stack_definition_id": 2, "cluster_name": "staging",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+					},
+				},
+				"total": 2, "page": 1, "page_size": 20, "total_pages": 1,
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// Create stack
+		case r.URL.Path == "/api/v1/stack-instances" && r.Method == http.MethodPost:
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			resp := map[string]interface{}{
+				"id": 10, "name": body["name"], "status": "draft",
+				"stack_definition_id": body["stack_definition_id"],
+				"branch":              body["branch"],
+				"owner":               "admin",
+				"namespace":           "ns-new",
+				"created_at":          "2025-06-01T00:00:00Z",
+				"updated_at":          "2025-06-01T00:00:00Z",
+				"version":             1,
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(resp)
+
+		// Get stack
+		case r.URL.Path == "/api/v1/stack-instances/10" && r.Method == http.MethodGet:
+			resp := map[string]interface{}{
+				"id": 10, "name": "e2e-new-stack", "status": "draft",
+				"stack_definition_id": 1, "owner": "admin", "branch": "main",
+				"namespace":  "ns-new",
+				"created_at": "2025-06-01T00:00:00Z", "updated_at": "2025-06-01T00:00:00Z", "version": 1,
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// Deploy stack
+		case r.URL.Path == "/api/v1/stack-instances/10/deploy" && r.Method == http.MethodPost:
+			nextLogID++
+			resp := map[string]interface{}{
+				"id": nextLogID, "instance_id": 10, "action": "deploy", "status": "started",
+				"created_at": "2025-06-01T00:00:00Z", "updated_at": "2025-06-01T00:00:00Z", "version": 1,
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// Delete stack
+		case r.URL.Path == "/api/v1/stack-instances/10" && r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+
+		// Delete non-existent
+		case r.URL.Path == "/api/v1/stack-instances/999" && r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "instance not found"})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
+}
+
+// setupE2EStackContext sets up a context pointing at the mock server.
+func setupE2EStackContext(t *testing.T, dir, serverURL string) {
+	t.Helper()
+	_, _, err := runStackctl(t, dir, "config", "use-context", "e2estack")
+	require.NoError(t, err)
+	_, _, err = runStackctl(t, dir, "config", "set", "api-url", serverURL)
+	require.NoError(t, err)
+	_, _, err = runStackctl(t, dir, "config", "set", "api-key", "sk_e2e_test_key")
+	require.NoError(t, err)
+}
+
+func TestE2E_StackCreateDeployDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EStackMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// 1. Create
+	stdout, _, err := runStackctl(t, dir, "stack", "create", "--name", "e2e-new-stack", "--definition", "1", "--branch", "main")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "10")
+	assert.Contains(t, stdout, "e2e-new-stack")
+	assert.Contains(t, stdout, "draft")
+
+	// 2. Deploy
+	stdout, _, err = runStackctl(t, dir, "stack", "deploy", "10")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Deploying stack 10")
+
+	// 3. Delete with --yes
+	stdout, _, err = runStackctl(t, dir, "stack", "delete", "10", "--yes")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Deleted stack 10")
+}
+
+func TestE2E_StackListOutputFormats(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EStackMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Table (default)
+	stdout, _, err := runStackctl(t, dir, "stack", "list")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "ID")
+	assert.Contains(t, stdout, "NAME")
+	assert.Contains(t, stdout, "e2e-stack-1")
+	assert.Contains(t, stdout, "e2e-stack-2")
+
+	// JSON
+	stdout, _, err = runStackctl(t, dir, "stack", "list", "--output", "json")
+	require.NoError(t, err)
+	var jsonResult map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &jsonResult))
+	data, ok := jsonResult["data"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, data, 2)
+
+	// YAML
+	stdout, _, err = runStackctl(t, dir, "stack", "list", "--output", "yaml")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "name: e2e-stack-1")
+	assert.Contains(t, stdout, "name: e2e-stack-2")
+
+	// Quiet
+	stdout, _, err = runStackctl(t, dir, "stack", "list", "--quiet")
+	require.NoError(t, err)
+	lines := strings.TrimSpace(stdout)
+	assert.Contains(t, lines, "1")
+	assert.Contains(t, lines, "2")
+}
+
+func TestE2E_StackDeleteConfirmation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EStackMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Without --yes flag, the command expects interactive input.
+	// Since we can't provide stdin easily in e2e, we verify --yes works.
+	stdout, _, err := runStackctl(t, dir, "stack", "delete", "10", "--yes")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Deleted stack 10")
+
+	// Deleting a non-existent instance should fail
+	_, _, err = runStackctl(t, dir, "stack", "delete", "999", "--yes")
+	assert.Error(t, err)
+}

@@ -199,7 +199,7 @@ func TestAuthWorkflow_InvalidCredentials(t *testing.T) {
 	c := client.New(server.URL)
 	_, err := c.Login("admin", "wrong-password")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid credentials")
+	assert.Contains(t, err.Error(), "Not authenticated. Run 'stackctl login' first.")
 
 	// Token should NOT be set on failure
 	assert.Empty(t, c.Token)
