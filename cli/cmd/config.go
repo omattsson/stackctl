@@ -78,30 +78,46 @@ var configListCmd = &cobra.Command{
 		}
 		sort.Strings(names)
 
+		// For JSON/YAML output, emit structured data with masked API keys
+		type contextOutput struct {
+			Name     string `json:"name" yaml:"name"`
+			Current  bool   `json:"current" yaml:"current"`
+			APIURL   string `json:"api-url" yaml:"api-url"`
+			APIKey   string `json:"api-key,omitempty" yaml:"api-key,omitempty"`
+			Insecure bool   `json:"insecure,omitempty" yaml:"insecure,omitempty"`
+		}
+		var structured []contextOutput
 		headers := []string{"", "CONTEXT", "API URL", "API KEY", "INSECURE"}
 		var rows [][]string
 		for _, name := range names {
 			ctx := cfg.Contexts[name]
 			marker := " "
-			if name == cfg.CurrentContext {
+			isCurrent := name == cfg.CurrentContext
+			if isCurrent {
 				marker = "*"
 			}
-			apiKey := ""
+			maskedKey := ""
 			if ctx.APIKey != "" {
-				// Mask API key, show only last 4 chars
 				if len(ctx.APIKey) > 4 {
-					apiKey = "***" + ctx.APIKey[len(ctx.APIKey)-4:]
+					maskedKey = "***" + ctx.APIKey[len(ctx.APIKey)-4:]
 				} else {
-					apiKey = "***"
+					maskedKey = "***"
 				}
 			}
 			insecure := ""
 			if ctx.Insecure {
 				insecure = "true"
 			}
-			rows = append(rows, []string{marker, name, ctx.APIURL, apiKey, insecure})
+			rows = append(rows, []string{marker, name, ctx.APIURL, maskedKey, insecure})
+			structured = append(structured, contextOutput{
+				Name:     name,
+				Current:  isCurrent,
+				APIURL:   ctx.APIURL,
+				APIKey:   maskedKey,
+				Insecure: ctx.Insecure,
+			})
 		}
-		return printer.PrintTable(headers, rows)
+		return printer.Print(structured, headers, rows, nil)
 	},
 }
 
@@ -116,6 +132,9 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+		if err := config.ValidateContextName(name); err != nil {
+			return err
+		}
 		if _, ok := cfg.Contexts[name]; !ok {
 			cfg.Contexts[name] = &config.Context{}
 		}

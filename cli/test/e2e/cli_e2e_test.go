@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,15 @@ import (
 var binaryPath string
 
 func TestMain(m *testing.M) {
+	// Skip expensive binary build in short mode — all e2e tests skip anyway.
+	if flag.Lookup("test.short") != nil {
+		// Parse flags to check -short before building.
+		flag.Parse()
+		if testing.Short() {
+			os.Exit(m.Run())
+		}
+	}
+
 	// Build the binary before running tests
 	tmpDir, err := os.MkdirTemp("", "stackctl-e2e-*")
 	if err != nil {

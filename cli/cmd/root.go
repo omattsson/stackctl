@@ -37,8 +37,7 @@ stacks across Kubernetes clusters.
 Get started:
   stackctl config use-context local
   stackctl config set api-url http://localhost:8081
-  stackctl login
-  stackctl stack list`,
+  stackctl version`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -96,15 +95,22 @@ func newClient() (*client.Client, error) {
 		insecure = cfg.CurrentCtx().Insecure
 	}
 	if insecure {
-		c.HTTPClient.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
+		// Clone the default transport to preserve proxies, timeouts, and keep-alives.
+		if t, ok := http.DefaultTransport.(*http.Transport); ok {
+			clone := t.Clone()
+			clone.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-requested
+			c.HTTPClient.Transport = clone
+		} else {
+			c.HTTPClient.Transport = &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
+			}
 		}
 	}
 
 	// JWT token from stored token file (only if no API key)
 	if c.APIKey == "" {
 		token, err := loadToken()
-		if err != nil {
+		if err != nil && !flagQuiet {
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		}
 		c.Token = token

@@ -133,9 +133,12 @@ func (c *Client) doJSON(method, path string, body interface{}, v interface{}) er
 
 	if v != nil {
 		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
-			// Treat empty body as success (common for 204 No Content)
-			if err == io.EOF {
+			// Treat empty body as success only for 204 No Content
+			if err == io.EOF && resp.StatusCode == http.StatusNoContent {
 				return nil
+			}
+			if err == io.EOF {
+				return fmt.Errorf("unexpected empty response body (status %d)", resp.StatusCode)
 			}
 			return fmt.Errorf("decoding response: %w", err)
 		}

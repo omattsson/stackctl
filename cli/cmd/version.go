@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/spf13/cobra"
 )
 
@@ -28,14 +29,15 @@ var versionCmd = &cobra.Command{
 			"commit":  buildCommit,
 			"date":    buildDate,
 		}
-		if flagOutput == "json" {
+		switch printer.Format {
+		case output.FormatJSON:
 			return printer.PrintJSON(versionInfo)
-		}
-		if flagOutput == "yaml" {
+		case output.FormatYAML:
 			return printer.PrintYAML(versionInfo)
+		default:
+			fmt.Fprintf(cmd.OutOrStdout(), "stackctl %s (commit: %s, built: %s)\n", buildVersion, buildCommit, buildDate)
+			return nil
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "stackctl %s (commit: %s, built: %s)\n", buildVersion, buildCommit, buildDate)
-		return nil
 	},
 }
 

@@ -195,7 +195,7 @@ stackctl git validate --repo https://dev.azure.com/org/project/_git/repo --branc
 
 ## Output Formats
 
-All commands support multiple output formats:
+Most commands support multiple output formats via the `--output` flag:
 
 ```bash
 # Table (default) — human-readable with colored status badges

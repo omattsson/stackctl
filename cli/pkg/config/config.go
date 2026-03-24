@@ -4,11 +4,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
+
+// validContextName matches safe context names: alphanumeric, hyphens, underscores, dots.
+var validContextName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+// ValidateContextName checks that a context name is safe for use in file paths.
+func ValidateContextName(name string) error {
+	if !validContextName.MatchString(name) {
+		return fmt.Errorf("invalid context name %q: must be alphanumeric and may contain hyphens, underscores, or dots", name)
+	}
+	return nil
+}
 
 const (
 	DefaultConfigDir  = ".stackmanager"
@@ -56,6 +68,9 @@ func ConfigPath() (string, error) {
 
 // TokenPath returns the path to the token file for a given context.
 func TokenPath(contextName string) (string, error) {
+	if err := ValidateContextName(contextName); err != nil {
+		return "", err
+	}
 	dir, err := ConfigDir()
 	if err != nil {
 		return "", err
