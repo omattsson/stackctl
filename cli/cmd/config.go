@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/omattsson/stackctl/pkg/config"
+	"github.com/omattsson/stackctl/cli/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +34,15 @@ Available keys:
 		if err := cfg.Save(); err != nil {
 			return err
 		}
-		printer.PrintMessage("Set %s = %s in context %q", key, value, cfg.CurrentContext)
+		displayValue := value
+		if key == "api-key" {
+			if len(value) > 4 {
+				displayValue = "***" + value[len(value)-4:]
+			} else {
+				displayValue = "***"
+			}
+		}
+		printer.PrintMessage("Set %s = %s in context %q", key, displayValue, cfg.CurrentContext)
 		return nil
 	},
 }

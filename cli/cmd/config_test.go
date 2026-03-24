@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/omattsson/stackctl/pkg/config"
-	"github.com/omattsson/stackctl/pkg/output"
+	"github.com/omattsson/stackctl/cli/pkg/config"
+	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

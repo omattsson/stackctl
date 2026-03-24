@@ -176,6 +176,12 @@ func TestSetContextValue(t *testing.T) {
 			},
 		},
 		{
+			name:    "set insecure invalid",
+			key:     "insecure",
+			value:   "maybe",
+			wantErr: true,
+		},
+		{
 			name:    "unknown key",
 			key:     "bogus",
 			value:   "val",

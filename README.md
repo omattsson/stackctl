@@ -16,7 +16,7 @@ sudo cp bin/stackctl /usr/local/bin/
 ### Go install
 
 ```bash
-go install github.com/omattsson/stackctl@latest
+go install github.com/omattsson/stackctl/cli@latest
 ```
 
 ### From release binaries
@@ -35,17 +35,17 @@ sudo mv stackctl-* /usr/local/bin/stackctl
 stackctl config use-context local
 stackctl config set api-url http://localhost:8081
 
-# 2. Authenticate
+# 2. Verify your setup
+stackctl version
+stackctl config list
+
+# 3. Authenticate (coming in Phase 1.2)
 stackctl login
 
-# 3. Browse templates and deploy
+# 4. Browse templates and deploy (coming in Phase 2+)
 stackctl template list
 stackctl template quick-deploy 1
-
-# 4. Monitor your stacks
 stackctl stack list --mine
-stackctl stack status 42
-stackctl stack logs 42
 ```
 
 ## Configuration

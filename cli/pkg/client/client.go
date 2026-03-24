@@ -10,18 +10,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/omattsson/stackctl/pkg/types"
+	"github.com/omattsson/stackctl/cli/pkg/types"
 )
 
 const defaultTimeout = 30 * time.Second
 
 // Client is the HTTP client for the k8s-stack-manager API.
+// TLS configuration (insecure mode) is handled by the caller setting
+// HTTPClient.Transport before making requests.
 type Client struct {
 	BaseURL    string
 	Token      string
 	APIKey     string
 	HTTPClient *http.Client
-	Insecure   bool
 }
 
 // New creates a new API client.
@@ -132,6 +133,10 @@ func (c *Client) doJSON(method, path string, body interface{}, v interface{}) er
 
 	if v != nil {
 		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+			// Treat empty body as success (common for 204 No Content)
+			if err == io.EOF {
+				return nil
+			}
 			return fmt.Errorf("decoding response: %w", err)
 		}
 	}

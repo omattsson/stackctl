@@ -1,21 +1,25 @@
 package cmd
 
 import (
+	"crypto/tls"
+	"fmt"
+	"net/http"
 	"os"
 
-	"github.com/omattsson/stackctl/pkg/client"
-	"github.com/omattsson/stackctl/pkg/config"
-	"github.com/omattsson/stackctl/pkg/output"
+	"github.com/omattsson/stackctl/cli/pkg/client"
+	"github.com/omattsson/stackctl/cli/pkg/config"
+	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/spf13/cobra"
 )
 
 var (
 	// Global flags
-	flagOutput  string
-	flagQuiet   bool
-	flagNoColor bool
-	flagAPIURL  string
-	flagAPIKey  string
+	flagOutput   string
+	flagQuiet    bool
+	flagNoColor  bool
+	flagAPIURL   string
+	flagAPIKey   string
+	flagInsecure bool
 
 	// Loaded at runtime
 	cfg     *config.Config
@@ -45,8 +49,9 @@ Get started:
 			return err
 		}
 
-		// Initialize printer
+		// Initialize printer with Cobra's configured output writer
 		printer = output.NewPrinter(flagOutput, flagQuiet, flagNoColor)
+		printer.Writer = cmd.OutOrStdout()
 
 		return nil
 	},
@@ -58,6 +63,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().StringVar(&flagAPIURL, "api-url", "", "API server URL (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", "", "API key (overrides config)")
+	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Skip TLS certificate verification (use with caution)")
 }
 
 // Execute runs the root command.
@@ -84,9 +90,23 @@ func newClient() (*client.Client, error) {
 	}
 	c.APIKey = apiKey
 
+	// Insecure: flag > config
+	insecure := flagInsecure
+	if !insecure && cfg.CurrentCtx() != nil {
+		insecure = cfg.CurrentCtx().Insecure
+	}
+	if insecure {
+		c.HTTPClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
+		}
+	}
+
 	// JWT token from stored token file (only if no API key)
 	if c.APIKey == "" {
-		token, _ := loadToken()
+		token, err := loadToken()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		}
 		c.Token = token
 	}
 

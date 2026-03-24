@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/omattsson/stackctl/pkg/config"
+	"github.com/omattsson/stackctl/cli/pkg/config"
 )
 
 // storedToken represents a JWT token stored on disk.
@@ -32,6 +32,10 @@ func saveToken(token, username string, expiresAt time.Time) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating token directory: %w", err)
 	}
+	// Enforce 0700 even if directory already existed with broader permissions
+	if err := os.Chmod(dir, 0700); err != nil {
+		return fmt.Errorf("setting token directory permissions: %w", err)
+	}
 
 	data, err := json.Marshal(storedToken{
 		Token:     token,
@@ -45,11 +49,16 @@ func saveToken(token, username string, expiresAt time.Time) error {
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing token file: %w", err)
 	}
+	// Enforce 0600 even if file already existed with broader permissions
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("setting token file permissions: %w", err)
+	}
 	return nil
 }
 
 // loadToken reads the JWT token for the current context.
-// Returns empty string if no token exists or token is expired.
+// Returns empty string and nil error if no token exists.
+// Returns an error if the token is expired or the file cannot be read.
 func loadToken() (string, error) {
 	if cfg.CurrentContext == "" {
 		return "", nil

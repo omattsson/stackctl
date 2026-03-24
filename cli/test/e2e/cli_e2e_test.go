@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -24,7 +25,11 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	binaryPath = filepath.Join(tmpDir, "stackctl")
+	binaryName := "stackctl"
+	if runtime.GOOS == "windows" {
+		binaryName = "stackctl.exe"
+	}
+	binaryPath = filepath.Join(tmpDir, binaryName)
 
 	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
 	cmd.Dir = filepath.Join("..", "..")
@@ -221,19 +226,18 @@ func TestE2E_ConfigAPIKeyMasking(t *testing.T) {
 	assert.NotContains(t, stdout, "sk_secret_key_12345678")
 }
 
-func TestE2E_EnvVarOverride(t *testing.T) {
+func TestE2E_ConfigGetAfterSet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping e2e test in short mode")
 	}
 
 	dir := t.TempDir()
-	// Set up a context
+	// Set up a context and verify get returns the set value
 	_, _, err := runStackctl(t, dir, "config", "use-context", "test")
 	require.NoError(t, err)
 	_, _, err = runStackctl(t, dir, "config", "set", "api-url", "http://config-url")
 	require.NoError(t, err)
 
-	// Verify config value is set
 	stdout, _, err := runStackctl(t, dir, "config", "get", "api-url")
 	require.NoError(t, err)
 	assert.Equal(t, "http://config-url\n", stdout)

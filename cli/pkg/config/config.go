@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,10 +29,13 @@ type Context struct {
 }
 
 // ConfigDir returns the configuration directory path.
-// Uses STACKCTL_CONFIG_DIR env var if set, otherwise ~/.stackmanager.
+// Checks STACKCTL_CONFIG_DIR, then XDG_CONFIG_HOME, then falls back to ~/.stackmanager.
 func ConfigDir() (string, error) {
 	if dir := os.Getenv("STACKCTL_CONFIG_DIR"); dir != "" {
 		return dir, nil
+	}
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "stackmanager"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -104,6 +108,10 @@ func (c *Config) SaveTo(path string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
+	// Enforce 0700 even if directory already existed with broader permissions
+	if err := os.Chmod(dir, 0700); err != nil {
+		return fmt.Errorf("setting config directory permissions: %w", err)
+	}
 
 	data, err := yaml.Marshal(c)
 	if err != nil {
@@ -112,6 +120,10 @@ func (c *Config) SaveTo(path string) error {
 
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("writing config file: %w", err)
+	}
+	// Enforce 0600 even if file already existed with broader permissions
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("setting config file permissions: %w", err)
 	}
 	return nil
 }
@@ -140,7 +152,11 @@ func (c *Config) SetContextValue(key, value string) error {
 	case "api-key":
 		ctx.APIKey = value
 	case "insecure":
-		ctx.Insecure = value == "true"
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid value for insecure: %q (use true or false)", value)
+		}
+		ctx.Insecure = b
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
