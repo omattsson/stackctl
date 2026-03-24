@@ -1,0 +1,4 @@
+.scannerwork/
+.vscode/
+sonar-project.properties
+cli/coverage_output.out
