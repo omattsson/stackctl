@@ -320,3 +320,113 @@ func (c *Client) ExtendStack(id uint, minutes int) (*types.StackInstance, error)
 	}
 	return &instance, nil
 }
+
+// ListTemplates returns a paginated list of stack templates, filtered by query params.
+func (c *Client) ListTemplates(params map[string]string) (*types.ListResponse[types.StackTemplate], error) {
+	var resp types.ListResponse[types.StackTemplate]
+	err := c.GetWithQuery("/api/v1/templates", params, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetTemplate returns a single stack template by ID.
+func (c *Client) GetTemplate(id uint) (*types.StackTemplate, error) {
+	var tmpl types.StackTemplate
+	err := c.Get(fmt.Sprintf("/api/v1/templates/%d", id), &tmpl)
+	if err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
+}
+
+// InstantiateTemplate creates a new stack instance from a template.
+func (c *Client) InstantiateTemplate(id uint, req *types.InstantiateTemplateRequest) (*types.StackInstance, error) {
+	var instance types.StackInstance
+	err := c.Post(fmt.Sprintf("/api/v1/templates/%d/instantiate", id), req, &instance)
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// QuickDeployTemplate creates and deploys a stack instance from a template in one step.
+func (c *Client) QuickDeployTemplate(id uint, req *types.QuickDeployRequest) (*types.StackInstance, error) {
+	var instance types.StackInstance
+	err := c.Post(fmt.Sprintf("/api/v1/templates/%d/quick-deploy", id), req, &instance)
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// ListDefinitions returns a paginated list of stack definitions, filtered by query params.
+func (c *Client) ListDefinitions(params map[string]string) (*types.ListResponse[types.StackDefinition], error) {
+	var resp types.ListResponse[types.StackDefinition]
+	err := c.GetWithQuery("/api/v1/stack-definitions", params, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetDefinition returns a single stack definition by ID.
+func (c *Client) GetDefinition(id uint) (*types.StackDefinition, error) {
+	var def types.StackDefinition
+	err := c.Get(fmt.Sprintf("/api/v1/stack-definitions/%d", id), &def)
+	if err != nil {
+		return nil, err
+	}
+	return &def, nil
+}
+
+// CreateDefinition creates a new stack definition.
+func (c *Client) CreateDefinition(req *types.CreateDefinitionRequest) (*types.StackDefinition, error) {
+	var def types.StackDefinition
+	err := c.Post("/api/v1/stack-definitions", req, &def)
+	if err != nil {
+		return nil, err
+	}
+	return &def, nil
+}
+
+// UpdateDefinition updates an existing stack definition.
+func (c *Client) UpdateDefinition(id uint, req *types.UpdateDefinitionRequest) (*types.StackDefinition, error) {
+	var def types.StackDefinition
+	err := c.Put(fmt.Sprintf("/api/v1/stack-definitions/%d", id), req, &def)
+	if err != nil {
+		return nil, err
+	}
+	return &def, nil
+}
+
+// DeleteDefinition deletes a stack definition by ID.
+func (c *Client) DeleteDefinition(id uint) error {
+	return c.Delete(fmt.Sprintf("/api/v1/stack-definitions/%d", id))
+}
+
+// ExportDefinition exports a stack definition as raw JSON bytes.
+func (c *Client) ExportDefinition(id uint) ([]byte, error) {
+	resp, err := c.do(http.MethodGet, fmt.Sprintf("/api/v1/stack-definitions/%d/export", id), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
+}
+
+// ImportDefinition imports a stack definition from JSON data
+func (c *Client) ImportDefinition(data []byte) (*types.StackDefinition, error) {
+	var def types.StackDefinition
+	// The data goes through json.Marshal via do()
+	resp, err := c.do(http.MethodPost, "/api/v1/stack-definitions/import", json.RawMessage(data))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&def); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return &def, nil
+}

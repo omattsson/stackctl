@@ -839,3 +839,405 @@ func TestExtendStack_Success(t *testing.T) {
 	assert.Equal(t, uint(42), stack.ID)
 	assert.Equal(t, 120, stack.TTLMinutes)
 }
+
+// ---------- Template client methods ----------
+
+func TestListTemplates_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/templates", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
+			Data:       []types.StackTemplate{{Base: types.Base{ID: 1}, Name: "tmpl-1", Published: true}},
+			Total:      1,
+			Page:       1,
+			PageSize:   20,
+			TotalPages: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ListTemplates(nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, resp.Total)
+	assert.Len(t, resp.Data, 1)
+	assert.Equal(t, "tmpl-1", resp.Data[0].Name)
+	assert.True(t, resp.Data[0].Published)
+}
+
+func TestListTemplates_WithQueryParams(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "true", r.URL.Query().Get("published"))
+		assert.Equal(t, "2", r.URL.Query().Get("page"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	_, err := c.ListTemplates(map[string]string{
+		"published": "true",
+		"page":      "2",
+	})
+	require.NoError(t, err)
+}
+
+func TestGetTemplate_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/templates/10", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.StackTemplate{
+			Base:        types.Base{ID: 10},
+			Name:        "web-template",
+			Description: "A web app template",
+			Published:   true,
+			Owner:       "admin",
+			Charts: []types.ChartConfig{
+				{Name: "frontend", RepoURL: "https://charts.example.com", ChartVersion: "1.0.0"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	tmpl, err := c.GetTemplate(10)
+	require.NoError(t, err)
+	assert.Equal(t, uint(10), tmpl.ID)
+	assert.Equal(t, "web-template", tmpl.Name)
+	assert.True(t, tmpl.Published)
+	assert.Len(t, tmpl.Charts, 1)
+	assert.Equal(t, "frontend", tmpl.Charts[0].Name)
+}
+
+func TestGetTemplate_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	tmpl, err := c.GetTemplate(999)
+	require.Error(t, err)
+	assert.Nil(t, tmpl)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+func TestInstantiateTemplate_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/templates/10/instantiate", r.URL.Path)
+
+		var body types.InstantiateTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "my-instance", body.Name)
+		assert.Equal(t, "feature/xyz", body.Branch)
+		assert.Equal(t, uint(2), body.ClusterID)
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.StackInstance{
+			Base:   types.Base{ID: 50},
+			Name:   "my-instance",
+			Status: "draft",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	instance, err := c.InstantiateTemplate(10, &types.InstantiateTemplateRequest{
+		Name:      "my-instance",
+		Branch:    "feature/xyz",
+		ClusterID: 2,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint(50), instance.ID)
+	assert.Equal(t, "my-instance", instance.Name)
+	assert.Equal(t, "draft", instance.Status)
+}
+
+func TestQuickDeployTemplate_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/templates/10/quick-deploy", r.URL.Path)
+
+		var body types.QuickDeployRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "quick-stack", body.Name)
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.StackInstance{
+			Base:   types.Base{ID: 60},
+			Name:   "quick-stack",
+			Status: "deploying",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	instance, err := c.QuickDeployTemplate(10, &types.QuickDeployRequest{
+		Name: "quick-stack",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint(60), instance.ID)
+	assert.Equal(t, "quick-stack", instance.Name)
+	assert.Equal(t, "deploying", instance.Status)
+}
+
+// ---------- Definition client methods ----------
+
+func TestListDefinitions_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-definitions", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
+			Data:       []types.StackDefinition{{Base: types.Base{ID: 1}, Name: "def-1", Owner: "admin"}},
+			Total:      1,
+			Page:       1,
+			PageSize:   20,
+			TotalPages: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ListDefinitions(nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, resp.Total)
+	assert.Len(t, resp.Data, 1)
+	assert.Equal(t, "def-1", resp.Data[0].Name)
+}
+
+func TestListDefinitions_WithQueryParams(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "me", r.URL.Query().Get("owner"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	_, err := c.ListDefinitions(map[string]string{"owner": "me"})
+	require.NoError(t, err)
+}
+
+func TestGetDefinition_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-definitions/5", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.StackDefinition{
+			Base:          types.Base{ID: 5},
+			Name:          "api-service",
+			Description:   "API stack",
+			DefaultBranch: "main",
+			Owner:         "admin",
+			Charts: []types.ChartConfig{
+				{Name: "api", RepoURL: "https://charts.example.com", ChartVersion: "2.0.0"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	def, err := c.GetDefinition(5)
+	require.NoError(t, err)
+	assert.Equal(t, uint(5), def.ID)
+	assert.Equal(t, "api-service", def.Name)
+	assert.Equal(t, "main", def.DefaultBranch)
+	assert.Len(t, def.Charts, 1)
+}
+
+func TestGetDefinition_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "definition not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	def, err := c.GetDefinition(999)
+	require.Error(t, err)
+	assert.Nil(t, def)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+func TestCreateDefinition_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-definitions", r.URL.Path)
+
+		var body types.CreateDefinitionRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "new-def", body.Name)
+		assert.Equal(t, "A new definition", body.Description)
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.StackDefinition{
+			Base:        types.Base{ID: 20},
+			Name:        "new-def",
+			Description: "A new definition",
+			Owner:       "admin",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	def, err := c.CreateDefinition(&types.CreateDefinitionRequest{
+		Name:        "new-def",
+		Description: "A new definition",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint(20), def.ID)
+	assert.Equal(t, "new-def", def.Name)
+}
+
+func TestUpdateDefinition_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/stack-definitions/5", r.URL.Path)
+
+		var body types.UpdateDefinitionRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "updated-name", body.Name)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.StackDefinition{
+			Base: types.Base{ID: 5},
+			Name: "updated-name",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	def, err := c.UpdateDefinition(5, &types.UpdateDefinitionRequest{
+		Name: "updated-name",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint(5), def.ID)
+	assert.Equal(t, "updated-name", def.Name)
+}
+
+func TestDeleteDefinition_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/stack-definitions/5", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteDefinition(5)
+	require.NoError(t, err)
+}
+
+func TestDeleteDefinition_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "definition not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteDefinition(999)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+func TestExportDefinition_Success(t *testing.T) {
+	t.Parallel()
+	exportJSON := `{"name":"exported-def","description":"test export","charts":[]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-definitions/5/export", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(exportJSON))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	data, err := c.ExportDefinition(5)
+	require.NoError(t, err)
+	assert.Equal(t, exportJSON, string(data))
+}
+
+func TestExportDefinition_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "definition not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	data, err := c.ExportDefinition(999)
+	require.Error(t, err)
+	assert.Nil(t, data)
+}
+
+func TestImportDefinition_Success(t *testing.T) {
+	t.Parallel()
+	importJSON := []byte(`{"name":"imported-def","description":"test import","charts":[]}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-definitions/import", r.URL.Path)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "imported-def")
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.StackDefinition{
+			Base:        types.Base{ID: 50},
+			Name:        "imported-def",
+			Description: "test import",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	def, err := c.ImportDefinition(importJSON)
+	require.NoError(t, err)
+	assert.Equal(t, uint(50), def.ID)
+	assert.Equal(t, "imported-def", def.Name)
+}
+
+func TestImportDefinition_ServerError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "definition already exists"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	def, err := c.ImportDefinition([]byte(`{"name":"dup"}`))
+	require.Error(t, err)
+	assert.Nil(t, def)
+}
