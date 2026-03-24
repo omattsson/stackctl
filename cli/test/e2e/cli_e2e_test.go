@@ -677,9 +677,9 @@ func TestE2E_StackListOutputFormats(t *testing.T) {
 	// Quiet
 	stdout, _, err = runStackctl(t, dir, "stack", "list", "--quiet")
 	require.NoError(t, err)
-	lines := strings.TrimSpace(stdout)
-	assert.Contains(t, lines, "1")
-	assert.Contains(t, lines, "2")
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 2)
+	assert.Equal(t, []string{"1", "2"}, lines)
 }
 
 func TestE2E_StackDeleteConfirmation(t *testing.T) {

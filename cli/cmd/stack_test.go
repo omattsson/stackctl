@@ -732,7 +732,7 @@ func TestStackDeployCmd_ServerError(t *testing.T) {
 	_ = setupStackTestCmd(t, server.URL)
 	err := stackDeployCmd.RunE(stackDeployCmd, []string{"42"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Server error. Check backend logs.")
+	assert.Contains(t, err.Error(), "internal error")
 }
 
 func TestStackStopCmd_NotFound(t *testing.T) {

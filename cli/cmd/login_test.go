@@ -176,7 +176,7 @@ func TestLoginCmd_APIError(t *testing.T) {
 
 	err := loginCmd.RunE(loginCmd, []string{})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Not authenticated. Run 'stackctl login' first.")
+	assert.Contains(t, err.Error(), "invalid credentials")
 
 	// Verify no token was saved
 	tokenPath := filepath.Join(os.Getenv("STACKCTL_CONFIG_DIR"), "tokens", "test.json")
@@ -470,7 +470,7 @@ func TestWhoamiCmd_Forbidden(t *testing.T) {
 	whoamiCmd.SetOut(buf)
 	err := whoamiCmd.RunE(whoamiCmd, []string{})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Permission denied.")
+	assert.Contains(t, err.Error(), "access denied")
 }
 
 func TestWhoamiCmd_TokenNotInOutput(t *testing.T) {

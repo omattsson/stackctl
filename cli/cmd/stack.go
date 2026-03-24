@@ -154,6 +154,9 @@ Examples:
 		branch, _ := cmd.Flags().GetString("branch")
 		clusterID, _ := cmd.Flags().GetUint("cluster")
 		ttl, _ := cmd.Flags().GetInt("ttl")
+		if ttl < 0 {
+			return fmt.Errorf("--ttl must be a non-negative integer (0 means no TTL)")
+		}
 
 		instance := &types.StackInstance{
 			Name:              name,

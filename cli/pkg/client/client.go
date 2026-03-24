@@ -42,6 +42,9 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
 	return e.UserFacingError()
 }
 
