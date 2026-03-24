@@ -13,6 +13,7 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/config"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -160,6 +161,26 @@ func TestStackListCmd_WithFilters(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestStackListCmd_DefinitionFilter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "5", r.URL.Query().Get("definition_id"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	_ = buf
+
+	stackListCmd.Flags().Set("definition", "5")
+	t.Cleanup(func() {
+		stackListCmd.Flags().Set("definition", "0")
+	})
+
+	err := stackListCmd.RunE(stackListCmd, []string{})
+	require.NoError(t, err)
+}
+
 func TestStackListCmd_EmptyList(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -253,7 +274,7 @@ func TestStackCreateCmd_Success(t *testing.T) {
 		require.Equal(t, "/api/v1/stack-instances", r.URL.Path)
 		require.Equal(t, http.MethodPost, r.Method)
 
-		var body types.StackInstance
+		var body types.CreateStackRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "my-stack", body.Name)
 		assert.Equal(t, uint(5), body.StackDefinitionID)
@@ -289,22 +310,21 @@ func TestStackCreateCmd_MissingRequiredFlags(t *testing.T) {
 	// global command state can leak between tests.
 	nameFlag := stackCreateCmd.Flags().Lookup("name")
 	require.NotNil(t, nameFlag)
-	assert.Contains(t, nameFlag.Annotations, "cobra_annotation_bash_completion_one_required_flag")
+	assert.Contains(t, nameFlag.Annotations, cobra.BashCompOneRequiredFlag)
 
 	defFlag := stackCreateCmd.Flags().Lookup("definition")
 	require.NotNil(t, defFlag)
-	assert.Contains(t, defFlag.Annotations, "cobra_annotation_bash_completion_one_required_flag")
+	assert.Contains(t, defFlag.Annotations, cobra.BashCompOneRequiredFlag)
 }
 
 func TestStackCreateCmd_AllFlags(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body types.StackInstance
+		var body types.CreateStackRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "feat-stack", body.Name)
 		assert.Equal(t, uint(3), body.StackDefinitionID)
 		assert.Equal(t, "feature/xyz", body.Branch)
-		assert.NotNil(t, body.ClusterID)
-		assert.Equal(t, uint(2), *body.ClusterID)
+		assert.Equal(t, uint(2), body.ClusterID)
 		assert.Equal(t, 120, body.TTLMinutes)
 
 		w.WriteHeader(http.StatusCreated)

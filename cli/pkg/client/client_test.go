@@ -617,7 +617,7 @@ func TestCreateStack_Success(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/stack-instances", r.URL.Path)
 
-		var body types.StackInstance
+		var body types.CreateStackRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "new-stack", body.Name)
 		assert.Equal(t, uint(3), body.StackDefinitionID)
@@ -633,7 +633,7 @@ func TestCreateStack_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	stack, err := c.CreateStack(&types.StackInstance{
+	stack, err := c.CreateStack(&types.CreateStackRequest{
 		Name:              "new-stack",
 		StackDefinitionID: 3,
 	})

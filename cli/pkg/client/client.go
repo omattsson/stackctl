@@ -236,9 +236,9 @@ func (c *Client) GetStack(id uint) (*types.StackInstance, error) {
 }
 
 // CreateStack creates a new stack instance.
-func (c *Client) CreateStack(instance *types.StackInstance) (*types.StackInstance, error) {
+func (c *Client) CreateStack(req *types.CreateStackRequest) (*types.StackInstance, error) {
 	var created types.StackInstance
-	err := c.Post("/api/v1/stack-instances", instance, &created)
+	err := c.Post("/api/v1/stack-instances", req, &created)
 	if err != nil {
 		return nil, err
 	}

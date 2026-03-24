@@ -158,14 +158,12 @@ Examples:
 			return fmt.Errorf("--ttl must be a non-negative integer (0 means no TTL)")
 		}
 
-		instance := &types.StackInstance{
+		req := &types.CreateStackRequest{
 			Name:              name,
 			StackDefinitionID: defID,
 			Branch:            branch,
+			ClusterID:         clusterID,
 			TTLMinutes:        ttl,
-		}
-		if clusterID != 0 {
-			instance.ClusterID = &clusterID
 		}
 
 		c, err := newClient()
@@ -173,7 +171,7 @@ Examples:
 			return err
 		}
 
-		created, err := c.CreateStack(instance)
+		created, err := c.CreateStack(req)
 		if err != nil {
 			return err
 		}

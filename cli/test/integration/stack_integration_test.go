@@ -237,7 +237,7 @@ func TestStackWorkflow_CreateDeployStatusLogsStopCleanDelete(t *testing.T) {
 	c := client.New(server.URL)
 
 	// 1. Create
-	created, err := c.CreateStack(&types.StackInstance{
+	created, err := c.CreateStack(&types.CreateStackRequest{
 		Name:              "lifecycle-stack",
 		StackDefinitionID: 1,
 		Branch:            "main",
@@ -302,9 +302,9 @@ func TestStackWorkflow_ListWithFilters(t *testing.T) {
 	c := client.New(server.URL)
 
 	// Create a few stacks
-	s1, err := c.CreateStack(&types.StackInstance{Name: "stack-a", Owner: "alice"})
+	s1, err := c.CreateStack(&types.CreateStackRequest{Name: "stack-a"})
 	require.NoError(t, err)
-	s2, err := c.CreateStack(&types.StackInstance{Name: "stack-b", Owner: "bob"})
+	s2, err := c.CreateStack(&types.CreateStackRequest{Name: "stack-b"})
 	require.NoError(t, err)
 
 	// Deploy s1 so its status changes
@@ -341,7 +341,7 @@ func TestStackWorkflow_CloneAndExtend(t *testing.T) {
 	c := client.New(server.URL)
 
 	// Create original
-	original, err := c.CreateStack(&types.StackInstance{Name: "original-stack", TTLMinutes: 60})
+	original, err := c.CreateStack(&types.CreateStackRequest{Name: "original-stack", TTLMinutes: 60})
 	require.NoError(t, err)
 
 	// Clone it
