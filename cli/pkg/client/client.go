@@ -187,18 +187,19 @@ func (c *Client) GetWithQuery(path string, params map[string]string, v interface
 	return c.Get(path, v)
 }
 
-// Login authenticates and returns the JWT token.
-func (c *Client) Login(username, password string) (string, error) {
+// Login authenticates with the given credentials. On success, c.Token is set
+// to the returned JWT for subsequent requests.
+func (c *Client) Login(username, password string) (*types.LoginResponse, error) {
 	var resp types.LoginResponse
 	err := c.Post("/api/v1/auth/login", types.LoginRequest{
 		Username: username,
 		Password: password,
 	}, &resp)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	c.Token = resp.Token
-	return resp.Token, nil
+	return &resp, nil
 }
 
 // Whoami returns the current authenticated user.

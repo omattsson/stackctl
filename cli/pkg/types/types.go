@@ -14,18 +14,18 @@ type Base struct {
 // StackInstance represents a deployed stack instance.
 type StackInstance struct {
 	Base
-	Name             string     `json:"name" yaml:"name"`
-	StackDefinitionID uint      `json:"stack_definition_id" yaml:"stack_definition_id"`
-	DefinitionName   string     `json:"definition_name,omitempty" yaml:"definition_name,omitempty"`
-	Owner            string     `json:"owner" yaml:"owner"`
-	Branch           string     `json:"branch" yaml:"branch"`
-	Namespace        string     `json:"namespace" yaml:"namespace"`
-	Status           string     `json:"status" yaml:"status"`
-	ClusterID        *uint      `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
-	ClusterName      string     `json:"cluster_name,omitempty" yaml:"cluster_name,omitempty"`
-	TTLMinutes       int        `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
-	DeployedAt       *time.Time `json:"deployed_at,omitempty" yaml:"deployed_at,omitempty"`
+	Name              string     `json:"name" yaml:"name"`
+	StackDefinitionID uint       `json:"stack_definition_id" yaml:"stack_definition_id"`
+	DefinitionName    string     `json:"definition_name,omitempty" yaml:"definition_name,omitempty"`
+	Owner             string     `json:"owner" yaml:"owner"`
+	Branch            string     `json:"branch" yaml:"branch"`
+	Namespace         string     `json:"namespace" yaml:"namespace"`
+	Status            string     `json:"status" yaml:"status"`
+	ClusterID         *uint      `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	ClusterName       string     `json:"cluster_name,omitempty" yaml:"cluster_name,omitempty"`
+	TTLMinutes        int        `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+	DeployedAt        *time.Time `json:"deployed_at,omitempty" yaml:"deployed_at,omitempty"`
 }
 
 // StackDefinition represents a stack definition with its chart configurations.
@@ -84,7 +84,9 @@ type LoginRequest struct {
 
 // LoginResponse is the response from POST /api/v1/auth/login.
 type LoginResponse struct {
-	Token string `json:"token"`
+	Token     string `json:"token" yaml:"token"`
+	ExpiresAt string `json:"expires_at" yaml:"expires_at"`
+	User      User   `json:"user" yaml:"user"`
 }
 
 // DeploymentLog represents a deployment log entry.

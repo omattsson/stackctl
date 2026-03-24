@@ -3,6 +3,8 @@ package e2e
 import (
 	"encoding/json"
 	"flag"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -313,4 +315,197 @@ func TestE2E_ConfigSetMissingArgs(t *testing.T) {
 	dir := t.TempDir()
 	_, _, err := runStackctl(t, dir, "config", "set", "api-url")
 	assert.Error(t, err, "set with only one arg should fail")
+}
+
+// startE2EMockAuthServer starts a mock server for auth e2e tests.
+func startE2EMockAuthServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/auth/login" && r.Method == http.MethodPost:
+			var body map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["username"] == "e2euser" && body["password"] == "e2epass" {
+				w.WriteHeader(http.StatusOK)
+				resp := map[string]interface{}{
+					"token":      "e2e-jwt-token",
+					"expires_at": "2099-01-01T00:00:00Z",
+					"user": map[string]interface{}{
+						"id":         1,
+						"username":   "e2euser",
+						"role":       "admin",
+						"created_at": "2025-01-01T00:00:00Z",
+						"updated_at": "2025-01-01T00:00:00Z",
+						"version":    1,
+					},
+				}
+				json.NewEncoder(w).Encode(resp)
+				return
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid credentials"})
+
+		case r.URL.Path == "/api/v1/auth/me" && r.Method == http.MethodGet:
+			auth := r.Header.Get("Authorization")
+			if auth == "Bearer e2e-jwt-token" {
+				resp := map[string]interface{}{
+					"id":         1,
+					"username":   "e2euser",
+					"role":       "admin",
+					"created_at": "2025-01-01T00:00:00Z",
+					"updated_at": "2025-01-01T00:00:00Z",
+					"version":    1,
+				}
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(resp)
+				return
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Not authenticated. Run 'stackctl login' first."})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
+}
+
+func TestE2E_LoginLogoutWorkflow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EMockAuthServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+
+	// 1. Set up context with API URL pointing at mock server
+	_, _, err := runStackctl(t, dir, "config", "use-context", "e2etest")
+	require.NoError(t, err)
+
+	_, _, err = runStackctl(t, dir, "config", "set", "api-url", server.URL)
+	require.NoError(t, err)
+
+	// 2. Login with flags
+	stdout, _, err := runStackctl(t, dir, "login", "--username", "e2euser", "--password", "e2epass")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Logged in as e2euser")
+
+	// 3. Verify token file exists with correct permissions
+	tokenPath := filepath.Join(dir, "tokens", "e2etest.json")
+	info, err := os.Stat(tokenPath)
+	require.NoError(t, err, "token file should exist after login")
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	}
+
+	// 4. Whoami should succeed
+	stdout, _, err = runStackctl(t, dir, "whoami")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "e2euser")
+	assert.Contains(t, stdout, "admin")
+
+	// 5. Verify password and token are NOT in whoami output
+	assert.NotContains(t, stdout, "e2epass")
+	assert.NotContains(t, stdout, "e2e-jwt-token")
+
+	// 6. Logout
+	stdout, _, err = runStackctl(t, dir, "logout")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Logged out")
+
+	// 7. Token file should be gone
+	_, err = os.Stat(tokenPath)
+	assert.True(t, os.IsNotExist(err), "token file should be removed after logout")
+
+	// 8. Whoami should fail after logout
+	_, stderr, err := runStackctl(t, dir, "whoami")
+	assert.Error(t, err, "whoami should fail after logout")
+	_ = stderr
+}
+
+func TestE2E_LoginInvalidCredentials(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EMockAuthServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+
+	_, _, err := runStackctl(t, dir, "config", "use-context", "e2etest")
+	require.NoError(t, err)
+	_, _, err = runStackctl(t, dir, "config", "set", "api-url", server.URL)
+	require.NoError(t, err)
+
+	_, _, err = runStackctl(t, dir, "login", "--username", "bad", "--password", "wrong")
+	assert.Error(t, err, "login with invalid credentials should fail")
+
+	// Token file should not exist
+	tokenPath := filepath.Join(dir, "tokens", "e2etest.json")
+	_, statErr := os.Stat(tokenPath)
+	assert.True(t, os.IsNotExist(statErr), "token should not be saved on auth failure")
+}
+
+func TestE2E_WhoamiOutputFormats(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EMockAuthServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+
+	// Set up and login
+	_, _, err := runStackctl(t, dir, "config", "use-context", "e2etest")
+	require.NoError(t, err)
+	_, _, err = runStackctl(t, dir, "config", "set", "api-url", server.URL)
+	require.NoError(t, err)
+	_, _, err = runStackctl(t, dir, "login", "--username", "e2euser", "--password", "e2epass")
+	require.NoError(t, err)
+
+	// Test JSON output
+	stdout, _, err := runStackctl(t, dir, "whoami", "--output", "json")
+	require.NoError(t, err)
+	var jsonResult map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &jsonResult))
+	assert.Equal(t, "e2euser", jsonResult["username"])
+	assert.Equal(t, "admin", jsonResult["role"])
+
+	// Test YAML output
+	stdout, _, err = runStackctl(t, dir, "whoami", "--output", "yaml")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "username: e2euser")
+	assert.Contains(t, stdout, "role: admin")
+
+	// Test quiet output
+	stdout, _, err = runStackctl(t, dir, "whoami", "--quiet")
+	require.NoError(t, err)
+	assert.Equal(t, "e2euser\n", stdout)
+
+	// Test table output (default)
+	stdout, _, err = runStackctl(t, dir, "whoami")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Username")
+	assert.Contains(t, stdout, "e2euser")
+	assert.Contains(t, stdout, "Role")
+}
+
+func TestE2E_LogoutWithoutLogin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	dir := t.TempDir()
+
+	_, _, err := runStackctl(t, dir, "config", "use-context", "e2etest")
+	require.NoError(t, err)
+
+	// Logout without having logged in should succeed gracefully
+	stdout, _, err := runStackctl(t, dir, "logout")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Logged out")
 }
