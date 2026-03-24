@@ -89,23 +89,7 @@ func newClient() (*client.Client, error) {
 	}
 	c.APIKey = apiKey
 
-	// Insecure: flag > config
-	insecure := flagInsecure
-	if !insecure && cfg.CurrentCtx() != nil {
-		insecure = cfg.CurrentCtx().Insecure
-	}
-	if insecure {
-		// Clone the default transport to preserve proxies, timeouts, and keep-alives.
-		if t, ok := http.DefaultTransport.(*http.Transport); ok {
-			clone := t.Clone()
-			clone.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-requested
-			c.HTTPClient.Transport = clone
-		} else {
-			c.HTTPClient.Transport = &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
-			}
-		}
-	}
+	applyInsecureTLS(c)
 
 	// JWT token from stored token file (only if no API key)
 	if c.APIKey == "" {
@@ -115,6 +99,20 @@ func newClient() (*client.Client, error) {
 		}
 		c.Token = token
 	}
+
+	return c, nil
+}
+
+// newUnauthenticatedClient creates a client without loading any credentials.
+// Used for login where we don't need (and don't want warnings about) existing tokens.
+func newUnauthenticatedClient() (*client.Client, error) {
+	apiURL := resolveAPIURL()
+	if apiURL == "" {
+		return nil, errNoAPIURL
+	}
+
+	c := client.New(apiURL)
+	applyInsecureTLS(c)
 
 	return c, nil
 }
@@ -131,6 +129,26 @@ func resolveAPIURL() string {
 		return ctx.APIURL
 	}
 	return ""
+}
+
+// applyInsecureTLS configures the client to skip TLS verification if the insecure flag is set.
+func applyInsecureTLS(c *client.Client) {
+	insecure := flagInsecure
+	if !insecure && cfg.CurrentCtx() != nil {
+		insecure = cfg.CurrentCtx().Insecure
+	}
+	if insecure {
+		// Clone the default transport to preserve proxies, timeouts, and keep-alives.
+		if t, ok := http.DefaultTransport.(*http.Transport); ok {
+			clone := t.Clone()
+			clone.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-requested
+			c.HTTPClient.Transport = clone
+		} else {
+			c.HTTPClient.Transport = &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
+			}
+		}
+	}
 }
 
 var errNoAPIURL = &configError{msg: "no API URL configured. Run 'stackctl config set api-url <url>' or use --api-url"}

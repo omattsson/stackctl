@@ -327,9 +327,9 @@ func TestLogin(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	token, err := c.Login("admin", "secret")
+	resp, err := c.Login("admin", "secret")
 	require.NoError(t, err)
-	assert.Equal(t, "jwt-token-abc", token)
+	assert.Equal(t, "jwt-token-abc", resp.Token)
 	assert.Equal(t, "jwt-token-abc", c.Token, "client token should be set after login")
 }
 
@@ -379,4 +379,147 @@ func TestConnectionError(t *testing.T) {
 	err := c.Get("/test", &result)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "making request")
+}
+
+func TestLogin_VerifiesRequestBody(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		var req types.LoginRequest
+		require.NoError(t, json.Unmarshal(body, &req))
+		assert.Equal(t, "user1", req.Username)
+		assert.Equal(t, "pass1", req.Password)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.LoginResponse{
+			Token:     "tok",
+			ExpiresAt: "2099-01-01T00:00:00Z",
+			User:      types.User{Username: "user1", Role: "viewer"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.Login("user1", "pass1")
+	require.NoError(t, err)
+	assert.Equal(t, "tok", resp.Token)
+	assert.Equal(t, "user1", resp.User.Username)
+	assert.Equal(t, "viewer", resp.User.Role)
+}
+
+func TestLogin_SetsClientToken(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.LoginResponse{Token: "new-token"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	assert.Empty(t, c.Token)
+
+	_, err := c.Login("u", "p")
+	require.NoError(t, err)
+	assert.Equal(t, "new-token", c.Token)
+}
+
+func TestLogin_InvalidCredentials(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid credentials"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.Login("bad", "creds")
+	require.Error(t, err)
+	assert.Nil(t, resp)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusUnauthorized, apiErr.StatusCode)
+	assert.Equal(t, "invalid credentials", apiErr.Message)
+}
+
+func TestLogin_ServerError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "db down"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.Login("u", "p")
+	require.Error(t, err)
+	assert.Nil(t, resp)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
+}
+
+func TestWhoami_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/auth/me", r.URL.Path)
+		assert.Equal(t, "Bearer my-jwt", r.Header.Get("Authorization"))
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.User{
+			Base:     types.Base{ID: 5},
+			Username: "testuser",
+			Role:     "operator",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.Token = "my-jwt"
+	user, err := c.Whoami()
+	require.NoError(t, err)
+	assert.Equal(t, uint(5), user.ID)
+	assert.Equal(t, "testuser", user.Username)
+	assert.Equal(t, "operator", user.Role)
+}
+
+func TestWhoami_Unauthorized(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "token expired"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	user, err := c.Whoami()
+	require.Error(t, err)
+	assert.Nil(t, user)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusUnauthorized, apiErr.StatusCode)
+	assert.Equal(t, "Not authenticated. Run 'stackctl login' first.", apiErr.UserFacingError())
+}
+
+func TestWhoami_WithAPIKey(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "sk_key_123", r.Header.Get("X-API-Key"))
+		assert.Empty(t, r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.User{Username: "apiuser", Role: "admin"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.APIKey = "sk_key_123"
+	user, err := c.Whoami()
+	require.NoError(t, err)
+	assert.Equal(t, "apiuser", user.Username)
 }
