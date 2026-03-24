@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -455,6 +456,9 @@ func TestSave_ToEnvDir(t *testing.T) {
 
 func TestLoadFrom_UnreadableFile(t *testing.T) {
 	t.Parallel()
+	if os.Getuid() == 0 {
+		t.Skip("test requires non-root")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("valid: yaml"), 0600))
@@ -491,7 +495,9 @@ func TestSaveTo_DirectoryPermissions(t *testing.T) {
 
 	dirInfo, err := os.Stat(filepath.Dir(path))
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
+	}
 }
 
 func TestSaveTo_OverwriteExistingFile(t *testing.T) {

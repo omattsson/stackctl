@@ -345,7 +345,7 @@ func TestStackInstance_YAML(t *testing.T) {
 	err := p.PrintYAML(instance)
 	require.NoError(t, err)
 
-	// yaml.v3 nests embedded Base struct under "base:" key
+	// yaml.v3 inlines fields from embedded structs, so we can unmarshal directly into StackInstance
 	var result types.StackInstance
 	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &result))
 
@@ -641,8 +641,9 @@ func TestDeploymentLog_EmptyOutput(t *testing.T) {
 
 	var result map[string]interface{}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	// Output with omitempty should still be present (empty string is not omitted by encoding/json unless pointer)
-	// But it should not error out
+	// Output is tagged with omitempty and should be omitted from the JSON when empty
+	_, hasOutput := result["output"]
+	assert.False(t, hasOutput, "output field should be omitted when empty and tagged with omitempty")
 	assert.Equal(t, "stop", result["action"])
 	assert.Equal(t, "pending", result["status"])
 }
