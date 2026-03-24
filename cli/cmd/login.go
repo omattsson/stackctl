@@ -43,7 +43,7 @@ Environment variables:
 
 		// Prompt interactively if not provided via flags or env
 		if username == "" {
-			fmt.Fprint(cmd.OutOrStdout(), "Username: ")
+			fmt.Fprint(cmd.ErrOrStderr(), "Username: ")
 			reader := bufio.NewReader(cmd.InOrStdin())
 			line, err := reader.ReadString('\n')
 			if err != nil && err != io.EOF {
@@ -56,10 +56,10 @@ Environment variables:
 		}
 
 		if password == "" {
-			fmt.Fprint(cmd.OutOrStdout(), "Password: ")
+			fmt.Fprint(cmd.ErrOrStderr(), "Password: ")
 			if f, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 				raw, err := term.ReadPassword(int(f.Fd()))
-				fmt.Fprintln(cmd.OutOrStdout()) // newline after hidden input
+				fmt.Fprintln(cmd.ErrOrStderr()) // newline after hidden input
 				if err != nil {
 					return fmt.Errorf("reading password: %w", err)
 				}
@@ -70,7 +70,7 @@ Environment variables:
 				if err != nil && err != io.EOF {
 					return fmt.Errorf("reading password: %w", err)
 				}
-				password = strings.TrimSpace(line)
+				password = strings.TrimRight(line, "\r\n")
 			}
 		}
 		if password == "" {

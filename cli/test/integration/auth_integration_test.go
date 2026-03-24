@@ -98,11 +98,12 @@ func TestAuthWorkflow_LoginWhoamiLogout(t *testing.T) {
 	require.NoError(t, err)
 	tokenPath := filepath.Join(dir, "tokens", "integration.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(tokenPath), 0700))
-	tokenData, _ := json.Marshal(map[string]interface{}{
+	tokenData, err := json.Marshal(map[string]interface{}{
 		"token":      resp.Token,
 		"expires_at": expiresAt,
 		"username":   resp.User.Username,
 	})
+	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(tokenPath, tokenData, 0600))
 
 	// Verify file permissions
@@ -215,11 +216,12 @@ func TestAuthWorkflow_ExpiredTokenDetection(t *testing.T) {
 	// Simulate an expired token on disk
 	tokenPath := filepath.Join(dir, "tokens", "expired-ctx.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(tokenPath), 0700))
-	tokenData, _ := json.Marshal(map[string]interface{}{
+	tokenData, err := json.Marshal(map[string]interface{}{
 		"token":      "expired-jwt",
 		"expires_at": time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339),
 		"username":   "admin",
 	})
+	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(tokenPath, tokenData, 0600))
 
 	// Read the token back and verify it's expired
@@ -266,7 +268,7 @@ func TestAuthWorkflow_TokenFileSecurityPermissions(t *testing.T) {
 	assert.Zero(t, perm&0077, "token file should not be readable by group or others")
 }
 
-func TestAuthWorkflow_LoginResponseExpiryParsing(t *testing.T) {
+func TestAuthWorkflow_LoginResponseExpiryPassthrough(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}

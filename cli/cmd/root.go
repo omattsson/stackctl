@@ -89,23 +89,7 @@ func newClient() (*client.Client, error) {
 	}
 	c.APIKey = apiKey
 
-	// Insecure: flag > config
-	insecure := flagInsecure
-	if !insecure && cfg.CurrentCtx() != nil {
-		insecure = cfg.CurrentCtx().Insecure
-	}
-	if insecure {
-		// Clone the default transport to preserve proxies, timeouts, and keep-alives.
-		if t, ok := http.DefaultTransport.(*http.Transport); ok {
-			clone := t.Clone()
-			clone.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-requested
-			c.HTTPClient.Transport = clone
-		} else {
-			c.HTTPClient.Transport = &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
-			}
-		}
-	}
+	applyInsecureTLS(c)
 
 	// JWT token from stored token file (only if no API key)
 	if c.APIKey == "" {
@@ -128,23 +112,7 @@ func newUnauthenticatedClient() (*client.Client, error) {
 	}
 
 	c := client.New(apiURL)
-
-	// Insecure: flag > config
-	insecure := flagInsecure
-	if !insecure && cfg.CurrentCtx() != nil {
-		insecure = cfg.CurrentCtx().Insecure
-	}
-	if insecure {
-		if t, ok := http.DefaultTransport.(*http.Transport); ok {
-			clone := t.Clone()
-			clone.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-requested
-			c.HTTPClient.Transport = clone
-		} else {
-			c.HTTPClient.Transport = &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
-			}
-		}
-	}
+	applyInsecureTLS(c)
 
 	return c, nil
 }
@@ -161,6 +129,26 @@ func resolveAPIURL() string {
 		return ctx.APIURL
 	}
 	return ""
+}
+
+// applyInsecureTLS configures the client to skip TLS verification if the insecure flag is set.
+func applyInsecureTLS(c *client.Client) {
+	insecure := flagInsecure
+	if !insecure && cfg.CurrentCtx() != nil {
+		insecure = cfg.CurrentCtx().Insecure
+	}
+	if insecure {
+		// Clone the default transport to preserve proxies, timeouts, and keep-alives.
+		if t, ok := http.DefaultTransport.(*http.Transport); ok {
+			clone := t.Clone()
+			clone.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-requested
+			c.HTTPClient.Transport = clone
+		} else {
+			c.HTTPClient.Transport = &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // user-requested
+			}
+		}
+	}
 }
 
 var errNoAPIURL = &configError{msg: "no API URL configured. Run 'stackctl config set api-url <url>' or use --api-url"}
