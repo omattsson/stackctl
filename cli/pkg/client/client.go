@@ -439,3 +439,126 @@ func (c *Client) ImportDefinition(data []byte) (*types.StackDefinition, error) {
 	}
 	return &def, nil
 }
+
+// ListValueOverrides returns all value overrides for a stack instance.
+func (c *Client) ListValueOverrides(instanceID uint) ([]types.ValueOverride, error) {
+	var overrides []types.ValueOverride
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/overrides", instanceID), &overrides)
+	if err != nil {
+		return nil, err
+	}
+	return overrides, nil
+}
+
+// GetValueOverride returns a single value override for a chart.
+func (c *Client) GetValueOverride(instanceID, chartID uint) (*types.ValueOverride, error) {
+	var override types.ValueOverride
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/overrides/%d", instanceID, chartID), &override)
+	if err != nil {
+		return nil, err
+	}
+	return &override, nil
+}
+
+// SetValueOverride sets value overrides for a chart.
+func (c *Client) SetValueOverride(instanceID, chartID uint, req *types.SetValueOverrideRequest) (*types.ValueOverride, error) {
+	var override types.ValueOverride
+	err := c.Put(fmt.Sprintf("/api/v1/stack-instances/%d/overrides/%d", instanceID, chartID), req, &override)
+	if err != nil {
+		return nil, err
+	}
+	return &override, nil
+}
+
+// DeleteValueOverride deletes a value override for a chart.
+func (c *Client) DeleteValueOverride(instanceID, chartID uint) error {
+	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%d/overrides/%d", instanceID, chartID))
+}
+
+// ListBranchOverrides returns all branch overrides for a stack instance.
+func (c *Client) ListBranchOverrides(instanceID uint) ([]types.BranchOverride, error) {
+	var overrides []types.BranchOverride
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/branches", instanceID), &overrides)
+	if err != nil {
+		return nil, err
+	}
+	return overrides, nil
+}
+
+// GetBranchOverride returns a single branch override for a chart.
+func (c *Client) GetBranchOverride(instanceID, chartID uint) (*types.BranchOverride, error) {
+	var override types.BranchOverride
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/branches/%d", instanceID, chartID), &override)
+	if err != nil {
+		return nil, err
+	}
+	return &override, nil
+}
+
+// SetBranchOverride sets a branch override for a chart.
+func (c *Client) SetBranchOverride(instanceID, chartID uint, req *types.SetBranchOverrideRequest) (*types.BranchOverride, error) {
+	var override types.BranchOverride
+	err := c.Put(fmt.Sprintf("/api/v1/stack-instances/%d/branches/%d", instanceID, chartID), req, &override)
+	if err != nil {
+		return nil, err
+	}
+	return &override, nil
+}
+
+// DeleteBranchOverride deletes a branch override for a chart.
+func (c *Client) DeleteBranchOverride(instanceID, chartID uint) error {
+	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%d/branches/%d", instanceID, chartID))
+}
+
+// GetQuotaOverride returns the quota override for a stack instance.
+func (c *Client) GetQuotaOverride(instanceID uint) (*types.QuotaOverride, error) {
+	var override types.QuotaOverride
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/quota-overrides", instanceID), &override)
+	if err != nil {
+		return nil, err
+	}
+	return &override, nil
+}
+
+// SetQuotaOverride sets the quota override for a stack instance.
+func (c *Client) SetQuotaOverride(instanceID uint, req *types.SetQuotaOverrideRequest) (*types.QuotaOverride, error) {
+	var override types.QuotaOverride
+	err := c.Put(fmt.Sprintf("/api/v1/stack-instances/%d/quota-overrides", instanceID), req, &override)
+	if err != nil {
+		return nil, err
+	}
+	return &override, nil
+}
+
+// DeleteQuotaOverride deletes the quota override for a stack instance.
+func (c *Client) DeleteQuotaOverride(instanceID uint) error {
+	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%d/quota-overrides", instanceID))
+}
+
+// GetMergedValues returns the merged Helm values for a stack instance.
+func (c *Client) GetMergedValues(instanceID uint, chartName string) (*types.MergedValues, error) {
+	var values types.MergedValues
+	params := map[string]string{}
+	if chartName != "" {
+		params["chart"] = chartName
+	}
+	err := c.GetWithQuery(fmt.Sprintf("/api/v1/stack-instances/%d/values", instanceID), params, &values)
+	if err != nil {
+		return nil, err
+	}
+	return &values, nil
+}
+
+// CompareInstances compares two stack instances.
+func (c *Client) CompareInstances(leftID, rightID uint) (*types.CompareResult, error) {
+	var result types.CompareResult
+	params := map[string]string{
+		"left":  fmt.Sprintf("%d", leftID),
+		"right": fmt.Sprintf("%d", rightID),
+	}
+	err := c.GetWithQuery("/api/v1/stack-instances/compare", params, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}

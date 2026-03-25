@@ -860,3 +860,129 @@ func TestE2E_DefinitionExportToFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "my-definition")
 }
+
+// ---------- Override E2E Mock Server ----------
+
+func startE2EOverrideMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		// List value overrides
+		case r.URL.Path == "/api/v1/stack-instances/1/overrides" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 10, "instance_id": 1, "chart_id": 5, "values": `{"replicas":3}`, "version": 1,
+					"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z"},
+			})
+
+		// Get quota override
+		case r.URL.Path == "/api/v1/stack-instances/1/quota-overrides" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"instance_id": 1, "cpu_request": "100m", "cpu_limit": "500m",
+				"memory_request": "128Mi", "memory_limit": "512Mi", "updated_at": "2025-01-01T00:00:00Z",
+			})
+
+		// List branch overrides
+		case r.URL.Path == "/api/v1/stack-instances/1/branches" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"id": 20, "instance_id": 1, "chart_id": 5, "branch": "feature/test", "version": 1,
+					"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z"},
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
+}
+
+func TestE2E_OverrideListJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EOverrideMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "override", "list", "1", "--output", "json")
+	require.NoError(t, err)
+	var result []interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+	assert.Len(t, result, 1)
+}
+
+func TestE2E_OverrideListTable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EOverrideMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "override", "list", "1")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "CHART ID")
+	assert.Contains(t, stdout, "HAS VALUES")
+}
+
+func TestE2E_OverrideQuotaGet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EOverrideMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "override", "quota", "get", "1", "--output", "json")
+	require.NoError(t, err)
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+	assert.Equal(t, "100m", result["cpu_request"])
+	assert.Equal(t, "512Mi", result["memory_limit"])
+}
+
+func TestE2E_OverrideBranchListJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EOverrideMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "override", "branch", "list", "1", "--output", "json")
+	require.NoError(t, err)
+	var result []interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+	assert.Len(t, result, 1)
+}
+
+func TestE2E_OverrideInvalidID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EOverrideMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	_, _, err := runStackctl(t, dir, "override", "list", "abc")
+	assert.Error(t, err)
+}
