@@ -639,30 +639,11 @@ Examples:
 		default:
 			headers := []string{"FIELD", "LEFT", "RIGHT"}
 			var rows [][]string
-			if result.Left != nil && result.Right != nil {
-				if result.Left.Name != result.Right.Name {
-					rows = append(rows, []string{"Name", result.Left.Name, result.Right.Name})
-				}
-				if result.Left.Status != result.Right.Status {
-					rows = append(rows, []string{"Status", printer.StatusColor(result.Left.Status), printer.StatusColor(result.Right.Status)})
-				}
-				if result.Left.Branch != result.Right.Branch {
-					rows = append(rows, []string{"Branch", result.Left.Branch, result.Right.Branch})
-				}
-				if result.Left.Owner != result.Right.Owner {
-					rows = append(rows, []string{"Owner", result.Left.Owner, result.Right.Owner})
-				}
-				if result.Left.StackDefinitionID != result.Right.StackDefinitionID {
-					rows = append(rows, []string{"Definition ID",
-						strconv.FormatUint(uint64(result.Left.StackDefinitionID), 10),
-						strconv.FormatUint(uint64(result.Right.StackDefinitionID), 10),
-					})
-				}
-				if result.Left.ClusterName != result.Right.ClusterName {
-					rows = append(rows, []string{"Cluster", result.Left.ClusterName, result.Right.ClusterName})
-				}
-				if result.Left.Namespace != result.Right.Namespace {
-					rows = append(rows, []string{"Namespace", result.Left.Namespace, result.Right.Namespace})
+			for field, val := range result.Diffs {
+				if diffMap, ok := val.(map[string]interface{}); ok {
+					left := fmt.Sprintf("%v", diffMap["left"])
+					right := fmt.Sprintf("%v", diffMap["right"])
+					rows = append(rows, []string{field, left, right})
 				}
 			}
 			if len(rows) == 0 {

@@ -1581,7 +1581,15 @@ func TestStackCompareCmd_TableOutput_WithDiffs(t *testing.T) {
 	right.Status = "stopped"
 	right.Branch = "feature/x"
 
-	result := types.CompareResult{Left: &left, Right: &right}
+	result := types.CompareResult{
+		Left:  &left,
+		Right: &right,
+		Diffs: map[string]interface{}{
+			"Name":   map[string]interface{}{"left": "my-stack", "right": "other-stack"},
+			"Status": map[string]interface{}{"left": "running", "right": "stopped"},
+			"Branch": map[string]interface{}{"left": "main", "right": "feature/x"},
+		},
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "42", r.URL.Query().Get("left"))
 		assert.Equal(t, "43", r.URL.Query().Get("right"))
@@ -1610,7 +1618,7 @@ func TestStackCompareCmd_TableOutput_NoDiffs(t *testing.T) {
 	right := sampleStack()
 	right.ID = 43
 
-	result := types.CompareResult{Left: &left, Right: &right}
+	result := types.CompareResult{Left: &left, Right: &right, Diffs: map[string]interface{}{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

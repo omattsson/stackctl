@@ -94,7 +94,12 @@ func startOverrideMockServer(t *testing.T, state *overrideMockState) *httptest.S
 					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid body"})
 					return
 				}
-				valBytes, _ := json.Marshal(req.Values)
+				valBytes, err := json.Marshal(req.Values)
+				if err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid values: " + err.Error()})
+					return
+				}
 				state.mu.Lock()
 				vo := &types.ValueOverride{
 					Base:       types.Base{ID: chartID, Version: 1},

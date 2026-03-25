@@ -131,7 +131,7 @@ Examples:
 			if err := json.Unmarshal(data, &values); err != nil {
 				// Try YAML
 				if yamlErr := yaml.Unmarshal(data, &values); yamlErr != nil {
-					return fmt.Errorf("invalid JSON/YAML in file %s: %w", file, err)
+					return fmt.Errorf("invalid JSON/YAML in file %s (json: %v): %w", file, err, yamlErr)
 				}
 			}
 		}
