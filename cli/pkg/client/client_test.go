@@ -1241,3 +1241,487 @@ func TestImportDefinition_ServerError(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, def)
 }
+
+// ---------- Value Override client methods ----------
+
+func TestListValueOverrides_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/overrides", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.ValueOverride{
+			{Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Values: `{"replicas":3}`},
+			{Base: types.Base{ID: 2}, InstanceID: 42, ChartID: 2, Values: `{"debug":true}`},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	overrides, err := c.ListValueOverrides(42)
+	require.NoError(t, err)
+	assert.Len(t, overrides, 2)
+	assert.Equal(t, uint(1), overrides[0].ChartID)
+	assert.Equal(t, uint(2), overrides[1].ChartID)
+}
+
+func TestListValueOverrides_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "instance not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	overrides, err := c.ListValueOverrides(999)
+	require.Error(t, err)
+	assert.Nil(t, overrides)
+}
+
+func TestGetValueOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/overrides/1", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ValueOverride{
+			Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Values: `{"replicas":3}`,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	override, err := c.GetValueOverride(42, 1)
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), override.ChartID)
+	assert.Equal(t, uint(42), override.InstanceID)
+	assert.Contains(t, override.Values, "replicas")
+}
+
+func TestGetValueOverride_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "override not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	override, err := c.GetValueOverride(42, 99)
+	require.Error(t, err)
+	assert.Nil(t, override)
+}
+
+func TestSetValueOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/overrides/1", r.URL.Path)
+
+		var body types.SetValueOverrideRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, float64(5), body.Values["replicas"])
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ValueOverride{
+			Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Values: `{"replicas":5}`,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	override, err := c.SetValueOverride(42, 1, &types.SetValueOverrideRequest{
+		Values: map[string]interface{}{"replicas": float64(5)},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), override.ChartID)
+}
+
+func TestSetValueOverride_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "set failed"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	override, err := c.SetValueOverride(42, 1, &types.SetValueOverrideRequest{
+		Values: map[string]interface{}{"key": "val"},
+	})
+	require.Error(t, err)
+	assert.Nil(t, override)
+}
+
+func TestDeleteValueOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/overrides/1", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteValueOverride(42, 1)
+	require.NoError(t, err)
+}
+
+func TestDeleteValueOverride_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "override not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteValueOverride(42, 99)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+// ---------- Branch Override client methods ----------
+
+func TestListBranchOverrides_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/branches", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.BranchOverride{
+			{Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Branch: "feature/xyz"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	overrides, err := c.ListBranchOverrides(42)
+	require.NoError(t, err)
+	assert.Len(t, overrides, 1)
+	assert.Equal(t, "feature/xyz", overrides[0].Branch)
+}
+
+func TestListBranchOverrides_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "instance not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	overrides, err := c.ListBranchOverrides(999)
+	require.Error(t, err)
+	assert.Nil(t, overrides)
+}
+
+func TestGetBranchOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/branches/1", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BranchOverride{
+			Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Branch: "main",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	override, err := c.GetBranchOverride(42, 1)
+	require.NoError(t, err)
+	assert.Equal(t, "main", override.Branch)
+	assert.Equal(t, uint(42), override.InstanceID)
+}
+
+func TestGetBranchOverride_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "branch override not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	override, err := c.GetBranchOverride(42, 99)
+	require.Error(t, err)
+	assert.Nil(t, override)
+}
+
+func TestSetBranchOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/branches/1", r.URL.Path)
+
+		var body types.SetBranchOverrideRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "feature/new", body.Branch)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BranchOverride{
+			Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Branch: "feature/new",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	override, err := c.SetBranchOverride(42, 1, &types.SetBranchOverrideRequest{Branch: "feature/new"})
+	require.NoError(t, err)
+	assert.Equal(t, "feature/new", override.Branch)
+}
+
+func TestSetBranchOverride_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "set branch failed"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	override, err := c.SetBranchOverride(42, 1, &types.SetBranchOverrideRequest{Branch: "main"})
+	require.Error(t, err)
+	assert.Nil(t, override)
+}
+
+func TestDeleteBranchOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/branches/1", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteBranchOverride(42, 1)
+	require.NoError(t, err)
+}
+
+func TestDeleteBranchOverride_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "branch override not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteBranchOverride(42, 99)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+// ---------- Quota Override client methods ----------
+
+func TestGetQuotaOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/quota-overrides", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.QuotaOverride{
+			InstanceID: 42, CPURequest: "100m", CPULimit: "500m",
+			MemRequest: "128Mi", MemLimit: "512Mi",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	quota, err := c.GetQuotaOverride(42)
+	require.NoError(t, err)
+	assert.Equal(t, uint(42), quota.InstanceID)
+	assert.Equal(t, "100m", quota.CPURequest)
+	assert.Equal(t, "500m", quota.CPULimit)
+	assert.Equal(t, "128Mi", quota.MemRequest)
+	assert.Equal(t, "512Mi", quota.MemLimit)
+}
+
+func TestGetQuotaOverride_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "quota not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	quota, err := c.GetQuotaOverride(999)
+	require.Error(t, err)
+	assert.Nil(t, quota)
+}
+
+func TestSetQuotaOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/quota-overrides", r.URL.Path)
+
+		var body types.SetQuotaOverrideRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "200m", body.CPURequest)
+		assert.Equal(t, "1Gi", body.MemLimit)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.QuotaOverride{
+			InstanceID: 42, CPURequest: "200m", MemLimit: "1Gi",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	quota, err := c.SetQuotaOverride(42, &types.SetQuotaOverrideRequest{
+		CPURequest: "200m", MemLimit: "1Gi",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "200m", quota.CPURequest)
+	assert.Equal(t, "1Gi", quota.MemLimit)
+}
+
+func TestSetQuotaOverride_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "set quota failed"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	quota, err := c.SetQuotaOverride(42, &types.SetQuotaOverrideRequest{CPURequest: "100m"})
+	require.Error(t, err)
+	assert.Nil(t, quota)
+}
+
+func TestDeleteQuotaOverride_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/quota-overrides", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteQuotaOverride(42)
+	require.NoError(t, err)
+}
+
+func TestDeleteQuotaOverride_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "quota not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteQuotaOverride(999)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+// ---------- MergedValues and CompareInstances client methods ----------
+
+func TestGetMergedValues_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/values", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.MergedValues{
+			InstanceID: 42,
+			Charts: map[string]map[string]interface{}{
+				"api": {"replicas": float64(3)},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	values, err := c.GetMergedValues(42, "")
+	require.NoError(t, err)
+	assert.Equal(t, uint(42), values.InstanceID)
+	assert.Contains(t, values.Charts, "api")
+}
+
+func TestGetMergedValues_WithChartFilter(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "frontend", r.URL.Query().Get("chart"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.MergedValues{
+			InstanceID: 42,
+			Charts:     map[string]map[string]interface{}{"frontend": {"port": float64(8080)}},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	values, err := c.GetMergedValues(42, "frontend")
+	require.NoError(t, err)
+	assert.Contains(t, values.Charts, "frontend")
+}
+
+func TestGetMergedValues_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "instance not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	values, err := c.GetMergedValues(999, "")
+	require.Error(t, err)
+	assert.Nil(t, values)
+}
+
+func TestCompareInstances_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/compare", r.URL.Path)
+		assert.Equal(t, "42", r.URL.Query().Get("left"))
+		assert.Equal(t, "43", r.URL.Query().Get("right"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.CompareResult{
+			Left:  &types.StackInstance{Base: types.Base{ID: 42}, Name: "stack-a"},
+			Right: &types.StackInstance{Base: types.Base{ID: 43}, Name: "stack-b"},
+			Diffs: map[string]interface{}{"name": true},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	result, err := c.CompareInstances(42, 43)
+	require.NoError(t, err)
+	assert.Equal(t, uint(42), result.Left.ID)
+	assert.Equal(t, uint(43), result.Right.ID)
+	assert.Contains(t, result.Diffs, "name")
+}
+
+func TestCompareInstances_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "compare failed"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	result, err := c.CompareInstances(42, 43)
+	require.Error(t, err)
+	assert.Nil(t, result)
+}

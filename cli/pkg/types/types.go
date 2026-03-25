@@ -204,3 +204,45 @@ type InstanceStatus struct {
 	Status string      `json:"status"`
 	Pods   []PodStatus `json:"pods,omitempty"`
 }
+
+// QuotaOverride represents a per-instance resource quota override.
+// Unlike other override types, the API returns quota overrides without standard Base fields (ID, Version).
+type QuotaOverride struct {
+	InstanceID uint      `json:"instance_id" yaml:"instance_id"`
+	CPURequest string    `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
+	CPULimit   string    `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
+	MemRequest string    `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
+	MemLimit   string    `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
+}
+
+// SetValueOverrideRequest is the request body for setting value overrides.
+type SetValueOverrideRequest struct {
+	Values map[string]interface{} `json:"values"`
+}
+
+// SetBranchOverrideRequest is the request body for setting a branch override.
+type SetBranchOverrideRequest struct {
+	Branch string `json:"branch"`
+}
+
+// SetQuotaOverrideRequest is the request body for setting quota overrides.
+type SetQuotaOverrideRequest struct {
+	CPURequest string `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
+	CPULimit   string `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
+	MemRequest string `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
+	MemLimit   string `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
+}
+
+// MergedValues represents the merged Helm values for an instance.
+type MergedValues struct {
+	InstanceID uint                              `json:"instance_id" yaml:"instance_id"`
+	Charts     map[string]map[string]interface{} `json:"charts" yaml:"charts"`
+}
+
+// CompareResult represents the comparison between two stack instances.
+type CompareResult struct {
+	Left  *StackInstance         `json:"left" yaml:"left"`
+	Right *StackInstance         `json:"right" yaml:"right"`
+	Diffs map[string]interface{} `json:"diffs,omitempty" yaml:"diffs,omitempty"`
+}

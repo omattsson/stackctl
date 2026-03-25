@@ -1422,3 +1422,328 @@ func TestStackStopCmd_ServerError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stop failed")
 }
+
+// ========== stack values ==========
+
+func TestStackValuesCmd_JSONOutput(t *testing.T) {
+	values := types.MergedValues{
+		InstanceID: 42,
+		Charts: map[string]map[string]interface{}{
+			"frontend": {"replicas": float64(3), "image": map[string]interface{}{"tag": "v2"}},
+			"backend":  {"replicas": float64(1)},
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/stack-instances/42/values", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(values)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := stackValuesCmd.RunE(stackValuesCmd, []string{"42"})
+	require.NoError(t, err)
+
+	var result types.MergedValues
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, uint(42), result.InstanceID)
+	assert.Contains(t, result.Charts, "frontend")
+	assert.Contains(t, result.Charts, "backend")
+}
+
+func TestStackValuesCmd_TableOutputFallsBackToJSON(t *testing.T) {
+	values := types.MergedValues{
+		InstanceID: 42,
+		Charts:     map[string]map[string]interface{}{"api": {"replicas": float64(2)}},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(values)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	// table format should fall back to JSON for values
+	err := stackValuesCmd.RunE(stackValuesCmd, []string{"42"})
+	require.NoError(t, err)
+
+	var result types.MergedValues
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, uint(42), result.InstanceID)
+}
+
+func TestStackValuesCmd_YAMLOutput(t *testing.T) {
+	values := types.MergedValues{
+		InstanceID: 42,
+		Charts:     map[string]map[string]interface{}{"api": {"replicas": float64(2)}},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(values)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := stackValuesCmd.RunE(stackValuesCmd, []string{"42"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "instance_id: 42")
+}
+
+func TestStackValuesCmd_QuietOutput(t *testing.T) {
+	values := types.MergedValues{InstanceID: 42}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(values)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := stackValuesCmd.RunE(stackValuesCmd, []string{"42"})
+	require.NoError(t, err)
+	assert.Equal(t, "42\n", buf.String())
+}
+
+func TestStackValuesCmd_WithChartFilter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "frontend", r.URL.Query().Get("chart"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.MergedValues{InstanceID: 42})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	stackValuesCmd.Flags().Set("chart", "frontend")
+	t.Cleanup(func() { stackValuesCmd.Flags().Set("chart", "") })
+
+	err := stackValuesCmd.RunE(stackValuesCmd, []string{"42"})
+	require.NoError(t, err)
+}
+
+func TestStackValuesCmd_InvalidID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called for invalid ID")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := stackValuesCmd.RunE(stackValuesCmd, []string{"abc"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ID")
+}
+
+func TestStackValuesCmd_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "values failed"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := stackValuesCmd.RunE(stackValuesCmd, []string{"42"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "values failed")
+}
+
+func TestStackValuesCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "instance not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := stackValuesCmd.RunE(stackValuesCmd, []string{"999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "instance not found")
+}
+
+// ========== stack compare ==========
+
+func TestStackCompareCmd_TableOutput_WithDiffs(t *testing.T) {
+	left := sampleStack()
+	right := sampleStack()
+	right.ID = 43
+	right.Name = "other-stack"
+	right.Status = "stopped"
+	right.Branch = "feature/x"
+
+	result := types.CompareResult{
+		Left:  &left,
+		Right: &right,
+		Diffs: map[string]interface{}{
+			"Name":   map[string]interface{}{"left": "my-stack", "right": "other-stack"},
+			"Status": map[string]interface{}{"left": "running", "right": "stopped"},
+			"Branch": map[string]interface{}{"left": "main", "right": "feature/x"},
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "42", r.URL.Query().Get("left"))
+		assert.Equal(t, "43", r.URL.Query().Get("right"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "43"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "FIELD")
+	assert.Contains(t, out, "LEFT")
+	assert.Contains(t, out, "RIGHT")
+	assert.Contains(t, out, "Name")
+	assert.Contains(t, out, "my-stack")
+	assert.Contains(t, out, "other-stack")
+	assert.Contains(t, out, "Branch")
+}
+
+func TestStackCompareCmd_TableOutput_NoDiffs(t *testing.T) {
+	left := sampleStack()
+	right := sampleStack()
+	right.ID = 43
+
+	result := types.CompareResult{Left: &left, Right: &right, Diffs: map[string]interface{}{}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "43"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "No differences found")
+}
+
+func TestStackCompareCmd_JSONOutput(t *testing.T) {
+	left := sampleStack()
+	right := sampleStack()
+	right.ID = 43
+
+	result := types.CompareResult{Left: &left, Right: &right}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "43"})
+	require.NoError(t, err)
+
+	var res types.CompareResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &res))
+	assert.Equal(t, uint(42), res.Left.ID)
+	assert.Equal(t, uint(43), res.Right.ID)
+}
+
+func TestStackCompareCmd_YAMLOutput(t *testing.T) {
+	left := sampleStack()
+	right := sampleStack()
+	right.ID = 43
+
+	result := types.CompareResult{Left: &left, Right: &right}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "43"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "name: my-stack")
+}
+
+func TestStackCompareCmd_QuietOutput(t *testing.T) {
+	result := types.CompareResult{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "43"})
+	require.NoError(t, err)
+	assert.Equal(t, "42\n43\n", buf.String())
+}
+
+func TestStackCompareCmd_InvalidLeftID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called for invalid ID")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"abc", "43"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ID")
+}
+
+func TestStackCompareCmd_InvalidRightID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called for invalid ID")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "xyz"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid ID")
+}
+
+func TestStackCompareCmd_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "compare failed"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "43"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "compare failed")
+}
+
+func TestStackCompareCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "instance not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "instance not found")
+}

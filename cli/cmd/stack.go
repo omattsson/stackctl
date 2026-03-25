@@ -544,6 +544,117 @@ Examples:
 	},
 }
 
+var stackValuesCmd = &cobra.Command{
+	Use:   "values <id>",
+	Short: "Show merged Helm values for a stack instance",
+	Long: `Show the fully merged Helm values for a stack instance.
+
+Nested values are displayed as JSON by default. Use -o yaml for YAML format.
+
+Examples:
+  stackctl stack values 1
+  stackctl stack values 1 --chart my-chart
+  stackctl stack values 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		chart, _ := cmd.Flags().GetString("chart")
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		values, err := c.GetMergedValues(id, chart)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, id)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(values)
+		case output.FormatYAML:
+			return printer.PrintYAML(values)
+		default:
+			return printer.PrintJSON(values)
+		}
+	},
+}
+
+var stackCompareCmd = &cobra.Command{
+	Use:   "compare <id1> <id2>",
+	Short: "Compare two stack instances",
+	Long: `Compare two stack instances and show their differences.
+
+Examples:
+  stackctl stack compare 42 43
+  stackctl stack compare 42 43 -o json`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		leftID, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+		rightID, err := parseID(args[1])
+		if err != nil {
+			return err
+		}
+
+		if leftID == rightID {
+			return fmt.Errorf("cannot compare an instance with itself (both IDs are %d)", leftID)
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		result, err := c.CompareInstances(leftID, rightID)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, leftID)
+			fmt.Fprintln(printer.Writer, rightID)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(result)
+		case output.FormatYAML:
+			return printer.PrintYAML(result)
+		default:
+			headers := []string{"FIELD", "LEFT", "RIGHT"}
+			var rows [][]string
+			for field, val := range result.Diffs {
+				if diffMap, ok := val.(map[string]interface{}); ok {
+					left := fmt.Sprintf("%v", diffMap["left"])
+					right := fmt.Sprintf("%v", diffMap["right"])
+					rows = append(rows, []string{field, left, right})
+				}
+			}
+			if len(rows) == 0 {
+				printer.PrintMessage("No differences found between stack %d and %d", leftID, rightID)
+				return nil
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
+}
+
 func init() {
 	// stack list flags
 	stackListCmd.Flags().Bool("mine", false, "Show only my stacks")
@@ -574,6 +685,9 @@ func init() {
 	stackExtendCmd.Flags().Int("minutes", 0, "Number of minutes to extend TTL by (required)")
 	_ = stackExtendCmd.MarkFlagRequired("minutes")
 
+	// stack values flags
+	stackValuesCmd.Flags().String("chart", "", "Filter by chart name")
+
 	// Wire up subcommands
 	stackCmd.AddCommand(stackListCmd)
 	stackCmd.AddCommand(stackGetCmd)
@@ -586,6 +700,8 @@ func init() {
 	stackCmd.AddCommand(stackLogsCmd)
 	stackCmd.AddCommand(stackCloneCmd)
 	stackCmd.AddCommand(stackExtendCmd)
+	stackCmd.AddCommand(stackValuesCmd)
+	stackCmd.AddCommand(stackCompareCmd)
 	rootCmd.AddCommand(stackCmd)
 }
 
