@@ -338,6 +338,11 @@ Examples:
 			return nil
 		}
 
+		if printer.Quiet {
+			_, err = fmt.Fprintln(printer.Writer, id)
+			return err
+		}
+
 		_, err = fmt.Fprint(printer.Writer, string(data))
 		return err
 	},
@@ -353,6 +358,9 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file, _ := cmd.Flags().GetString("file")
+		if file == "" {
+			return fmt.Errorf("--file is required")
+		}
 
 		for _, segment := range strings.Split(filepath.ToSlash(file), "/") {
 			if segment == ".." {
