@@ -14,14 +14,15 @@ cli/
     config.go                 # config set/get/list/use-context
     version.go                # Version info (build-time ldflags)
     login.go                  # login, logout, whoami
-    stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend
+    token.go                  # Token storage helpers (save/load/delete JWT)
+    stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend/values/compare
     template.go               # template list/get/instantiate/quick-deploy
     definition.go             # definition list/get/create/update/delete/export/import
     override.go               # override list/set/delete, branch overrides, quota overrides
-    bulk.go                   # bulk deploy/stop/clean/delete
+    bulk.go                   # bulk deploy/stop/clean/delete (--ids flag or positional args)
     git.go                    # git branches/validate
-    cluster.go                # cluster list/get
-    completion.go             # Shell completion generation
+    cluster.go                # cluster list/get (with health summary)
+    completion.go             # Shell completion generation (bash/zsh/fish/powershell)
   pkg/
     client/
       client.go              # HTTP client wrapper (auth headers, base URL, error handling)
@@ -31,6 +32,15 @@ cli/
       config.go              # Viper-based config (~/.stackmanager/config.yaml)
     output/
       output.go              # Table, JSON, YAML formatters
+  test/
+    e2e/
+      cli_e2e_test.go        # Binary execution end-to-end tests
+    integration/
+      auth_integration_test.go
+      config_integration_test.go
+      override_integration_test.go
+      stack_integration_test.go
+      template_definition_integration_test.go
 ```
 
 ## Development Commands
@@ -49,13 +59,13 @@ cli/
 
 **Flag precedence**: flag > environment variable > config file. Viper binds all three. Environment variables use `STACKCTL_` prefix.
 
-**Global flags**: `--output table|json|yaml`, `--quiet`, `--api-url`, `--api-key`, `--no-color`
+**Global flags**: `--output table|json|yaml`, `--quiet`, `--api-url`, `--api-key`, `--no-color`, `--insecure`
 
 **Output modes**:
 - `table` (default): human-readable with colored status badges
 - `json`: machine-readable, full API response
 - `yaml`: machine-readable, full API response
-- `--quiet`: IDs only, one per line (pipeable to `xargs`)
+- `--quiet`: minimal output — IDs or identifiers, one per line (pipeable to `xargs`)
 
 **Destructive operations**: Commands that delete or clean resources must prompt for confirmation. `--yes` flag skips the prompt.
 
