@@ -152,6 +152,34 @@ type GitBranch struct {
 	IsHead bool   `json:"is_head,omitempty" yaml:"is_head,omitempty"`
 }
 
+// InstantiateTemplateRequest is the request body for POST /api/v1/templates/:id/instantiate.
+type InstantiateTemplateRequest struct {
+	Name      string `json:"name" yaml:"name"`
+	Branch    string `json:"branch,omitempty" yaml:"branch,omitempty"`
+	ClusterID uint   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+}
+
+// QuickDeployRequest is the request body for POST /api/v1/templates/:id/quick-deploy.
+type QuickDeployRequest struct {
+	Name      string `json:"name" yaml:"name"`
+	Branch    string `json:"branch,omitempty" yaml:"branch,omitempty"`
+	ClusterID uint   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+}
+
+// CreateDefinitionRequest is the request body for POST /api/v1/stack-definitions.
+type CreateDefinitionRequest struct {
+	Name        string        `json:"name" yaml:"name"`
+	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
+	Charts      []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+}
+
+// UpdateDefinitionRequest is the request body for PUT /api/v1/stack-definitions/:id.
+type UpdateDefinitionRequest struct {
+	Name        string        `json:"name,omitempty" yaml:"name,omitempty"`
+	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
+	Charts      []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+}
+
 // ErrorResponse represents an API error response.
 type ErrorResponse struct {
 	Error string `json:"error"`

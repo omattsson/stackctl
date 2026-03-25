@@ -703,3 +703,160 @@ func TestE2E_StackDeleteConfirmation(t *testing.T) {
 	_, _, err = runStackctl(t, dir, "stack", "delete", "999", "--yes")
 	assert.Error(t, err)
 }
+
+// ---------- Template & Definition E2E Mock Server ----------
+
+func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		// List templates
+		case r.URL.Path == "/api/v1/templates" && r.Method == http.MethodGet:
+			resp := map[string]interface{}{
+				"data": []map[string]interface{}{
+					{
+						"id": 1, "name": "web-template", "description": "Web app stack",
+						"published": true, "owner": "admin", "charts": []map[string]interface{}{
+							{"id": 1, "name": "frontend", "repo_url": "https://charts.example.com", "chart_version": "1.0.0"},
+						},
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+					},
+					{
+						"id": 2, "name": "api-template", "description": "API stack",
+						"published": false, "owner": "admin", "charts": []map[string]interface{}{},
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+					},
+				},
+				"total": 2, "page": 1, "page_size": 20, "total_pages": 1,
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// List definitions
+		case r.URL.Path == "/api/v1/stack-definitions" && r.Method == http.MethodGet:
+			resp := map[string]interface{}{
+				"data": []map[string]interface{}{
+					{
+						"id": 1, "name": "my-definition", "description": "Test definition",
+						"owner": "admin", "default_branch": "main",
+						"charts":     []map[string]interface{}{},
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+					},
+				},
+				"total": 1, "page": 1, "page_size": 20, "total_pages": 1,
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// Export definition
+		case r.URL.Path == "/api/v1/stack-definitions/1/export" && r.Method == http.MethodGet:
+			exportData := map[string]interface{}{
+				"name": "my-definition", "description": "Test definition",
+				"charts": []interface{}{},
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(exportData)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
+}
+
+func TestE2E_TemplateListOutputFormats(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Table (default)
+	stdout, _, err := runStackctl(t, dir, "template", "list")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "ID")
+	assert.Contains(t, stdout, "NAME")
+	assert.Contains(t, stdout, "PUBLISHED")
+	assert.Contains(t, stdout, "web-template")
+	assert.Contains(t, stdout, "api-template")
+
+	// Quiet
+	stdout, _, err = runStackctl(t, dir, "template", "list", "--quiet")
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 2)
+	assert.Equal(t, []string{"1", "2"}, lines)
+
+	// JSON
+	stdout, _, err = runStackctl(t, dir, "template", "list", "--output", "json")
+	require.NoError(t, err)
+	var jsonResult map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &jsonResult))
+	data, ok := jsonResult["data"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, data, 2)
+}
+
+func TestE2E_DefinitionListOutputFormats(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Table (default)
+	stdout, _, err := runStackctl(t, dir, "definition", "list")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "ID")
+	assert.Contains(t, stdout, "NAME")
+	assert.Contains(t, stdout, "OWNER")
+	assert.Contains(t, stdout, "my-definition")
+
+	// Quiet
+	stdout, _, err = runStackctl(t, dir, "definition", "list", "--quiet")
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 1)
+	assert.Equal(t, "1", lines[0])
+
+	// JSON
+	stdout, _, err = runStackctl(t, dir, "definition", "list", "--output", "json")
+	require.NoError(t, err)
+	var jsonResult map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &jsonResult))
+	data, ok := jsonResult["data"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, data, 1)
+}
+
+func TestE2E_DefinitionExportToFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	outFile := filepath.Join(dir, "exported.json")
+	stdout, _, err := runStackctl(t, dir, "definition", "export", "1", "--output-file", outFile)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Exported definition 1")
+
+	// Verify file was written
+	data, err := os.ReadFile(outFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "my-definition")
+}
