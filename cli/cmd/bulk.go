@@ -18,16 +18,20 @@ var bulkCmd = &cobra.Command{
 }
 
 var bulkDeployCmd = &cobra.Command{
-	Use:   "deploy",
+	Use:   "deploy [IDs...]",
 	Short: "Deploy multiple stack instances",
 	Long: `Deploy multiple stack instances at once.
 
+IDs can be provided via --ids flag, positional arguments, or both.
+
 Examples:
   stackctl bulk deploy --ids 1,2,3
+  stackctl bulk deploy 1 2 3
+  stackctl bulk deploy --ids 1,2 3
   stackctl bulk deploy --ids 1,2,3 -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := parseBulkIDs(cmd)
+		ids, err := parseBulkIDs(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -47,16 +51,20 @@ Examples:
 }
 
 var bulkStopCmd = &cobra.Command{
-	Use:   "stop",
+	Use:   "stop [IDs...]",
 	Short: "Stop multiple stack instances",
 	Long: `Stop multiple stack instances at once.
 
+IDs can be provided via --ids flag, positional arguments, or both.
+
 Examples:
   stackctl bulk stop --ids 1,2,3
+  stackctl bulk stop 1 2 3
+  stackctl bulk stop --ids 1,2 3
   stackctl bulk stop --ids 1,2,3 -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := parseBulkIDs(cmd)
+		ids, err := parseBulkIDs(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -76,19 +84,22 @@ Examples:
 }
 
 var bulkCleanCmd = &cobra.Command{
-	Use:   "clean",
+	Use:   "clean [IDs...]",
 	Short: "Clean multiple stack instances",
 	Long: `Undeploy and remove namespaces for multiple stack instances.
 
 This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
+IDs can be provided via --ids flag, positional arguments, or both.
+
 Examples:
   stackctl bulk clean --ids 1,2,3
+  stackctl bulk clean 1 2 3
   stackctl bulk clean --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := parseBulkIDs(cmd)
+		ids, err := parseBulkIDs(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -122,19 +133,22 @@ Examples:
 }
 
 var bulkDeleteCmd = &cobra.Command{
-	Use:   "delete",
+	Use:   "delete [IDs...]",
 	Short: "Delete multiple stack instances",
 	Long: `Permanently delete multiple stack instances.
 
 This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
+IDs can be provided via --ids flag, positional arguments, or both.
+
 Examples:
   stackctl bulk delete --ids 1,2,3
+  stackctl bulk delete 1 2 3
   stackctl bulk delete --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := parseBulkIDs(cmd)
+		ids, err := parseBulkIDs(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -168,18 +182,14 @@ Examples:
 }
 
 func init() {
-	bulkDeployCmd.Flags().String("ids", "", "Comma-separated list of instance IDs (required)")
-	_ = bulkDeployCmd.MarkFlagRequired("ids")
+	bulkDeployCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
 
-	bulkStopCmd.Flags().String("ids", "", "Comma-separated list of instance IDs (required)")
-	_ = bulkStopCmd.MarkFlagRequired("ids")
+	bulkStopCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
 
-	bulkCleanCmd.Flags().String("ids", "", "Comma-separated list of instance IDs (required)")
-	_ = bulkCleanCmd.MarkFlagRequired("ids")
+	bulkCleanCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
 	bulkCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
-	bulkDeleteCmd.Flags().String("ids", "", "Comma-separated list of instance IDs (required)")
-	_ = bulkDeleteCmd.MarkFlagRequired("ids")
+	bulkDeleteCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
 	bulkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	bulkCmd.AddCommand(bulkDeployCmd)
@@ -189,20 +199,18 @@ func init() {
 	rootCmd.AddCommand(bulkCmd)
 }
 
-func parseBulkIDs(cmd *cobra.Command) ([]uint, error) {
-	idsStr, _ := cmd.Flags().GetString("ids")
-	if idsStr == "" {
-		return nil, fmt.Errorf("--ids is required")
-	}
+func parseBulkIDs(cmd *cobra.Command, args []string) ([]uint, error) {
+	var rawParts []string
 
-	parts := strings.Split(idsStr, ",")
-	if len(parts) > 50 {
-		return nil, fmt.Errorf("maximum 50 IDs allowed, got %d", len(parts))
+	idsStr, _ := cmd.Flags().GetString("ids")
+	if idsStr != "" {
+		rawParts = append(rawParts, strings.Split(idsStr, ",")...)
 	}
+	rawParts = append(rawParts, args...)
 
 	seen := make(map[uint]bool)
-	ids := make([]uint, 0, len(parts))
-	for _, p := range parts {
+	ids := make([]uint, 0, len(rawParts))
+	for _, p := range rawParts {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
@@ -219,7 +227,11 @@ func parseBulkIDs(cmd *cobra.Command) ([]uint, error) {
 	}
 
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("--ids must contain at least one valid ID")
+		return nil, fmt.Errorf("at least one instance ID is required (use --ids or positional arguments)")
+	}
+
+	if len(ids) > 50 {
+		return nil, fmt.Errorf("maximum 50 IDs allowed, got %d", len(ids))
 	}
 
 	return ids, nil

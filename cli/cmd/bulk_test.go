@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -315,7 +316,7 @@ func TestParseBulkIDs_Valid(t *testing.T) {
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", "1,2,3")
 
-	ids, err := parseBulkIDs(cmd)
+	ids, err := parseBulkIDs(cmd, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []uint{1, 2, 3}, ids)
 }
@@ -325,7 +326,7 @@ func TestParseBulkIDs_InvalidID(t *testing.T) {
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", "1,abc,3")
 
-	_, err := parseBulkIDs(cmd)
+	_, err := parseBulkIDs(cmd, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid ID")
 }
@@ -333,14 +334,14 @@ func TestParseBulkIDs_InvalidID(t *testing.T) {
 func TestParseBulkIDs_TooMany(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
-	// Build 51 IDs
+	// Build 51 unique IDs
 	parts := make([]string, 51)
 	for i := range parts {
-		parts[i] = "1"
+		parts[i] = strconv.Itoa(i + 1)
 	}
 	cmd.Flags().Set("ids", strings.Join(parts, ","))
 
-	_, err := parseBulkIDs(cmd)
+	_, err := parseBulkIDs(cmd, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "maximum 50")
 }
@@ -350,7 +351,7 @@ func TestParseBulkIDs_Empty(t *testing.T) {
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", "")
 
-	_, err := parseBulkIDs(cmd)
+	_, err := parseBulkIDs(cmd, nil)
 	require.Error(t, err)
 }
 
@@ -359,7 +360,7 @@ func TestParseBulkIDs_ZeroID(t *testing.T) {
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", "0")
 
-	_, err := parseBulkIDs(cmd)
+	_, err := parseBulkIDs(cmd, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid ID")
 }
@@ -560,9 +561,9 @@ func TestParseBulkIDs_OnlyCommas(t *testing.T) {
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", ",,,")
 
-	_, err := parseBulkIDs(cmd)
+	_, err := parseBulkIDs(cmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "at least one valid ID")
+	assert.Contains(t, err.Error(), "at least one instance ID is required")
 }
 
 func TestParseBulkIDs_WhitespaceHandling(t *testing.T) {
@@ -570,7 +571,7 @@ func TestParseBulkIDs_WhitespaceHandling(t *testing.T) {
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", " 1 , 2 , 3 ")
 
-	ids, err := parseBulkIDs(cmd)
+	ids, err := parseBulkIDs(cmd, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []uint{1, 2, 3}, ids)
 }
@@ -580,7 +581,88 @@ func TestParseBulkIDs_NegativeID(t *testing.T) {
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", "-1")
 
-	_, err := parseBulkIDs(cmd)
+	_, err := parseBulkIDs(cmd, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid ID")
+}
+
+// ---------- positional and mixed args ----------
+
+func TestParseBulkIDs_PositionalArgs(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("ids", "", "")
+
+	ids, err := parseBulkIDs(cmd, []string{"1", "2", "3"})
+	require.NoError(t, err)
+	assert.Equal(t, []uint{1, 2, 3}, ids)
+}
+
+func TestParseBulkIDs_MixedFlagAndPositional(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("ids", "", "")
+	cmd.Flags().Set("ids", "1,2")
+
+	ids, err := parseBulkIDs(cmd, []string{"3"})
+	require.NoError(t, err)
+	assert.Equal(t, []uint{1, 2, 3}, ids)
+}
+
+func TestParseBulkIDs_MixedDedup(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("ids", "", "")
+	cmd.Flags().Set("ids", "1,2")
+
+	ids, err := parseBulkIDs(cmd, []string{"2", "3"})
+	require.NoError(t, err)
+	assert.Equal(t, []uint{1, 2, 3}, ids)
+}
+
+func TestBulkDeployCmd_PositionalArgs(t *testing.T) {
+	resp := sampleBulkResponse()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/stack-instances/bulk/deploy", r.URL.Path)
+
+		var body types.BulkRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, []uint{1, 2, 3}, body.IDs)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	err := bulkDeployCmd.RunE(bulkDeployCmd, []string{"1", "2", "3"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "ID")
+	assert.Contains(t, out, "STATUS")
+}
+
+func TestBulkDeployCmd_MixedArgs(t *testing.T) {
+	resp := sampleBulkResponse()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body types.BulkRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, []uint{1, 2, 3}, body.IDs)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	bulkDeployCmd.Flags().Set("ids", "1,2")
+	t.Cleanup(func() { bulkDeployCmd.Flags().Set("ids", "") })
+
+	err := bulkDeployCmd.RunE(bulkDeployCmd, []string{"3"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "ID")
 }
