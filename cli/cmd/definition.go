@@ -135,10 +135,12 @@ Examples:
 
 		var req types.CreateDefinitionRequest
 		if fromFile != "" {
-			fromFile = filepath.Clean(fromFile)
-			if strings.Contains(fromFile, "..") {
-				return fmt.Errorf("file path must not contain '..'")
+			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
+				if segment == ".." {
+					return fmt.Errorf("file path must not contain '..' segments")
+				}
 			}
+			fromFile = filepath.Clean(fromFile)
 			data, err := os.ReadFile(fromFile)
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", fromFile, err)
@@ -201,10 +203,12 @@ Examples:
 
 		var req types.UpdateDefinitionRequest
 		if fromFile != "" {
-			fromFile = filepath.Clean(fromFile)
-			if strings.Contains(fromFile, "..") {
-				return fmt.Errorf("file path must not contain '..'")
+			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
+				if segment == ".." {
+					return fmt.Errorf("file path must not contain '..' segments")
+				}
 			}
+			fromFile = filepath.Clean(fromFile)
 			data, err := os.ReadFile(fromFile)
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", fromFile, err)
@@ -317,14 +321,20 @@ Examples:
 
 		outputFile, _ := cmd.Flags().GetString("output-file")
 		if outputFile != "" {
-			outputFile = filepath.Clean(outputFile)
-			if strings.Contains(outputFile, "..") {
-				return fmt.Errorf("output file path must not contain '..'")
+			for _, segment := range strings.Split(filepath.ToSlash(outputFile), "/") {
+				if segment == ".." {
+					return fmt.Errorf("output file path must not contain '..' segments")
+				}
 			}
+			outputFile = filepath.Clean(outputFile)
 			if err := os.WriteFile(outputFile, data, 0600); err != nil {
 				return fmt.Errorf("writing file %s: %w", outputFile, err)
 			}
-			printer.PrintMessage("Exported definition %d to %s", id, outputFile)
+			if printer.Quiet {
+				fmt.Fprintln(printer.Writer, id)
+			} else {
+				printer.PrintMessage("Exported definition %d to %s", id, outputFile)
+			}
 			return nil
 		}
 
@@ -344,10 +354,12 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		file, _ := cmd.Flags().GetString("file")
 
-		file = filepath.Clean(file)
-		if strings.Contains(file, "..") {
-			return fmt.Errorf("file path must not contain '..'")
+		for _, segment := range strings.Split(filepath.ToSlash(file), "/") {
+			if segment == ".." {
+				return fmt.Errorf("file path must not contain '..' segments")
+			}
 		}
+		file = filepath.Clean(file)
 
 		data, err := os.ReadFile(file)
 		if err != nil {

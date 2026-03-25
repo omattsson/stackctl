@@ -413,7 +413,16 @@ func (c *Client) ExportDefinition(id uint) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
+	const maxExportSize = 10 * 1024 * 1024 // 10MB
+	limitedReader := io.LimitReader(resp.Body, maxExportSize+1)
+	data, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return nil, fmt.Errorf("reading export response: %w", err)
+	}
+	if int64(len(data)) > maxExportSize {
+		return nil, fmt.Errorf("export response exceeds maximum size of %d bytes", maxExportSize)
+	}
+	return data, nil
 }
 
 // ImportDefinition imports a stack definition from JSON data
