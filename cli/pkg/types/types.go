@@ -120,14 +120,14 @@ type ListResponse[T any] struct {
 
 // BulkOperationResult represents the result of a bulk operation.
 type BulkOperationResult struct {
-	ID      uint   `json:"id"`
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+	ID      uint   `json:"id" yaml:"id"`
+	Success bool   `json:"success" yaml:"success"`
+	Error   string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 // BulkResponse wraps bulk operation results.
 type BulkResponse struct {
-	Results []BulkOperationResult `json:"results"`
+	Results []BulkOperationResult `json:"results" yaml:"results"`
 }
 
 // ValueOverride represents a per-chart value override.
@@ -178,6 +178,28 @@ type UpdateDefinitionRequest struct {
 	Name        string        `json:"name,omitempty" yaml:"name,omitempty"`
 	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
 	Charts      []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+}
+
+// BulkRequest is the request body for bulk operations.
+type BulkRequest struct {
+	IDs []uint `json:"ids" yaml:"ids"`
+}
+
+// GitValidateResponse represents the result of branch validation.
+type GitValidateResponse struct {
+	Valid   bool   `json:"valid" yaml:"valid"`
+	Branch  string `json:"branch" yaml:"branch"`
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+// ClusterHealthSummary represents a cluster's health summary.
+type ClusterHealthSummary struct {
+	Status    string `json:"status" yaml:"status"`
+	NodeCount int    `json:"node_count" yaml:"node_count"`
+	CPUUsage  string `json:"cpu_usage,omitempty" yaml:"cpu_usage,omitempty"`
+	MemUsage  string `json:"memory_usage,omitempty" yaml:"memory_usage,omitempty"`
+	CPUTotal  string `json:"cpu_total,omitempty" yaml:"cpu_total,omitempty"`
+	MemTotal  string `json:"memory_total,omitempty" yaml:"memory_total,omitempty"`
 }
 
 // ErrorResponse represents an API error response.
