@@ -1685,7 +1685,7 @@ func TestStackCompareCmd_QuietOutput(t *testing.T) {
 	printer.Quiet = true
 	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "43"})
 	require.NoError(t, err)
-	assert.Equal(t, "42 43\n", buf.String())
+	assert.Equal(t, "42\n43\n", buf.String())
 }
 
 func TestStackCompareCmd_InvalidLeftID(t *testing.T) {

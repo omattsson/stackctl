@@ -12,6 +12,7 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var overrideCmd = &cobra.Command{
@@ -86,11 +87,12 @@ var overrideSetCmd = &cobra.Command{
 	Short: "Set value overrides for a chart",
 	Long: `Set value overrides for a specific chart in a stack instance.
 
-Provide values via --file (JSON file) or --set key=value (repeatable).
+Provide values via --file (JSON or YAML file) or --set key=value (repeatable).
 At least one of --file or --set is required.
 
 Examples:
   stackctl override set 42 1 --file values.json
+  stackctl override set 42 1 --file values.yaml
   stackctl override set 42 1 --set replicas=3 --set image.tag=v2
   stackctl override set 42 1 --file values.json --set replicas=5`,
 	Args:         cobra.ExactArgs(2),
@@ -125,8 +127,12 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", file, err)
 			}
+			// Try JSON first, then YAML
 			if err := json.Unmarshal(data, &values); err != nil {
-				return fmt.Errorf("invalid JSON in file %s: %w", file, err)
+				// Try YAML
+				if yamlErr := yaml.Unmarshal(data, &values); yamlErr != nil {
+					return fmt.Errorf("invalid JSON/YAML in file %s: %w", file, err)
+				}
 			}
 		}
 
@@ -135,7 +141,7 @@ Examples:
 			if len(parts) != 2 {
 				return fmt.Errorf("invalid --set format %q: expected key=value", kv)
 			}
-			values[parts[0]] = parts[1]
+			setNestedValue(values, parts[0], parseScalarValue(parts[1]))
 		}
 
 		c, err := newClient()
@@ -214,7 +220,7 @@ Examples:
 		}
 
 		if printer.Quiet {
-			fmt.Fprintf(printer.Writer, "%d %d\n", instanceID, chartID)
+			fmt.Fprintln(printer.Writer, chartID)
 			return nil
 		}
 
@@ -382,7 +388,7 @@ Examples:
 		}
 
 		if printer.Quiet {
-			fmt.Fprintf(printer.Writer, "%d %d\n", instanceID, chartID)
+			fmt.Fprintln(printer.Writer, chartID)
 			return nil
 		}
 
@@ -560,9 +566,51 @@ Examples:
 	},
 }
 
+// parseScalarValue converts a string value to the appropriate Go type.
+func parseScalarValue(s string) interface{} {
+	if s == "true" {
+		return true
+	}
+	if s == "false" {
+		return false
+	}
+	if s == "null" || s == "" {
+		return nil
+	}
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return i
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f
+	}
+	return s
+}
+
+// setNestedValue sets a value in a nested map using a dot-separated key path.
+func setNestedValue(m map[string]interface{}, key string, value interface{}) {
+	parts := strings.Split(key, ".")
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			m[part] = value
+			return
+		}
+		next, ok := m[part]
+		if !ok {
+			next = map[string]interface{}{}
+			m[part] = next
+		}
+		nextMap, ok := next.(map[string]interface{})
+		if !ok {
+			nextMap = map[string]interface{}{}
+			m[part] = nextMap
+		}
+		m = nextMap
+	}
+}
+
 func init() {
 	// override set flags
-	overrideSetCmd.Flags().String("file", "", "JSON file with values")
+	overrideSetCmd.Flags().String("file", "", "JSON or YAML file with values")
 	overrideSetCmd.Flags().StringSlice("set", nil, "Set a value (key=value), repeatable")
 
 	// override delete flags

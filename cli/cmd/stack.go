@@ -626,7 +626,8 @@ Examples:
 		}
 
 		if printer.Quiet {
-			fmt.Fprintf(printer.Writer, "%d %d\n", leftID, rightID)
+			fmt.Fprintln(printer.Writer, leftID)
+			fmt.Fprintln(printer.Writer, rightID)
 			return nil
 		}
 

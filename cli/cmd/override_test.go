@@ -250,7 +250,7 @@ func TestOverrideSetCmd_WithSetFlag(t *testing.T) {
 
 		var body types.SetValueOverrideRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, "3", body.Values["replicas"])
+		assert.Equal(t, float64(3), body.Values["replicas"])
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -309,7 +309,7 @@ func TestOverrideSetCmd_FileAndSetCombined(t *testing.T) {
 		var body types.SetValueOverrideRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		// --set should override the file value for replicas
-		assert.Equal(t, "5", body.Values["replicas"])
+		assert.Equal(t, float64(5), body.Values["replicas"])
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -612,7 +612,7 @@ func TestOverrideDeleteCmd_QuietOutput(t *testing.T) {
 
 	err := overrideDeleteCmd.RunE(overrideDeleteCmd, []string{"42", "1"})
 	require.NoError(t, err)
-	assert.Equal(t, "42 1\n", buf.String())
+	assert.Equal(t, "1\n", buf.String())
 }
 
 func TestOverrideDeleteCmd_InvalidID(t *testing.T) {
@@ -987,7 +987,7 @@ func TestOverrideBranchDeleteCmd_QuietOutput(t *testing.T) {
 
 	err := overrideBranchDeleteCmd.RunE(overrideBranchDeleteCmd, []string{"42", "1"})
 	require.NoError(t, err)
-	assert.Equal(t, "42 1\n", buf.String())
+	assert.Equal(t, "1\n", buf.String())
 }
 
 func TestOverrideBranchDeleteCmd_InvalidID(t *testing.T) {
@@ -1516,4 +1516,125 @@ func TestOverrideQuotaDeleteCmd_NotFound(t *testing.T) {
 	err := overrideQuotaDeleteCmd.RunE(overrideQuotaDeleteCmd, []string{"42"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "quota not found")
+}
+
+// ===================== override set — YAML file =====================
+
+func TestOverrideSetCmd_WithYAMLFile(t *testing.T) {
+	override := sampleValueOverride()
+
+	tmpDir := t.TempDir()
+	fp := filepath.Join(tmpDir, "values.yaml")
+	require.NoError(t, os.WriteFile(fp, []byte("replicas: 3\nimage:\n  tag: v2\n"), 0644))
+
+	var captured map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body types.SetValueOverrideRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		captured = body.Values
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(override)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	overrideSetCmd.Flags().Set("file", fp)
+	t.Cleanup(func() { resetOverrideSetFlags(t) })
+
+	err := overrideSetCmd.RunE(overrideSetCmd, []string{"42", "1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Set value override for chart 1 on instance 42")
+
+	// YAML integers round-trip through JSON as float64
+	assert.Equal(t, float64(3), captured["replicas"])
+	imageMap, ok := captured["image"].(map[string]interface{})
+	require.True(t, ok, "image should be a nested map")
+	assert.Equal(t, "v2", imageMap["tag"])
+}
+
+// ===================== override set — scalar type parsing via --set =====================
+
+func TestOverrideSetCmd_ScalarTypeParsing(t *testing.T) {
+	override := sampleValueOverride()
+
+	var captured map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body types.SetValueOverrideRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		captured = body.Values
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(override)
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	overrideSetCmd.Flags().Set("set", "replicas=3")
+	overrideSetCmd.Flags().Set("set", "enabled=true")
+	overrideSetCmd.Flags().Set("set", "image.tag=v2")
+	t.Cleanup(func() { resetOverrideSetFlags(t) })
+
+	err := overrideSetCmd.RunE(overrideSetCmd, []string{"42", "1"})
+	require.NoError(t, err)
+
+	// Integer: JSON round-trips int64 as float64
+	assert.Equal(t, float64(3), captured["replicas"])
+	// Boolean
+	assert.Equal(t, true, captured["enabled"])
+	// Nested key with string value
+	imageMap, ok := captured["image"].(map[string]interface{})
+	require.True(t, ok, "image should be a nested map")
+	assert.Equal(t, "v2", imageMap["tag"])
+}
+
+// ===================== parseScalarValue =====================
+
+func TestParseScalarValue(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		{"true", true},
+		{"false", false},
+		{"null", nil},
+		{"", nil},
+		{"3", int64(3)},
+		{"3.14", 3.14},
+		{"hello", "hello"},
+		{"0", int64(0)},
+		{"-1", int64(-1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := parseScalarValue(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// ===================== setNestedValue =====================
+
+func TestSetNestedValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		value    interface{}
+		expected map[string]interface{}
+	}{
+		{"simple", "key", "val", map[string]interface{}{"key": "val"}},
+		{"nested", "a.b.c", "val", map[string]interface{}{"a": map[string]interface{}{"b": map[string]interface{}{"c": "val"}}}},
+		{"overwrite", "a", int64(1), map[string]interface{}{"a": int64(1)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := map[string]interface{}{}
+			setNestedValue(m, tt.key, tt.value)
+			assert.Equal(t, tt.expected, m)
+		})
+	}
 }
