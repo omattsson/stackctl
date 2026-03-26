@@ -39,10 +39,10 @@ stackctl config set api-url http://localhost:8081
 stackctl version
 stackctl config list
 
-# 3. Authenticate (coming in Phase 1.2)
+# 3. Authenticate
 stackctl login
 
-# 4. Browse templates and deploy (coming in Phase 2+)
+# 4. Browse templates and deploy
 stackctl template list
 stackctl template quick-deploy 1
 stackctl stack list --mine
@@ -67,8 +67,14 @@ stackctl config set api-key sk_prod_...
 # Switch between contexts
 stackctl config use-context local
 
+# Show current context
+stackctl config current-context
+
 # List all contexts
 stackctl config list
+
+# Delete a context
+stackctl config delete-context staging
 ```
 
 ### Authentication
@@ -159,6 +165,11 @@ stackctl override set 42 3 --set image.tag=v2.0.0
 # Per-chart branch overrides
 stackctl override branch set 42 3 feature/hotfix
 
+# Quota overrides
+stackctl override quota get 42
+stackctl override quota set 42 --cpu 4 --memory 8Gi
+stackctl override quota delete 42
+
 # View merged values
 stackctl stack values 42
 stackctl stack values 42 --chart 3
@@ -172,11 +183,12 @@ stackctl stack compare 42 43
 ```bash
 # Bulk deploy/stop/clean/delete (up to 50 instances)
 stackctl bulk deploy --ids 1,2,3,4,5
+stackctl bulk deploy 1 2 3 4 5          # positional args also work
 stackctl bulk stop --ids 1,2,3
 stackctl bulk clean --ids 1,2,3
 
 # Piping workflows with quiet mode
-stackctl stack list --status stopped --mine -q | xargs -I{} stackctl stack deploy {}
+stackctl stack list --status stopped --mine -q | xargs stackctl bulk deploy
 ```
 
 ### Clusters
@@ -216,10 +228,11 @@ stackctl stack list -q
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--output` | `-o` | Output format: `table`, `json`, `yaml` |
-| `--quiet` | `-q` | Print only IDs (one per line) |
+| `--quiet` | `-q` | Output only IDs (one per line) |
 | `--no-color` | | Disable colored output |
 | `--api-url` | | Override API server URL |
 | `--api-key` | | Override API key |
+| `--insecure` | | Skip TLS certificate verification |
 | `--help` | `-h` | Show help |
 
 ## Shell Completion
@@ -239,7 +252,7 @@ stackctl completion fish > ~/.config/fish/completions/stackctl.fish
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.26+
 - A running [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager) backend for integration/e2e tests (`make dev` in that repo)
 
 ### Getting Started
@@ -257,6 +270,16 @@ go build -o bin/stackctl .
 cli/
   main.go                 # Entry point
   cmd/                    # Cobra commands (one file per command group)
+    config.go             # config set/get/list/use-context/current-context/delete-context
+    login.go              # login, logout, whoami
+    stack.go              # stack lifecycle (13 subcommands)
+    template.go           # template list/get/instantiate/quick-deploy
+    definition.go         # definition CRUD + export/import
+    override.go           # value, branch, and quota overrides
+    bulk.go               # bulk deploy/stop/clean/delete
+    git.go                # git branches/validate
+    cluster.go            # cluster list/get
+    completion.go         # shell completion (bash/zsh/fish/powershell)
   pkg/
     client/               # HTTP client (auth, error handling)
     config/               # Config file management (named contexts)

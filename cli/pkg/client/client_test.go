@@ -1725,3 +1725,393 @@ func TestCompareInstances_Error(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, result)
 }
+
+// ---------- Bulk operations ----------
+
+func TestBulkDeploy_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/bulk/deploy", r.URL.Path)
+		var body types.BulkRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, []uint{1, 2, 3}, body.IDs)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BulkResponse{
+			Results: []types.BulkOperationResult{
+				{ID: 1, Success: true},
+				{ID: 2, Success: true},
+				{ID: 3, Success: false, Error: "not found"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkDeploy([]uint{1, 2, 3})
+	require.NoError(t, err)
+	assert.Len(t, resp.Results, 3)
+	assert.True(t, resp.Results[0].Success)
+	assert.False(t, resp.Results[2].Success)
+	assert.Equal(t, "not found", resp.Results[2].Error)
+}
+
+func TestBulkDeploy_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "unauthorized"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkDeploy([]uint{1, 2})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestBulkStop_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/bulk/stop", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BulkResponse{
+			Results: []types.BulkOperationResult{
+				{ID: 1, Success: true},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkStop([]uint{1})
+	require.NoError(t, err)
+	assert.Len(t, resp.Results, 1)
+	assert.True(t, resp.Results[0].Success)
+}
+
+func TestBulkStop_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "server error"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkStop([]uint{1})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestBulkClean_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/bulk/clean", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BulkResponse{
+			Results: []types.BulkOperationResult{
+				{ID: 5, Success: true},
+				{ID: 6, Success: true},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkClean([]uint{5, 6})
+	require.NoError(t, err)
+	assert.Len(t, resp.Results, 2)
+}
+
+func TestBulkClean_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "forbidden"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkClean([]uint{5, 6})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestBulkDelete_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/bulk/delete", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BulkResponse{
+			Results: []types.BulkOperationResult{
+				{ID: 10, Success: true},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkDelete([]uint{10})
+	require.NoError(t, err)
+	assert.Len(t, resp.Results, 1)
+	assert.True(t, resp.Results[0].Success)
+}
+
+func TestBulkDelete_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkDelete([]uint{999})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+// ---------- Git operations ----------
+
+func TestListGitBranches_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/git/branches", r.URL.Path)
+		assert.Equal(t, "https://github.com/org/repo", r.URL.Query().Get("repo"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.GitBranch{
+			{Name: "main", IsHead: true},
+			{Name: "develop", IsHead: false},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	branches, err := c.ListGitBranches("https://github.com/org/repo")
+	require.NoError(t, err)
+	assert.Len(t, branches, 2)
+	assert.Equal(t, "main", branches[0].Name)
+	assert.True(t, branches[0].IsHead)
+}
+
+func TestListGitBranches_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "repository not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	branches, err := c.ListGitBranches("https://github.com/org/nonexistent")
+	require.Error(t, err)
+	assert.Nil(t, branches)
+}
+
+func TestListGitBranches_Empty(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.GitBranch{})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	branches, err := c.ListGitBranches("https://github.com/org/empty")
+	require.NoError(t, err)
+	assert.Empty(t, branches)
+}
+
+func TestValidateGitBranch_Valid(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/git/validate", r.URL.Path)
+		assert.Equal(t, "https://github.com/org/repo", r.URL.Query().Get("repo"))
+		assert.Equal(t, "main", r.URL.Query().Get("branch"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.GitValidateResponse{
+			Valid:  true,
+			Branch: "main",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ValidateGitBranch("https://github.com/org/repo", "main")
+	require.NoError(t, err)
+	assert.True(t, resp.Valid)
+	assert.Equal(t, "main", resp.Branch)
+}
+
+func TestValidateGitBranch_Invalid(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.GitValidateResponse{
+			Valid:   false,
+			Branch:  "nonexistent",
+			Message: "branch does not exist",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ValidateGitBranch("https://github.com/org/repo", "nonexistent")
+	require.NoError(t, err)
+	assert.False(t, resp.Valid)
+	assert.Equal(t, "branch does not exist", resp.Message)
+}
+
+func TestValidateGitBranch_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "internal error"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ValidateGitBranch("https://github.com/org/repo", "main")
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+// ---------- Cluster operations ----------
+
+func TestListClusters_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
+			Data:       []types.Cluster{{Base: types.Base{ID: 1}, Name: "dev-cluster", Status: "online"}},
+			Total:      1,
+			Page:       1,
+			PageSize:   20,
+			TotalPages: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ListClusters()
+	require.NoError(t, err)
+	assert.Equal(t, 1, resp.Total)
+	assert.Len(t, resp.Data, 1)
+	assert.Equal(t, "dev-cluster", resp.Data[0].Name)
+}
+
+func TestListClusters_Empty(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
+			Data: []types.Cluster{}, Total: 0, Page: 1, PageSize: 20, TotalPages: 0,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ListClusters()
+	require.NoError(t, err)
+	assert.Equal(t, 0, resp.Total)
+	assert.Empty(t, resp.Data)
+}
+
+func TestListClusters_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "unauthorized"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ListClusters()
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestGetCluster_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.Cluster{
+			Base:      types.Base{ID: 1},
+			Name:      "dev-cluster",
+			Status:    "online",
+			IsDefault: true,
+			NodeCount: 3,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	cluster, err := c.GetCluster(1)
+	require.NoError(t, err)
+	assert.Equal(t, uint(1), cluster.ID)
+	assert.Equal(t, "dev-cluster", cluster.Name)
+	assert.True(t, cluster.IsDefault)
+}
+
+func TestGetCluster_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	cluster, err := c.GetCluster(999)
+	require.Error(t, err)
+	assert.Nil(t, cluster)
+}
+
+func TestGetClusterHealth_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/health/summary", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ClusterHealthSummary{
+			Status:    "healthy",
+			NodeCount: 3,
+			CPUUsage:  "2.5",
+			MemUsage:  "4Gi",
+			CPUTotal:  "8",
+			MemTotal:  "16Gi",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	health, err := c.GetClusterHealth(1)
+	require.NoError(t, err)
+	assert.Equal(t, "healthy", health.Status)
+	assert.Equal(t, "2.5", health.CPUUsage)
+	assert.Equal(t, "16Gi", health.MemTotal)
+}
+
+func TestGetClusterHealth_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster unreachable"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	health, err := c.GetClusterHealth(1)
+	require.Error(t, err)
+	assert.Nil(t, health)
+}

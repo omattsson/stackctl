@@ -85,7 +85,7 @@ func (p *Printer) StatusColor(status string) string {
 		return status
 	}
 	switch strings.ToLower(status) {
-	case "running", "deployed", "healthy", "online":
+	case "running", "deployed", "healthy", "online", "success":
 		return colorGreen + status + colorReset
 	case "error", "failed", "unhealthy", "offline":
 		return colorRed + status + colorReset

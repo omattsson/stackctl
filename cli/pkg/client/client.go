@@ -562,3 +562,93 @@ func (c *Client) CompareInstances(leftID, rightID uint) (*types.CompareResult, e
 	}
 	return &result, nil
 }
+
+// BulkDeploy triggers deployment for multiple stack instances.
+func (c *Client) BulkDeploy(ids []uint) (*types.BulkResponse, error) {
+	var resp types.BulkResponse
+	err := c.Post("/api/v1/stack-instances/bulk/deploy", types.BulkRequest{IDs: ids}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// BulkStop stops multiple stack instances.
+func (c *Client) BulkStop(ids []uint) (*types.BulkResponse, error) {
+	var resp types.BulkResponse
+	err := c.Post("/api/v1/stack-instances/bulk/stop", types.BulkRequest{IDs: ids}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// BulkClean undeploys and removes namespaces for multiple stack instances.
+func (c *Client) BulkClean(ids []uint) (*types.BulkResponse, error) {
+	var resp types.BulkResponse
+	err := c.Post("/api/v1/stack-instances/bulk/clean", types.BulkRequest{IDs: ids}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// BulkDelete deletes multiple stack instances.
+func (c *Client) BulkDelete(ids []uint) (*types.BulkResponse, error) {
+	var resp types.BulkResponse
+	err := c.Post("/api/v1/stack-instances/bulk/delete", types.BulkRequest{IDs: ids}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListGitBranches returns branches for a git repository.
+func (c *Client) ListGitBranches(repo string) ([]types.GitBranch, error) {
+	var branches []types.GitBranch
+	err := c.GetWithQuery("/api/v1/git/branches", map[string]string{"repo": repo}, &branches)
+	if err != nil {
+		return nil, err
+	}
+	return branches, nil
+}
+
+// ValidateGitBranch validates whether a branch exists in a git repository.
+func (c *Client) ValidateGitBranch(repo, branch string) (*types.GitValidateResponse, error) {
+	var resp types.GitValidateResponse
+	err := c.GetWithQuery("/api/v1/git/validate", map[string]string{"repo": repo, "branch": branch}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListClusters returns a paginated list of clusters.
+func (c *Client) ListClusters() (*types.ListResponse[types.Cluster], error) {
+	var resp types.ListResponse[types.Cluster]
+	err := c.Get("/api/v1/clusters", &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetCluster returns a single cluster by ID.
+func (c *Client) GetCluster(id uint) (*types.Cluster, error) {
+	var cluster types.Cluster
+	err := c.Get(fmt.Sprintf("/api/v1/clusters/%d", id), &cluster)
+	if err != nil {
+		return nil, err
+	}
+	return &cluster, nil
+}
+
+// GetClusterHealth returns the health summary for a cluster.
+func (c *Client) GetClusterHealth(id uint) (*types.ClusterHealthSummary, error) {
+	var health types.ClusterHealthSummary
+	err := c.Get(fmt.Sprintf("/api/v1/clusters/%d/health/summary", id), &health)
+	if err != nil {
+		return nil, err
+	}
+	return &health, nil
+}

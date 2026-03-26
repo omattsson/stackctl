@@ -30,12 +30,13 @@ You are a senior Go engineer specializing in CLI tools. Implement the requested 
 
 ## Flag Conventions
 - `--output`, `-o` — output format (table|json|yaml)
-- `--quiet`, `-q` — ID-only output
+- `--quiet`, `-q` — ID-only output (one per line, for piping)
 - `--yes`, `-y` — skip confirmation prompts
 - `--mine` — filter to current user
 - `--status` — filter by status
 - `--cluster` — filter by cluster
-- Entity-specific flags use full names: `--definition`, `--branch`, `--ttl`, `--name`
+- `--ids` — comma-separated IDs for bulk operations (also accepts positional args)
+- Entity-specific flags use full names: `--definition`, `--branch`, `--ttl`, `--name`, `--repo`, `--file`, `--set`
 
 ## Error Handling
 - HTTP client returns typed errors; commands print user-friendly messages

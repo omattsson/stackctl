@@ -11,17 +11,18 @@ cli/
   main.go                     # Entry point
   cmd/
     root.go                   # Root cobra command, global flags, config loading
-    config.go                 # config set/get/list/use-context
+    config.go                 # config set/get/list/use-context/current-context/delete-context
     version.go                # Version info (build-time ldflags)
     login.go                  # login, logout, whoami
-    stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend
+    token.go                  # Token storage helpers (save/load/delete JWT)
+    stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend/values/compare
     template.go               # template list/get/instantiate/quick-deploy
     definition.go             # definition list/get/create/update/delete/export/import
     override.go               # override list/set/delete, branch overrides, quota overrides
-    bulk.go                   # bulk deploy/stop/clean/delete
+    bulk.go                   # bulk deploy/stop/clean/delete (--ids flag or positional args)
     git.go                    # git branches/validate
-    cluster.go                # cluster list/get
-    completion.go             # Shell completion generation
+    cluster.go                # cluster list/get (with health summary)
+    completion.go             # Shell completion generation (bash/zsh/fish/powershell)
   pkg/
     client/
       client.go              # HTTP client wrapper (auth headers, base URL, error handling)
@@ -31,17 +32,26 @@ cli/
       config.go              # Viper-based config (~/.stackmanager/config.yaml)
     output/
       output.go              # Table, JSON, YAML formatters
+  test/
+    e2e/
+      cli_e2e_test.go        # Binary execution end-to-end tests
+    integration/
+      auth_integration_test.go
+      config_integration_test.go
+      override_integration_test.go
+      stack_integration_test.go
+      template_definition_integration_test.go
 ```
 
 ## Development Commands
 
 | Task | Command |
 |------|---------|
-| Build | `make build` → `bin/stackctl` |
-| Build all platforms | `make build-all` |
-| Run tests | `make test` or `go test ./... -v` |
-| Lint | `make lint` (`go vet` + `staticcheck`) |
-| Install | `make install` → `$GOPATH/bin/stackctl` |
+| Build | `cd cli && go build -o bin/stackctl .` |
+| Run tests | `cd cli && go test ./... -v` |
+| Lint | `cd cli && go vet ./...` |
+| Coverage | `cd cli && go test ./pkg/... ./cmd/ -coverprofile=coverage.out && go tool cover -func=coverage.out` |
+| Install | `cd cli && go install .` → `$GOPATH/bin/stackctl` |
 
 ## CLI Patterns
 
@@ -49,7 +59,7 @@ cli/
 
 **Flag precedence**: flag > environment variable > config file. Viper binds all three. Environment variables use `STACKCTL_` prefix.
 
-**Global flags**: `--output table|json|yaml`, `--quiet`, `--api-url`, `--api-key`, `--no-color`
+**Global flags**: `--output table|json|yaml`, `--quiet`, `--api-url`, `--api-key`, `--no-color`, `--insecure`
 
 **Output modes**:
 - `table` (default): human-readable with colored status badges
@@ -114,7 +124,7 @@ Backend: [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager)
 
 All API calls go to `/api/v1/*`. Key route groups:
 - `/api/v1/auth` — login, register, current user
-- `/api/v1/stack-instances` — CRUD + deploy/stop/clean/status/logs/clone/extend
+- `/api/v1/stack-instances` — CRUD + deploy/stop/clean/status/logs/clone/extend/values/compare
 - `/api/v1/stack-instances/bulk` — bulk operations
 - `/api/v1/stack-definitions` — CRUD + export/import
 - `/api/v1/templates` — list/get/instantiate/quick-deploy
