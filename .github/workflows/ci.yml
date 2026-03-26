@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.1'
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
       - run: make test
 
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.1'
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
       - run: go install honnef.co/go/tools/cmd/staticcheck@2026.1
       - run: make lint
@@ -53,6 +53,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.1'
+          go-version-file: cli/go.mod
           cache-dependency-path: cli/go.sum
       - run: make build-all

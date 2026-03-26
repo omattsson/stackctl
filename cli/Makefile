@@ -42,7 +42,7 @@ coverage:
 	go tool cover -func=coverage.out
 
 install:
-	go install -ldflags "$(LDFLAGS)" .
+	CGO_ENABLED=0 go install -ldflags "$(LDFLAGS)" .
 
 clean:
 	rm -rf bin/
