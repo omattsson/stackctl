@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -276,7 +277,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will undeploy and remove the namespace for stack %d. Continue? (y/n): ", id)
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
@@ -329,7 +330,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete stack %d. Continue? (y/n): ", id)
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {

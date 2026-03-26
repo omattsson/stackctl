@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -263,7 +264,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete definition %d. Continue? (y/n): ", id)
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {

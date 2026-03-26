@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -201,7 +202,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will delete the value override for chart %d on instance %d. Continue? (y/n): ", chartID, instanceID)
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
@@ -369,7 +370,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will delete the branch override for chart %d on instance %d. Continue? (y/n): ", chartID, instanceID)
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
@@ -538,7 +539,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will delete the quota override for instance %d. Continue? (y/n): ", instanceID)
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil {
+			if err != nil && err != io.EOF {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {

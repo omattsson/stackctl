@@ -8,6 +8,7 @@ applyTo: "cli/**_test.go"
 - Use `testify/assert` for non-fatal assertions and `testify/require` for fatal ones
 - Table-driven tests with `t.Parallel()` on parent and subtests
 - Capture range variable: `tt := tt` inside the loop
+- **Exception**: `cli/cmd/` tests must NOT use `t.Parallel()` because setup helpers (e.g. `setupStackTestCmd`) mutate package-level globals (`cfg`, `printer`, `flagAPIURL`)
 
 ## API Mocking
 Always use `httptest.NewServer` — never call a real API in unit tests.
