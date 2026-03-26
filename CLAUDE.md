@@ -11,7 +11,7 @@ cli/
   main.go                     # Entry point
   cmd/
     root.go                   # Root cobra command, global flags, config loading
-    config.go                 # config set/get/list/use-context
+    config.go                 # config set/get/list/use-context/current-context/delete-context
     version.go                # Version info (build-time ldflags)
     login.go                  # login, logout, whoami
     token.go                  # Token storage helpers (save/load/delete JWT)
@@ -47,11 +47,11 @@ cli/
 
 | Task | Command |
 |------|---------|
-| Build | `make build` → `bin/stackctl` |
-| Build all platforms | `make build-all` |
-| Run tests | `make test` or `go test ./... -v` |
-| Lint | `make lint` (`go vet` + `staticcheck`) |
-| Install | `make install` → `$GOPATH/bin/stackctl` |
+| Build | `cd cli && go build -o bin/stackctl .` |
+| Run tests | `cd cli && go test ./... -v` |
+| Lint | `cd cli && go vet ./...` |
+| Coverage | `cd cli && go test ./pkg/... ./cmd/ -coverprofile=coverage.out && go tool cover -func=coverage.out` |
+| Install | `cd cli && go install .` → `$GOPATH/bin/stackctl` |
 
 ## CLI Patterns
 
@@ -124,7 +124,7 @@ Backend: [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager)
 
 All API calls go to `/api/v1/*`. Key route groups:
 - `/api/v1/auth` — login, register, current user
-- `/api/v1/stack-instances` — CRUD + deploy/stop/clean/status/logs/clone/extend
+- `/api/v1/stack-instances` — CRUD + deploy/stop/clean/status/logs/clone/extend/values/compare
 - `/api/v1/stack-instances/bulk` — bulk operations
 - `/api/v1/stack-definitions` — CRUD + export/import
 - `/api/v1/templates` — list/get/instantiate/quick-deploy

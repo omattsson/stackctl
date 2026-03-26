@@ -67,8 +67,14 @@ stackctl config set api-key sk_prod_...
 # Switch between contexts
 stackctl config use-context local
 
+# Show current context
+stackctl config current-context
+
 # List all contexts
 stackctl config list
+
+# Delete a context
+stackctl config delete-context staging
 ```
 
 ### Authentication
@@ -158,6 +164,11 @@ stackctl override set 42 3 --set image.tag=v2.0.0
 
 # Per-chart branch overrides
 stackctl override branch set 42 3 feature/hotfix
+
+# Quota overrides
+stackctl override quota get 42
+stackctl override quota set 42 --cpu 4 --memory 8Gi
+stackctl override quota delete 42
 
 # View merged values
 stackctl stack values 42
@@ -259,7 +270,7 @@ go build -o bin/stackctl .
 cli/
   main.go                 # Entry point
   cmd/                    # Cobra commands (one file per command group)
-    config.go             # config set/get/list/use-context
+    config.go             # config set/get/list/use-context/current-context/delete-context
     login.go              # login, logout, whoami
     stack.go              # stack lifecycle (13 subcommands)
     template.go           # template list/get/instantiate/quick-deploy

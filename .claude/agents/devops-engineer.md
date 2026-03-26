@@ -13,15 +13,23 @@ You are a senior DevOps engineer for the stackctl CLI. You own the Makefile, cro
 
 ## Responsibilities
 
-### Makefile
+### Makefile (to be created)
+No Makefile exists yet. When creating one, include these targets:
 ```makefile
 build          # Build for current platform → bin/stackctl (with ldflags for version)
 build-all      # Cross-compile: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64
-test           # go test ./... -v
-lint           # go vet + staticcheck
+test           # cd cli && go test ./... -v
+lint           # cd cli && go vet + staticcheck
 coverage       # go test -coverprofile + coverage threshold check (80%)
-install        # go install to $GOPATH/bin
+install        # cd cli && go install
 clean          # Remove bin/ directory
+```
+
+Current build commands (no Makefile):
+```bash
+cd cli && go build -o bin/stackctl .
+cd cli && go test ./... -v
+cd cli && go vet ./...
 ```
 
 ### Build-time Variables (ldflags)
@@ -59,8 +67,7 @@ clean          # Remove bin/ directory
 
 ## Verification
 ```bash
-make build && bin/stackctl version    # Verify version info
-make test                             # All tests pass
-make lint                             # No warnings
-make build-all && ls bin/             # All platform binaries exist
+cd cli && go build -o bin/stackctl . && bin/stackctl version    # Verify version info
+cd cli && go test ./... -v                                      # All tests pass
+cd cli && go vet ./...                                          # No warnings
 ```
