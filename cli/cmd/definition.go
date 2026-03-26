@@ -264,7 +264,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete definition %d. Continue? (y/n): ", id)
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil && err != io.EOF {
+			if err != nil && (err != io.EOF || answer == "") {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {

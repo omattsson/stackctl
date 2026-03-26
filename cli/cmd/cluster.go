@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
@@ -97,9 +99,17 @@ Examples:
 		}
 
 		var health *types.ClusterHealthSummary
-		var healthErr error
 		if !printer.Quiet {
-			health, healthErr = c.GetClusterHealth(id)
+			h, err := c.GetClusterHealth(id)
+			if err != nil {
+				// Degrade gracefully for expected unavailability; propagate other errors
+				var apiErr *client.APIError
+				if !errors.As(err, &apiErr) || (apiErr.StatusCode != 404 && apiErr.StatusCode != 503) {
+					return err
+				}
+			} else {
+				health = h
+			}
 		}
 
 		if printer.Quiet {
@@ -112,7 +122,7 @@ Examples:
 			combined := map[string]interface{}{
 				"cluster": cluster,
 			}
-			if healthErr == nil {
+			if health != nil {
 				combined["health"] = health
 			}
 			return printer.PrintJSON(combined)
@@ -120,7 +130,7 @@ Examples:
 			combined := map[string]interface{}{
 				"cluster": cluster,
 			}
-			if healthErr == nil {
+			if health != nil {
 				combined["health"] = health
 			}
 			return printer.PrintYAML(combined)
@@ -137,7 +147,7 @@ Examples:
 				{Key: "Default", Value: isDefault},
 				{Key: "Nodes", Value: strconv.Itoa(cluster.NodeCount)},
 			}
-			if healthErr == nil {
+			if health != nil {
 				fields = append(fields,
 					output.KeyValue{Key: "Health Status", Value: printer.StatusColor(health.Status)},
 					output.KeyValue{Key: "CPU Usage", Value: health.CPUUsage},
