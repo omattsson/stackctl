@@ -110,7 +110,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will clean %d stack instances. Continue? (y/n): ", len(ids))
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil && err != io.EOF {
+			if err != nil && (err != io.EOF || answer == "") {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
@@ -159,7 +159,7 @@ Examples:
 			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete %d stack instances. Continue? (y/n): ", len(ids))
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
-			if err != nil && err != io.EOF {
+			if err != nil && (err != io.EOF || answer == "") {
 				return fmt.Errorf("reading confirmation: %w", err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
