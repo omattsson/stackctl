@@ -1,0 +1,10 @@
+.git
+cli/bin
+cli/dist
+cli/coverage.out
+.github
+.claude
+.goreleaser.yml
+cli/Makefile
+*.md
+LICENSE

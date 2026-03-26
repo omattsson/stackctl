@@ -1,0 +1,65 @@
+version: 2
+
+project_name: stackctl
+
+dist: cli/dist
+
+builds:
+  - dir: cli
+    main: .
+    binary: stackctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge"
+
+brews:
+  - repository:
+      owner: omattsson
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/omattsson/stackctl
+    description: CLI for managing Kubernetes stack deployments via k8s-stack-manager
+    license: MIT
+    install: |
+      bin.install "stackctl"
+    test: |
+      system "#{bin}/stackctl", "version"
+
+release:
+  github:
+    owner: omattsson
+    name: stackctl
+  draft: false
