@@ -12,9 +12,11 @@ PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 .PHONY: build build-all test lint coverage install clean
 
 build:
+	@mkdir -p bin
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME) .
 
 build-all:
+	@mkdir -p bin
 	@for platform in $(PLATFORMS); do \
 		os=$${platform%/*}; \
 		arch=$${platform#*/}; \
