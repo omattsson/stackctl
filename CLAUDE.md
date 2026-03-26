@@ -65,7 +65,7 @@ cli/
 - `table` (default): human-readable with colored status badges
 - `json`: machine-readable, full API response
 - `yaml`: machine-readable, full API response
-- `--quiet`: minimal output — IDs or identifiers, one per line (pipeable to `xargs`)
+- `--quiet`: IDs only, one per line (pipeable to `xargs`)
 
 **Destructive operations**: Commands that delete or clean resources must prompt for confirmation. `--yes` flag skips the prompt.
 

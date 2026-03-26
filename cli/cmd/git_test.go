@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/omattsson/stackctl/cli/pkg/output"
@@ -81,28 +80,6 @@ func TestGitBranchesCmd_JSONOutput(t *testing.T) {
 	assert.Len(t, result, 3)
 	assert.Equal(t, "main", result[0].Name)
 	assert.True(t, result[0].IsHead)
-}
-
-func TestGitBranchesCmd_QuietOutput(t *testing.T) {
-	branches := sampleBranches()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(branches)
-	}))
-	defer server.Close()
-
-	buf := setupGitTestCmd(t, server.URL)
-	printer.Quiet = true
-
-	gitBranchesCmd.Flags().Set("repo", "https://github.com/org/repo")
-	t.Cleanup(func() { gitBranchesCmd.Flags().Set("repo", "") })
-
-	err := gitBranchesCmd.RunE(gitBranchesCmd, []string{})
-	require.NoError(t, err)
-
-	lines := strings.TrimSpace(buf.String())
-	assert.Equal(t, "main\ndevelop\nfeature/xyz", lines)
 }
 
 func TestGitBranchesCmd_YAMLOutput(t *testing.T) {
@@ -260,61 +237,6 @@ func TestGitValidateCmd_JSONOutput(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.True(t, result.Valid)
 	assert.Equal(t, "main", result.Branch)
-}
-
-func TestGitValidateCmd_QuietOutput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.GitValidateResponse{
-			Valid:  true,
-			Branch: "main",
-		})
-	}))
-	defer server.Close()
-
-	buf := setupGitTestCmd(t, server.URL)
-	printer.Quiet = true
-
-	gitValidateCmd.Flags().Set("repo", "https://github.com/org/repo")
-	gitValidateCmd.Flags().Set("branch", "main")
-	t.Cleanup(func() {
-		gitValidateCmd.Flags().Set("repo", "")
-		gitValidateCmd.Flags().Set("branch", "")
-	})
-
-	err := gitValidateCmd.RunE(gitValidateCmd, []string{})
-	require.NoError(t, err)
-
-	assert.Equal(t, "true\n", buf.String())
-}
-
-func TestGitValidateCmd_QuietOutput_False(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.GitValidateResponse{
-			Valid:   false,
-			Branch:  "nonexistent",
-			Message: "branch does not exist",
-		})
-	}))
-	defer server.Close()
-
-	buf := setupGitTestCmd(t, server.URL)
-	printer.Quiet = true
-
-	gitValidateCmd.Flags().Set("repo", "https://github.com/org/repo")
-	gitValidateCmd.Flags().Set("branch", "nonexistent")
-	t.Cleanup(func() {
-		gitValidateCmd.Flags().Set("repo", "")
-		gitValidateCmd.Flags().Set("branch", "")
-	})
-
-	err := gitValidateCmd.RunE(gitValidateCmd, []string{})
-	require.NoError(t, err)
-
-	assert.Equal(t, "false\n", buf.String())
 }
 
 func TestGitValidateCmd_YAMLOutput(t *testing.T) {

@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/spf13/cobra"
 )
@@ -34,13 +31,6 @@ Examples:
 		branches, err := c.ListGitBranches(repo)
 		if err != nil {
 			return err
-		}
-
-		if printer.Quiet {
-			for _, b := range branches {
-				fmt.Fprintln(printer.Writer, b.Name)
-			}
-			return nil
 		}
 
 		switch printer.Format {
@@ -84,11 +74,6 @@ Examples:
 		resp, err := c.ValidateGitBranch(repo, branch)
 		if err != nil {
 			return err
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, strconv.FormatBool(resp.Valid))
-			return nil
 		}
 
 		switch printer.Format {

@@ -208,7 +208,7 @@ stackctl stack list -o json
 # YAML — machine-readable
 stackctl stack list -o yaml
 
-# Quiet — IDs or identifiers, one per line (for piping)
+# Quiet — IDs only, one per line (for piping)
 stackctl stack list -q
 ```
 
@@ -217,7 +217,7 @@ stackctl stack list -q
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--output` | `-o` | Output format: `table`, `json`, `yaml` |
-| `--quiet` | `-q` | Minimal output (IDs or identifiers, one per line) |
+| `--quiet` | `-q` | Output only IDs (one per line) |
 | `--no-color` | | Disable colored output |
 | `--api-url` | | Override API server URL |
 | `--api-key` | | Override API key |
