@@ -44,11 +44,11 @@ test:
 
 lint:
 	go vet ./...
-	@if command -v staticcheck >/dev/null 2>&1; then \
-		staticcheck ./...; \
-	else \
-		echo "staticcheck not installed, skipping (run 'make tools' to install staticcheck@$(STATICCHECK_VERSION))"; \
+	@if ! command -v staticcheck >/dev/null 2>&1; then \
+		echo "Error: staticcheck is not installed. Run 'make tools' to install staticcheck@$(STATICCHECK_VERSION)"; \
+		exit 1; \
 	fi
+	staticcheck ./...
 
 coverage:
 	go test ./... -coverprofile=coverage.out
