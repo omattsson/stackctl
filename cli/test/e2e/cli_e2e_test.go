@@ -1026,42 +1026,54 @@ func startE2EQuietPipingMockServer(t *testing.T) *httptest.Server {
 
 		// Bulk deploy
 		case r.URL.Path == "/api/v1/stack-instances/bulk/deploy" && r.Method == http.MethodPost:
-			var req map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&req)
+			var req struct {
+				IDs []uint `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"results": []map[string]interface{}{
-					{"id": 1, "success": true},
-					{"id": 2, "success": true},
-					{"id": 3, "success": true},
-				},
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
 
 		// Bulk stop
 		case r.URL.Path == "/api/v1/stack-instances/bulk/stop" && r.Method == http.MethodPost:
-			var req map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&req)
+			var req struct {
+				IDs []uint `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"results": []map[string]interface{}{
-					{"id": 1, "success": true},
-					{"id": 2, "success": true},
-					{"id": 3, "success": true},
-				},
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
 
 		// Bulk delete
 		case r.URL.Path == "/api/v1/stack-instances/bulk/delete" && r.Method == http.MethodPost:
-			var req map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&req)
+			var req struct {
+				IDs []uint `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"results": []map[string]interface{}{
-					{"id": 1, "success": true},
-					{"id": 2, "success": true},
-					{"id": 3, "success": true},
-				},
-			})
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
 
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -1089,31 +1101,34 @@ func TestE2E_QuietPipingWorkflow(t *testing.T) {
 	// 2. Parse the quiet output to extract IDs — validates the format
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
 	require.Len(t, lines, 3)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		assert.Regexp(t, `^\d+$`, line, "each line should be a numeric ID only")
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+		assert.Regexp(t, `^\d+$`, lines[i], "each line should be a numeric ID only")
 	}
 
-	// 3. Run bulk deploy --ids 1,2,3 → verify success
-	stdout, _, err = runStackctl(t, dir, "bulk", "deploy", "--ids", "1,2,3")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "1")
-	assert.Contains(t, stdout, "2")
-	assert.Contains(t, stdout, "3")
+	// 3. Build the --ids argument from the quiet output to simulate piping workflow
+	idsCSV := strings.Join(lines, ",")
 
-	// 4. Run bulk stop --ids 1,2,3 → verify success
-	stdout, _, err = runStackctl(t, dir, "bulk", "stop", "--ids", "1,2,3")
+	// 4. Run bulk deploy --ids <derived> → verify success
+	stdout, _, err = runStackctl(t, dir, "bulk", "deploy", "--ids", idsCSV)
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "1")
-	assert.Contains(t, stdout, "2")
-	assert.Contains(t, stdout, "3")
+	for _, id := range lines {
+		assert.Contains(t, stdout, id)
+	}
 
-	// 5. Run bulk delete --ids 1,2,3 --yes → verify success (needs --yes to skip confirmation)
-	stdout, _, err = runStackctl(t, dir, "bulk", "delete", "--ids", "1,2,3", "--yes")
+	// 5. Run bulk stop --ids <derived> → verify success
+	stdout, _, err = runStackctl(t, dir, "bulk", "stop", "--ids", idsCSV)
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "1")
-	assert.Contains(t, stdout, "2")
-	assert.Contains(t, stdout, "3")
+	for _, id := range lines {
+		assert.Contains(t, stdout, id)
+	}
+
+	// 6. Run bulk delete --ids <derived> --yes → verify success (needs --yes to skip confirmation)
+	stdout, _, err = runStackctl(t, dir, "bulk", "delete", "--ids", idsCSV, "--yes")
+	require.NoError(t, err)
+	for _, id := range lines {
+		assert.Contains(t, stdout, id)
+	}
 }
 
 func TestE2E_QuietOutputFormat(t *testing.T) {

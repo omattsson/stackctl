@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// roundTripFunc adapts a plain function into an http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // ---------- Expired Token / 401 Handling ----------
 
@@ -99,12 +105,11 @@ func TestEdgeCase_ExpiredTokenHandling(t *testing.T) {
 func TestEdgeCase_NetworkErrors(t *testing.T) {
 	t.Parallel()
 
-	// Create a server and immediately close it to get a connection-refused endpoint
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	closedURL := server.URL
-	server.Close()
-
-	c := client.New(closedURL)
+	// Use a custom RoundTripper that always returns an error for deterministic failure.
+	c := client.New("http://unreachable.invalid")
+	c.HTTPClient.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("simulated network error")
+	})
 
 	tests := []struct {
 		name string
