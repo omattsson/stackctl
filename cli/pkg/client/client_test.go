@@ -255,13 +255,13 @@ func TestAPIError_UserFacingError(t *testing.T) {
 		message    string
 		want       string
 	}{
-		{name: "401", statusCode: 401, message: "invalid", want: "Not authenticated. Run 'stackctl login' first."},
-		{name: "403", statusCode: 403, message: "denied", want: "Permission denied."},
+		{name: "401", statusCode: 401, message: "invalid", want: "Not authenticated. Run 'stackctl login' first. (server: invalid)"},
+		{name: "403", statusCode: 403, message: "denied", want: "Permission denied. (server: denied)"},
 		{name: "404", statusCode: 404, message: "not found", want: "Resource not found: not found"},
 		{name: "409", statusCode: 409, message: "version mismatch", want: "Conflict: version mismatch"},
-		{name: "429", statusCode: 429, message: "slow down", want: "Rate limited. Try again later."},
-		{name: "500", statusCode: 500, message: "oops", want: "Server error. Check backend logs."},
-		{name: "502", statusCode: 502, message: "oops", want: "Server error. Check backend logs."},
+		{name: "429", statusCode: 429, message: "slow down", want: "Rate limited. Try again later. (server: slow down)"},
+		{name: "500", statusCode: 500, message: "oops", want: "Server error. Check backend logs. (server: oops)"},
+		{name: "502", statusCode: 502, message: "oops", want: "Server error. Check backend logs. (server: oops)"},
 		{name: "400", statusCode: 400, message: "bad input", want: "bad input"},
 	}
 	for _, tt := range tests {
@@ -504,7 +504,7 @@ func TestWhoami_Unauthorized(t *testing.T) {
 	apiErr, ok := err.(*APIError)
 	require.True(t, ok)
 	assert.Equal(t, http.StatusUnauthorized, apiErr.StatusCode)
-	assert.Equal(t, "Not authenticated. Run 'stackctl login' first.", apiErr.UserFacingError())
+	assert.Equal(t, "Not authenticated. Run 'stackctl login' first. (server: token expired)", apiErr.UserFacingError())
 }
 
 func TestWhoami_WithAPIKey(t *testing.T) {

@@ -21,8 +21,9 @@ func SetVersionInfo(version, commit, date string) {
 }
 
 var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print version information",
+	Use:          "version",
+	Short:        "Print version information",
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		versionInfo := map[string]string{
 			"version": buildVersion,

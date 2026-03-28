@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -640,7 +641,13 @@ Examples:
 		default:
 			headers := []string{"FIELD", "LEFT", "RIGHT"}
 			var rows [][]string
-			for field, val := range result.Diffs {
+			fields := make([]string, 0, len(result.Diffs))
+			for field := range result.Diffs {
+				fields = append(fields, field)
+			}
+			sort.Strings(fields)
+			for _, field := range fields {
+				val := result.Diffs[field]
 				if diffMap, ok := val.(map[string]interface{}); ok {
 					left := fmt.Sprintf("%v", diffMap["left"])
 					right := fmt.Sprintf("%v", diffMap["right"])

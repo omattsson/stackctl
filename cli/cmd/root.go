@@ -41,6 +41,17 @@ Get started:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Initialize printer with Cobra's configured output writer
+		printer = output.NewPrinter(flagOutput, flagQuiet, flagNoColor)
+		printer.Writer = cmd.OutOrStdout()
+
+		// Skip config loading for commands that should work without a config file
+		name := cmd.Name()
+		if name == "version" || name == "completion" || (cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
+			cfg = &config.Config{Contexts: map[string]*config.Context{}}
+			return nil
+		}
+
 		// Load config
 		var err error
 		cfg, err = config.Load()
@@ -48,9 +59,14 @@ Get started:
 			return err
 		}
 
-		// Initialize printer with Cobra's configured output writer
-		printer = output.NewPrinter(flagOutput, flagQuiet, flagNoColor)
-		printer.Writer = cmd.OutOrStdout()
+		// Warn when TLS verification is disabled
+		insecure := flagInsecure
+		if !insecure && cfg.CurrentCtx() != nil {
+			insecure = cfg.CurrentCtx().Insecure
+		}
+		if insecure {
+			fmt.Fprintln(os.Stderr, "WARNING: TLS certificate verification is disabled")
+		}
 
 		return nil
 	},

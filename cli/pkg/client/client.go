@@ -42,31 +42,37 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	if e.Message != "" {
-		return e.Message
-	}
 	return e.UserFacingError()
 }
 
 // UserFacingError returns a user-friendly error message based on the status code.
+// When the server provides a message, it is appended for context.
 func (e *APIError) UserFacingError() string {
 	switch e.StatusCode {
 	case http.StatusUnauthorized:
-		return "Not authenticated. Run 'stackctl login' first."
+		return e.withServerMsg("Not authenticated. Run 'stackctl login' first.")
 	case http.StatusForbidden:
-		return "Permission denied."
+		return e.withServerMsg("Permission denied.")
 	case http.StatusNotFound:
 		return fmt.Sprintf("Resource not found: %s", e.Message)
 	case http.StatusConflict:
 		return fmt.Sprintf("Conflict: %s", e.Message)
 	case http.StatusTooManyRequests:
-		return "Rate limited. Try again later."
+		return e.withServerMsg("Rate limited. Try again later.")
 	default:
 		if e.StatusCode >= 500 {
-			return "Server error. Check backend logs."
+			return e.withServerMsg("Server error. Check backend logs.")
 		}
 		return e.Message
 	}
+}
+
+// withServerMsg appends the server message (if non-empty) to a user-facing guidance string.
+func (e *APIError) withServerMsg(guidance string) string {
+	if e.Message != "" {
+		return guidance + " (server: " + e.Message + ")"
+	}
+	return guidance
 }
 
 // do executes an HTTP request with auth headers and error handling.
