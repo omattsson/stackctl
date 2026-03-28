@@ -91,6 +91,10 @@ Environment variables:
 			return err
 		}
 
+		if resp.Token == "" {
+			return fmt.Errorf("server returned an empty token")
+		}
+
 		// Parse expiry from response
 		var expiresAt time.Time
 		if resp.ExpiresAt != "" {

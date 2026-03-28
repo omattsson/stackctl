@@ -626,16 +626,11 @@ func TestLoginCmd_EmptyTokenFromServer(t *testing.T) {
 
 	err := loginCmd.RunE(loginCmd, []string{})
 
-	// The login command does not validate empty tokens — it saves and reports success.
-	// Verify the token file was written with an empty token value.
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Logged in as test")
+	// The login command should treat an empty token as an error and avoid writing a token file.
+	require.Error(t, err, "login should fail when server returns an empty token")
+	assert.Contains(t, err.Error(), "empty token")
 
 	tokenPath := filepath.Join(os.Getenv("STACKCTL_CONFIG_DIR"), "tokens", "test.json")
-	data, readErr := os.ReadFile(tokenPath)
-	require.NoError(t, readErr)
-
-	var stored storedToken
-	require.NoError(t, json.Unmarshal(data, &stored))
-	assert.Empty(t, stored.Token, "token should be empty when server returns empty token")
+	_, statErr := os.Stat(tokenPath)
+	assert.True(t, os.IsNotExist(statErr), "token file should not exist when server returns empty token")
 }

@@ -112,38 +112,38 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	assert.NotEmpty(t, status.Status, "status field must be present")
 	t.Logf("Status: %s, pods: %d", status.Status, len(status.Pods))
 
-	// Derive chart ID from the template instead of hardcoding.
-	var chartID uint = 1
-	if len(tmpl.Charts) > 0 {
-		chartID = tmpl.Charts[0].ID
+	// Step 6–7: Set overrides and redeploy (only if template has charts)
+	if len(tmpl.Charts) == 0 {
+		t.Log("Step 6–7: Skipped — template has no charts, cannot set overrides")
+	} else {
+		chartID := tmpl.Charts[0].ID
+
+		t.Log("Step 6: Set overrides")
+		_, err = c.SetValueOverride(instance.ID, chartID, &types.SetValueOverrideRequest{
+			Values: map[string]interface{}{"replicas": 2},
+		})
+		require.NoError(t, err, "set value override")
+
+		_, err = c.SetBranchOverride(instance.ID, chartID, &types.SetBranchOverrideRequest{
+			Branch: "feature/test",
+		})
+		require.NoError(t, err, "set branch override")
+
+		// Verify overrides were persisted
+		valOverrides, err := c.ListValueOverrides(instance.ID)
+		require.NoError(t, err, "list value overrides")
+		assert.NotEmpty(t, valOverrides, "should have at least one value override")
+
+		branchOverrides, err := c.ListBranchOverrides(instance.ID)
+		require.NoError(t, err, "list branch overrides")
+		assert.NotEmpty(t, branchOverrides, "should have at least one branch override")
+
+		// Step 7: Redeploy after overrides
+		t.Log("Step 7: Redeploy")
+		redeployLog, err := c.DeployStack(instance.ID)
+		require.NoError(t, err, "redeploy stack")
+		assert.NotZero(t, redeployLog.ID, "redeploy log ID must be set")
 	}
-
-	// Step 6: Set overrides — value override (replicas=2) and branch override
-	t.Log("Step 6: Set overrides")
-	_, err = c.SetValueOverride(instance.ID, chartID, &types.SetValueOverrideRequest{
-		Values: map[string]interface{}{"replicas": 2},
-	})
-	require.NoError(t, err, "set value override")
-
-	_, err = c.SetBranchOverride(instance.ID, chartID, &types.SetBranchOverrideRequest{
-		Branch: "feature/test",
-	})
-	require.NoError(t, err, "set branch override")
-
-	// Verify overrides were persisted
-	valOverrides, err := c.ListValueOverrides(instance.ID)
-	require.NoError(t, err, "list value overrides")
-	assert.NotEmpty(t, valOverrides, "should have at least one value override")
-
-	branchOverrides, err := c.ListBranchOverrides(instance.ID)
-	require.NoError(t, err, "list branch overrides")
-	assert.NotEmpty(t, branchOverrides, "should have at least one branch override")
-
-	// Step 7: Redeploy after overrides
-	t.Log("Step 7: Redeploy")
-	redeployLog, err := c.DeployStack(instance.ID)
-	require.NoError(t, err, "redeploy stack")
-	assert.NotZero(t, redeployLog.ID, "redeploy log ID must be set")
 
 	// Step 8: View logs
 	t.Log("Step 8: View logs")
