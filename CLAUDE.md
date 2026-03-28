@@ -76,8 +76,8 @@ cli/
 **Error mapping**: HTTP status codes map to user-friendly messages (with server error message appended when available):
 - 401 → "Not authenticated. Run 'stackctl login' first. (server: ...)"
 - 403 → "Permission denied. (server: ...)"
-- 404 → "Resource not found. (server: ...)"
-- 409 → "Conflict (resource already exists or version mismatch). (server: ...)"
+- 404 → "Resource not found: <server message>"
+- 409 → "Conflict: <server message>"
 - 429 → "Rate limited. Try again later."
 - 500 → "Server error. Check backend logs."
 
