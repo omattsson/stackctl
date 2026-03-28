@@ -14,6 +14,7 @@ import (
 )
 
 const defaultTimeout = 30 * time.Second
+const maxServerMessageLen = 256
 
 // Client is the HTTP client for the k8s-stack-manager API.
 // TLS configuration (insecure mode) is handled by the caller setting
@@ -54,9 +55,17 @@ func (e *APIError) UserFacingError() string {
 	case http.StatusForbidden:
 		return e.withServerMsg("Permission denied.")
 	case http.StatusNotFound:
-		return fmt.Sprintf("Resource not found: %s", e.Message)
+		msg := sanitizeServerMessage(e.Message)
+		if msg == "" {
+			msg = "unknown resource"
+		}
+		return fmt.Sprintf("Resource not found: %s", msg)
 	case http.StatusConflict:
-		return fmt.Sprintf("Conflict: %s", e.Message)
+		msg := sanitizeServerMessage(e.Message)
+		if msg == "" {
+			msg = "unknown conflict"
+		}
+		return fmt.Sprintf("Conflict: %s", msg)
 	case http.StatusTooManyRequests:
 		return e.withServerMsg("Rate limited. Try again later.")
 	default:
@@ -67,10 +76,36 @@ func (e *APIError) UserFacingError() string {
 	}
 }
 
+// sanitizeServerMessage cleans up a server error message for safe display.
+// It trims whitespace, replaces control characters, collapses runs of
+// whitespace, and truncates to maxServerMessageLen.
+func sanitizeServerMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(msg))
+	for _, r := range msg {
+		if r < 0x20 || r == 0x7f {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	clean := strings.Join(strings.Fields(b.String()), " ")
+
+	if len(clean) > maxServerMessageLen {
+		clean = clean[:maxServerMessageLen] + "..."
+	}
+	return clean
+}
+
 // withServerMsg appends the server message (if non-empty) to a user-facing guidance string.
 func (e *APIError) withServerMsg(guidance string) string {
-	if e.Message != "" {
-		return guidance + " (server: " + e.Message + ")"
+	if msg := sanitizeServerMessage(e.Message); msg != "" {
+		return guidance + " (server: " + msg + ")"
 	}
 	return guidance
 }

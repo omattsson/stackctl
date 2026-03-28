@@ -209,7 +209,7 @@ while [ "$(stackctl stack status 42 -o json | jq -r '.status')" != "running" ]; 
 done
 echo "Stack 42 is running"
 
-# Clean up all stacks on a specific cluster
+# Delete all stacks on a specific cluster
 stackctl stack list --cluster 1 -q | xargs stackctl bulk delete --yes
 ```
 

@@ -65,7 +65,7 @@ Get started:
 			insecure = cfg.CurrentCtx().Insecure
 		}
 		if insecure {
-			fmt.Fprintln(os.Stderr, "WARNING: TLS certificate verification is disabled")
+			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: TLS certificate verification is disabled")
 		}
 
 		return nil

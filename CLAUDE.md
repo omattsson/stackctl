@@ -78,8 +78,8 @@ cli/
 - 403 → "Permission denied. (server: ...)"
 - 404 → "Resource not found: <server message>"
 - 409 → "Conflict: <server message>"
-- 429 → "Rate limited. Try again later."
-- 500 → "Server error. Check backend logs."
+- 429 → "Rate limited. Try again later. (server: ...)"
+- 500 → "Server error. Check backend logs. (server: ...)"
 
 **Config-free commands**: `version` and `completion` skip config file loading and work even if the config is missing or corrupted.
 

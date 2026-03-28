@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/omattsson/stackctl/cli/pkg/types"
@@ -263,6 +264,9 @@ func TestAPIError_UserFacingError(t *testing.T) {
 		{name: "500", statusCode: 500, message: "oops", want: "Server error. Check backend logs. (server: oops)"},
 		{name: "502", statusCode: 502, message: "oops", want: "Server error. Check backend logs. (server: oops)"},
 		{name: "400", statusCode: 400, message: "bad input", want: "bad input"},
+		{name: "401 with newlines", statusCode: 401, message: "token\nexpired", want: "Not authenticated. Run 'stackctl login' first. (server: token expired)"},
+		{name: "404 empty message", statusCode: 404, message: "", want: "Resource not found: unknown resource"},
+		{name: "409 empty message", statusCode: 409, message: "", want: "Conflict: unknown conflict"},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -270,6 +274,30 @@ func TestAPIError_UserFacingError(t *testing.T) {
 			t.Parallel()
 			err := &APIError{StatusCode: tt.statusCode, Message: tt.message}
 			assert.Equal(t, tt.want, err.UserFacingError())
+		})
+	}
+}
+
+func TestSanitizeServerMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "whitespace only", input: "   ", want: ""},
+		{name: "simple", input: "not found", want: "not found"},
+		{name: "newlines", input: "line1\nline2\nline3", want: "line1 line2 line3"},
+		{name: "tabs and carriage returns", input: "error\t\rstuff", want: "error stuff"},
+		{name: "long message truncated", input: strings.Repeat("a", 300), want: strings.Repeat("a", 256) + "..."},
+		{name: "leading/trailing whitespace", input: "  hello  ", want: "hello"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, sanitizeServerMessage(tt.input))
 		})
 	}
 }
