@@ -40,6 +40,9 @@ func newLiveClient(t *testing.T) *client.Client {
 		t.Skipf("Backend unreachable at %s: %v", baseURL(), err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Skipf("Backend unhealthy at %s: HTTP %d", baseURL(), resp.StatusCode)
+	}
 
 	return c
 }
@@ -109,14 +112,20 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	assert.NotEmpty(t, status.Status, "status field must be present")
 	t.Logf("Status: %s, pods: %d", status.Status, len(status.Pods))
 
-	// Step 6: Set overrides — value override (replicas=2) and branch override on chart ID 1
+	// Derive chart ID from the template instead of hardcoding.
+	var chartID uint = 1
+	if len(tmpl.Charts) > 0 {
+		chartID = tmpl.Charts[0].ID
+	}
+
+	// Step 6: Set overrides — value override (replicas=2) and branch override
 	t.Log("Step 6: Set overrides")
-	_, err = c.SetValueOverride(instance.ID, 1, &types.SetValueOverrideRequest{
+	_, err = c.SetValueOverride(instance.ID, chartID, &types.SetValueOverrideRequest{
 		Values: map[string]interface{}{"replicas": 2},
 	})
 	require.NoError(t, err, "set value override")
 
-	_, err = c.SetBranchOverride(instance.ID, 1, &types.SetBranchOverrideRequest{
+	_, err = c.SetBranchOverride(instance.ID, chartID, &types.SetBranchOverrideRequest{
 		Branch: "feature/test",
 	})
 	require.NoError(t, err, "set branch override")
@@ -172,8 +181,14 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	t.Log("Step 1: Login")
 	login(t, c)
 
-	// We need at least one definition. Use definition_id=1.
-	const defID uint = 1
+	// Discover an available definition dynamically instead of assuming ID 1 exists.
+	defs, err := c.ListDefinitions(nil)
+	require.NoError(t, err, "list definitions")
+	if len(defs.Data) == 0 {
+		t.Skip("No definitions available on backend — cannot run bulk test")
+	}
+	defID := defs.Data[0].ID
+	t.Logf("Using definition %d (%s)", defID, defs.Data[0].Name)
 
 	// Step 2: Create 3 stack instances
 	t.Log("Step 2: Create 3 stack instances")

@@ -159,7 +159,7 @@ func TestEdgeCase_NetworkErrors(t *testing.T) {
 			t.Parallel()
 			err := tt.fn()
 			require.Error(t, err, "should return an error, not panic")
-			assert.Contains(t, err.Error(), "connect")
+			assert.ErrorContains(t, err, "making request:")
 		})
 	}
 }
@@ -419,9 +419,9 @@ func TestEdgeCase_LargeResponseHandling(t *testing.T) {
 	})
 }
 
-// ---------- Server Error Retry Behavior ----------
+// ---------- Server Error User-Facing Messages ----------
 
-func TestEdgeCase_ServerErrorRetryBehavior(t *testing.T) {
+func TestEdgeCase_ServerErrorUserFacingMessages(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
