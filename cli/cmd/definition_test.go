@@ -1017,5 +1017,5 @@ func TestDefinitionImportCmd_InvalidJSON(t *testing.T) {
 
 	err := definitionImportCmd.RunE(definitionImportCmd, []string{})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "marshaling request body")
+	assert.Contains(t, err.Error(), "invalid JSON")
 }
