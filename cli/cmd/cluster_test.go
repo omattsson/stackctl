@@ -363,3 +363,18 @@ func TestClusterGetCmd_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cluster not found")
 }
+
+func TestClusterGetCmd_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(types.ErrorResponse{})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	err := clusterGetCmd.RunE(clusterGetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Not authenticated")
+}

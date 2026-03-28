@@ -606,3 +606,36 @@ func TestLoginLogout_RoundTrip(t *testing.T) {
 	_, err = os.Stat(tokenPath)
 	assert.True(t, os.IsNotExist(err), "token file should be removed after logout")
 }
+
+func TestLoginCmd_EmptyTokenFromServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.LoginResponse{
+			Token:     "",
+			ExpiresAt: "2030-01-01T00:00:00Z",
+			User:      types.User{Base: types.Base{ID: 1}, Username: "test", Role: "admin"},
+		})
+	}))
+	defer server.Close()
+
+	buf := setupLoginTestCmd(t, server.URL)
+
+	loginCmd.Flags().Set("username", "test")
+	loginCmd.Flags().Set("password", "pass")
+	loginCmd.SetOut(buf)
+
+	err := loginCmd.RunE(loginCmd, []string{})
+
+	// The login command does not validate empty tokens — it saves and reports success.
+	// Verify the token file was written with an empty token value.
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Logged in as test")
+
+	tokenPath := filepath.Join(os.Getenv("STACKCTL_CONFIG_DIR"), "tokens", "test.json")
+	data, readErr := os.ReadFile(tokenPath)
+	require.NoError(t, readErr)
+
+	var stored storedToken
+	require.NoError(t, json.Unmarshal(data, &stored))
+	assert.Empty(t, stored.Token, "token should be empty when server returns empty token")
+}

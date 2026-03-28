@@ -666,3 +666,39 @@ func TestBulkDeployCmd_MixedArgs(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "ID")
 }
+
+func TestBulkDeployCmd_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{})
+	}))
+	defer server.Close()
+
+	_ = setupBulkTestCmd(t, server.URL)
+
+	bulkDeployCmd.Flags().Set("ids", "1,2")
+	t.Cleanup(func() { bulkDeployCmd.Flags().Set("ids", "") })
+
+	err := bulkDeployCmd.RunE(bulkDeployCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Server error")
+}
+
+func TestBulkDeployCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{})
+	}))
+	defer server.Close()
+
+	_ = setupBulkTestCmd(t, server.URL)
+
+	bulkDeployCmd.Flags().Set("ids", "1,2")
+	t.Cleanup(func() { bulkDeployCmd.Flags().Set("ids", "") })
+
+	err := bulkDeployCmd.RunE(bulkDeployCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}

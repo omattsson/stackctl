@@ -2115,3 +2115,35 @@ func TestGetClusterHealth_Error(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, health)
 }
+
+// ---------- malformed / empty response body ----------
+
+func TestClient_MalformedJSON(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`not json at all`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.ListStacks(nil)
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "decoding response")
+}
+
+func TestClient_EmptyResponseBody(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Write nothing — empty body
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	stack, err := c.GetStack(1)
+	require.Error(t, err)
+	assert.Nil(t, stack)
+	assert.Contains(t, err.Error(), "unexpected empty response body")
+}

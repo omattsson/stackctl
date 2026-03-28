@@ -144,6 +144,24 @@ func TestGitBranchesCmd_APIError(t *testing.T) {
 	assert.Contains(t, err.Error(), "repository not found")
 }
 
+func TestGitBranchesCmd_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(types.ErrorResponse{})
+	}))
+	defer server.Close()
+
+	_ = setupGitTestCmd(t, server.URL)
+
+	gitBranchesCmd.Flags().Set("repo", "https://github.com/org/repo")
+	t.Cleanup(func() { gitBranchesCmd.Flags().Set("repo", "") })
+
+	err := gitBranchesCmd.RunE(gitBranchesCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Not authenticated")
+}
+
 // ---------- git validate ----------
 
 func TestGitValidateCmd_ValidBranch(t *testing.T) {
