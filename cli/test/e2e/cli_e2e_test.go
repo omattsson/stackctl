@@ -152,7 +152,7 @@ func TestE2E_ConfigWorkflow(t *testing.T) {
 	}
 
 	// 7. Add another context
-	stdout, _, err = runStackctl(t, dir, "config", "use-context", "production")
+	_, _, err = runStackctl(t, dir, "config", "use-context", "production")
 	require.NoError(t, err)
 
 	_, _, err = runStackctl(t, dir, "config", "set", "api-url", "https://prod.example.com")
