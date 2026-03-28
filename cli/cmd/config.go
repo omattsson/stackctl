@@ -26,7 +26,12 @@ var configSetCmd = &cobra.Command{
 Available keys:
   api-url    API server URL
   api-key    API key for authentication
-  insecure   Skip TLS verification (true/false)`,
+  insecure   Skip TLS verification (true/false)
+
+Examples:
+  stackctl config set api-url http://localhost:8081
+  stackctl config set api-key sk_prod_abc123
+  stackctl config set insecure true`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {

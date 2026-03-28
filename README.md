@@ -191,6 +191,28 @@ stackctl bulk clean --ids 1,2,3
 stackctl stack list --status stopped --mine -q | xargs stackctl bulk deploy
 ```
 
+### Scripting Examples
+
+```bash
+# Deploy all stopped stacks owned by me
+stackctl stack list --status stopped --mine -q | xargs stackctl bulk deploy
+
+# Export all definitions to individual files
+for id in $(stackctl definition list -q); do
+  stackctl definition export "$id" -o json > "definition-${id}.json"
+done
+
+# CI/CD: deploy and wait for status
+stackctl stack deploy 42
+while [ "$(stackctl stack status 42 -o json | jq -r '.status')" != "running" ]; do
+  sleep 5
+done
+echo "Stack 42 is running"
+
+# Clean up all stacks on a specific cluster
+stackctl stack list --cluster 1 -q | xargs stackctl bulk delete --yes
+```
+
 ### Clusters
 
 ```bash
