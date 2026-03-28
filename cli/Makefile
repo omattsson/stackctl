@@ -61,4 +61,4 @@ tools:
 	go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
 
 clean:
-	rm -rf bin/
+	rm -rf bin/ dist/ coverage.out
