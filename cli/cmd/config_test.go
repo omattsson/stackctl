@@ -178,3 +178,16 @@ func TestConfigDeleteContextCmd_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+func TestConfigUseContextCmd_EmptyName(t *testing.T) {
+	setupTestCmd(t)
+
+	var buf bytes.Buffer
+	printer.Writer = &buf
+
+	// Empty string is passed as the context name argument.
+	// ValidateContextName rejects it because the regex requires at least one alphanumeric char.
+	err := configUseContextCmd.RunE(configUseContextCmd, []string{""})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid context name")
+}

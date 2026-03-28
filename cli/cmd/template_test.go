@@ -556,3 +556,41 @@ func TestTemplateQuickDeployCmd_InvalidID(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid ID")
 }
+
+// ---------- template list auth error ----------
+
+func TestTemplateListCmd_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(types.ErrorResponse{})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := templateListCmd.RunE(templateListCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Not authenticated")
+}
+
+// ---------- template instantiate auth error ----------
+
+func TestTemplateInstantiateCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	templateInstantiateCmd.Flags().Set("name", "test")
+	t.Cleanup(func() {
+		templateInstantiateCmd.Flags().Set("name", "")
+	})
+
+	err := templateInstantiateCmd.RunE(templateInstantiateCmd, []string{"10"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}

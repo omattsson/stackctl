@@ -986,3 +986,197 @@ func TestE2E_OverrideInvalidID(t *testing.T) {
 	_, _, err := runStackctl(t, dir, "override", "list", "abc")
 	assert.Error(t, err)
 }
+
+// ---------- Quiet Piping Workflow E2E ----------
+
+// startE2EQuietPipingMockServer starts a mock server that handles stack list and bulk endpoints.
+func startE2EQuietPipingMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		// List stacks — returns 3 stacks with IDs 1, 2, 3
+		case r.URL.Path == "/api/v1/stack-instances" && r.Method == http.MethodGet:
+			resp := map[string]interface{}{
+				"data": []map[string]interface{}{
+					{
+						"id": 1, "name": "pipe-stack-1", "status": "running",
+						"owner": "admin", "branch": "main", "namespace": "ns-1",
+						"stack_definition_id": 1, "cluster_name": "dev",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+					},
+					{
+						"id": 2, "name": "pipe-stack-2", "status": "running",
+						"owner": "admin", "branch": "main", "namespace": "ns-2",
+						"stack_definition_id": 1, "cluster_name": "dev",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+					},
+					{
+						"id": 3, "name": "pipe-stack-3", "status": "stopped",
+						"owner": "admin", "branch": "feature/x", "namespace": "ns-3",
+						"stack_definition_id": 2, "cluster_name": "staging",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+					},
+				},
+				"total": 3, "page": 1, "page_size": 20, "total_pages": 1,
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// Bulk deploy
+		case r.URL.Path == "/api/v1/stack-instances/bulk/deploy" && r.Method == http.MethodPost:
+			var req struct {
+				IDs []uint `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+
+		// Bulk stop
+		case r.URL.Path == "/api/v1/stack-instances/bulk/stop" && r.Method == http.MethodPost:
+			var req struct {
+				IDs []uint `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+
+		// Bulk delete
+		case r.URL.Path == "/api/v1/stack-instances/bulk/delete" && r.Method == http.MethodPost:
+			var req struct {
+				IDs []uint `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
+}
+
+func TestE2E_QuietPipingWorkflow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EQuietPipingMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// 1. Run stack list --quiet and verify output is "1\n2\n3\n"
+	stdout, _, err := runStackctl(t, dir, "stack", "list", "--quiet")
+	require.NoError(t, err)
+	assert.Equal(t, "1\n2\n3\n", stdout)
+
+	// 2. Parse the quiet output to extract IDs — validates the format
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 3)
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+		assert.Regexp(t, `^\d+$`, lines[i], "each line should be a numeric ID only")
+	}
+
+	// 3. Build the --ids argument from the quiet output to simulate piping workflow
+	idsCSV := strings.Join(lines, ",")
+
+	// 4. Run bulk deploy --ids <derived> → verify success
+	stdout, _, err = runStackctl(t, dir, "bulk", "deploy", "--ids", idsCSV)
+	require.NoError(t, err)
+	for _, id := range lines {
+		assert.Contains(t, stdout, id)
+	}
+
+	// 5. Run bulk stop --ids <derived> → verify success
+	stdout, _, err = runStackctl(t, dir, "bulk", "stop", "--ids", idsCSV)
+	require.NoError(t, err)
+	for _, id := range lines {
+		assert.Contains(t, stdout, id)
+	}
+
+	// 6. Run bulk delete --ids <derived> --yes → verify success (needs --yes to skip confirmation)
+	stdout, _, err = runStackctl(t, dir, "bulk", "delete", "--ids", idsCSV, "--yes")
+	require.NoError(t, err)
+	for _, id := range lines {
+		assert.Contains(t, stdout, id)
+	}
+}
+
+func TestE2E_QuietOutputFormat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	// Use the quiet piping mock for stacks, and the template/def mock for templates and definitions.
+	stackServer := startE2EQuietPipingMockServer(t)
+	defer stackServer.Close()
+
+	templateDefServer := startE2ETemplateDefMockServer(t)
+	defer templateDefServer.Close()
+
+	// --- stack list --quiet ---
+	dir1 := t.TempDir()
+	setupE2EStackContext(t, dir1, stackServer.URL)
+
+	stdout, _, err := runStackctl(t, dir1, "stack", "list", "--quiet")
+	require.NoError(t, err)
+	// Verify exact format: numeric IDs only, one per line, no headers, no extra whitespace
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 3)
+	assert.Equal(t, "1", lines[0])
+	assert.Equal(t, "2", lines[1])
+	assert.Equal(t, "3", lines[2])
+
+	// --- template list --quiet ---
+	dir2 := t.TempDir()
+	setupE2EStackContext(t, dir2, templateDefServer.URL)
+
+	stdout, _, err = runStackctl(t, dir2, "template", "list", "--quiet")
+	require.NoError(t, err)
+	lines = strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 2)
+	assert.Equal(t, "1", lines[0])
+	assert.Equal(t, "2", lines[1])
+	// Verify no table headers or extra output
+	assert.NotContains(t, stdout, "ID")
+	assert.NotContains(t, stdout, "NAME")
+
+	// --- definition list --quiet ---
+	stdout, _, err = runStackctl(t, dir2, "definition", "list", "--quiet")
+	require.NoError(t, err)
+	lines = strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 1)
+	assert.Equal(t, "1", lines[0])
+	// Verify no table headers or extra output
+	assert.NotContains(t, stdout, "ID")
+	assert.NotContains(t, stdout, "NAME")
+}

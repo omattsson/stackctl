@@ -1747,3 +1747,19 @@ func TestStackCompareCmd_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "instance not found")
 }
+
+// ---------- stack deploy auth error ----------
+
+func TestStackDeployCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := stackDeployCmd.RunE(stackDeployCmd, []string{"42"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}

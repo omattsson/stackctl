@@ -375,6 +375,10 @@ Examples:
 			return fmt.Errorf("reading file %s: %w", file, err)
 		}
 
+		if !json.Valid(data) {
+			return fmt.Errorf("file %s contains invalid JSON", file)
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err

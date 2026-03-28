@@ -975,3 +975,47 @@ func TestDefinitionCreateCmd_FromFileMissingNameField(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "'name' field is required")
 }
+
+// ---------- definition delete auth error ----------
+
+func TestDefinitionDeleteCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	definitionDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { definitionDeleteCmd.Flags().Set("yes", "false") })
+
+	err := definitionDeleteCmd.RunE(definitionDeleteCmd, []string{"5"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}
+
+// ---------- definition import edge cases ----------
+
+func TestDefinitionImportCmd_InvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called for invalid JSON content")
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "bad.json")
+	require.NoError(t, os.WriteFile(filePath, []byte(`{invalid json}`), 0644))
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	definitionImportCmd.Flags().Set("file", filePath)
+	t.Cleanup(func() {
+		definitionImportCmd.Flags().Set("file", "")
+	})
+
+	err := definitionImportCmd.RunE(definitionImportCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid JSON")
+}
