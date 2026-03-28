@@ -78,7 +78,8 @@ func (e *APIError) UserFacingError() string {
 
 // sanitizeServerMessage cleans up a server error message for safe display.
 // It trims whitespace, replaces control characters, collapses runs of
-// whitespace, and truncates to maxServerMessageLen.
+// whitespace, and truncates to maxServerMessageLen runes (with "..." appended
+// if truncated).
 func sanitizeServerMessage(msg string) string {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -96,8 +97,9 @@ func sanitizeServerMessage(msg string) string {
 	}
 	clean := strings.Join(strings.Fields(b.String()), " ")
 
-	if len(clean) > maxServerMessageLen {
-		clean = clean[:maxServerMessageLen] + "..."
+	runes := []rune(clean)
+	if len(runes) > maxServerMessageLen {
+		clean = string(runes[:maxServerMessageLen]) + "..."
 	}
 	return clean
 }
