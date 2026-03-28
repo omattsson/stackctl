@@ -73,13 +73,17 @@ cli/
 
 **Dual auth**: JWT token (stored in `~/.stackmanager/tokens/<context>.json`) or API key (from config). API key takes precedence when both are configured.
 
-**Error mapping**: HTTP status codes map to user-friendly messages:
-- 401 → "Not authenticated. Run 'stackctl login' first."
-- 403 → "Permission denied."
-- 404 → "Resource not found."
-- 409 → "Conflict (resource already exists or version mismatch)."
-- 429 → "Rate limited. Try again later."
-- 500 → "Server error. Check backend logs."
+**Error mapping**: HTTP status codes map to user-friendly messages (with server error message appended when available):
+- 401 → "Not authenticated. Run 'stackctl login' first. (server: ...)"
+- 403 → "Permission denied. (server: ...)"
+- 404 → "Resource not found: <server message>"
+- 409 → "Conflict: <server message>"
+- 429 → "Rate limited. Try again later. (server: ...)"
+- 500 → "Server error. Check backend logs. (server: ...)"
+
+**Config-free commands**: `version` and `completion` skip config file loading and work even if the config is missing or corrupted.
+
+**Insecure mode**: When `--insecure` is active, a warning is printed to stderr.
 
 **Base URL**: From `--api-url` flag, `STACKCTL_API_URL` env, or config file `api-url` key.
 

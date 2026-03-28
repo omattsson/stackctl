@@ -23,6 +23,15 @@ func SetVersionInfo(version, commit, date string) {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
+	Long: `Print the stackctl version, git commit, and build date.
+
+This command works without any configuration and can be used to verify
+that stackctl is installed correctly.
+
+Examples:
+  stackctl version
+  stackctl version -o json`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		versionInfo := map[string]string{
 			"version": buildVersion,

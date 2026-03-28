@@ -26,8 +26,14 @@ var configSetCmd = &cobra.Command{
 Available keys:
   api-url    API server URL
   api-key    API key for authentication
-  insecure   Skip TLS verification (true/false)`,
-	Args: cobra.ExactArgs(2),
+  insecure   Skip TLS verification (true/false)
+
+Examples:
+  stackctl config set api-url http://localhost:8081
+  stackctl config set api-key YOUR_API_KEY
+  stackctl config set insecure true`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key, value := args[0], args[1]
 		if err := cfg.SetContextValue(key, value); err != nil {
@@ -52,7 +58,18 @@ Available keys:
 var configGetCmd = &cobra.Command{
 	Use:   "get <key>",
 	Short: "Get a config value from the current context",
-	Args:  cobra.ExactArgs(1),
+	Long: `Get a configuration value from the current context.
+
+Available keys:
+  api-url    API server URL
+  api-key    API key for authentication
+  insecure   Skip TLS verification (true/false)
+
+Examples:
+  stackctl config get api-url
+  stackctl config get api-key`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		value, err := cfg.GetContextValue(args[0])
 		if err != nil {
@@ -66,6 +83,15 @@ var configGetCmd = &cobra.Command{
 var configListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all contexts and their configuration",
+	Long: `List all configured contexts and their settings.
+
+API keys are masked in the output for security. The current context is
+marked with an asterisk (*).
+
+Examples:
+  stackctl config list
+  stackctl config list -o json`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(cfg.Contexts) == 0 {
 			printer.PrintMessage("No contexts configured. Run 'stackctl config use-context <name>' to create one.")
@@ -129,7 +155,8 @@ var configUseContextCmd = &cobra.Command{
 Examples:
   stackctl config use-context local
   stackctl config use-context production`,
-	Args: cobra.ExactArgs(1),
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		if err := config.ValidateContextName(name); err != nil {
@@ -150,6 +177,11 @@ Examples:
 var configCurrentContextCmd = &cobra.Command{
 	Use:   "current-context",
 	Short: "Show the current context name",
+	Long: `Show the name of the currently active context.
+
+Examples:
+  stackctl config current-context`,
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cfg.CurrentContext == "" {
 			printer.PrintMessage("No current context set.")
@@ -163,7 +195,14 @@ var configCurrentContextCmd = &cobra.Command{
 var configDeleteContextCmd = &cobra.Command{
 	Use:   "delete-context <name>",
 	Short: "Delete a named context",
-	Args:  cobra.ExactArgs(1),
+	Long: `Delete a named context from the configuration.
+
+If the deleted context is the current context, the current context is unset.
+
+Examples:
+  stackctl config delete-context staging`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		if _, ok := cfg.Contexts[name]; !ok {
