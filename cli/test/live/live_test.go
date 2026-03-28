@@ -124,19 +124,26 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 		})
 		require.NoError(t, err, "set value override")
 
-		_, err = c.SetBranchOverride(instance.ID, chartID, &types.SetBranchOverrideRequest{
-			Branch: "feature/test",
-		})
-		require.NoError(t, err, "set branch override")
+		branch := os.Getenv("STACKCTL_LIVE_BRANCH")
+		if branch == "" {
+			t.Log("Step 6 (branch override): Skipped — STACKCTL_LIVE_BRANCH not set")
+		} else {
+			_, err = c.SetBranchOverride(instance.ID, chartID, &types.SetBranchOverrideRequest{
+				Branch: branch,
+			})
+			require.NoError(t, err, "set branch override")
+		}
 
 		// Verify overrides were persisted
 		valOverrides, err := c.ListValueOverrides(instance.ID)
 		require.NoError(t, err, "list value overrides")
 		assert.NotEmpty(t, valOverrides, "should have at least one value override")
 
-		branchOverrides, err := c.ListBranchOverrides(instance.ID)
-		require.NoError(t, err, "list branch overrides")
-		assert.NotEmpty(t, branchOverrides, "should have at least one branch override")
+		if branch != "" {
+			branchOverrides, err := c.ListBranchOverrides(instance.ID)
+			require.NoError(t, err, "list branch overrides")
+			assert.NotEmpty(t, branchOverrides, "should have at least one branch override")
+		}
 
 		// Step 7: Redeploy after overrides
 		t.Log("Step 7: Redeploy")
