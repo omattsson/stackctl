@@ -30,7 +30,7 @@ Available keys:
 
 Examples:
   stackctl config set api-url http://localhost:8081
-  stackctl config set api-key sk_prod_abc123
+  stackctl config set api-key YOUR_API_KEY
   stackctl config set insecure true`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
