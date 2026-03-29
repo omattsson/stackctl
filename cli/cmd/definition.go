@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,7 +19,6 @@ import (
 const (
 	flagFromFile     = "from-file"
 	errPathTraversal = "file path must not contain '..' segments"
-	errReadingFile   = "reading file %s: %w"
 )
 
 var definitionCmd = &cobra.Command{
@@ -144,13 +144,13 @@ Examples:
 		if fromFile != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
 				if segment == ".." {
-					return fmt.Errorf(errPathTraversal)
+					return errors.New(errPathTraversal)
 				}
 			}
 			fromFile = filepath.Clean(fromFile)
 			data, err := os.ReadFile(fromFile)
 			if err != nil {
-				return fmt.Errorf(errReadingFile, fromFile, err)
+				return fmt.Errorf("reading file %s: %w", fromFile, err)
 			}
 			if err := json.Unmarshal(data, &req); err != nil {
 				return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
@@ -212,13 +212,13 @@ Examples:
 		if fromFile != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
 				if segment == ".." {
-					return fmt.Errorf(errPathTraversal)
+					return errors.New(errPathTraversal)
 				}
 			}
 			fromFile = filepath.Clean(fromFile)
 			data, err := os.ReadFile(fromFile)
 			if err != nil {
-				return fmt.Errorf(errReadingFile, fromFile, err)
+				return fmt.Errorf("reading file %s: %w", fromFile, err)
 			}
 			if err := json.Unmarshal(data, &req); err != nil {
 				return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
@@ -371,14 +371,14 @@ Examples:
 
 		for _, segment := range strings.Split(filepath.ToSlash(file), "/") {
 			if segment == ".." {
-				return fmt.Errorf(errPathTraversal)
+				return errors.New(errPathTraversal)
 			}
 		}
 		file = filepath.Clean(file)
 
 		data, err := os.ReadFile(file)
 		if err != nil {
-			return fmt.Errorf(errReadingFile, file, err)
+			return fmt.Errorf("reading file %s: %w", file, err)
 		}
 
 		if !json.Valid(data) {
