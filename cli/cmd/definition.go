@@ -18,7 +18,7 @@ import (
 
 const (
 	flagFromFile     = "from-file"
-	errPathTraversal = "file path must not contain '..' segments"
+	msgPathTraversal = "file path must not contain '..' segments"
 )
 
 var definitionCmd = &cobra.Command{
@@ -144,7 +144,7 @@ Examples:
 		if fromFile != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
 				if segment == ".." {
-					return errors.New(errPathTraversal)
+					return errors.New(msgPathTraversal)
 				}
 			}
 			fromFile = filepath.Clean(fromFile)
@@ -212,7 +212,7 @@ Examples:
 		if fromFile != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
 				if segment == ".." {
-					return errors.New(errPathTraversal)
+					return errors.New(msgPathTraversal)
 				}
 			}
 			fromFile = filepath.Clean(fromFile)
@@ -371,7 +371,7 @@ Examples:
 
 		for _, segment := range strings.Split(filepath.ToSlash(file), "/") {
 			if segment == ".." {
-				return errors.New(errPathTraversal)
+				return errors.New(msgPathTraversal)
 			}
 		}
 		file = filepath.Clean(file)

@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	errReadConfirmation = "reading confirmation: %w"
-	msgAborted          = "Aborted."
-	flagDescSkipConfirm = "Skip confirmation prompt"
+	errReadConfirmationFmt = "reading confirmation: %w"
+	msgAborted             = "Aborted."
+	flagDescSkipConfirm    = "Skip confirmation prompt"
 )
 
 var overrideCmd = &cobra.Command{
@@ -209,7 +209,7 @@ Examples:
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
 			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf(errReadConfirmation, err)
+				return fmt.Errorf(errReadConfirmationFmt, err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
 				printer.PrintMessage(msgAborted)
@@ -377,7 +377,7 @@ Examples:
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
 			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf(errReadConfirmation, err)
+				return fmt.Errorf(errReadConfirmationFmt, err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
 				printer.PrintMessage(msgAborted)
@@ -546,7 +546,7 @@ Examples:
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
 			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf(errReadConfirmation, err)
+				return fmt.Errorf(errReadConfirmationFmt, err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
 				printer.PrintMessage(msgAborted)
