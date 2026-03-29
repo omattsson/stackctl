@@ -1,14 +1,12 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
@@ -273,18 +271,13 @@ Examples:
 			return err
 		}
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will undeploy and remove the namespace for stack %d. Continue? (y/n): ", id)
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will undeploy and remove the namespace for stack %d. Continue? (y/n): ", id))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage("Aborted.")
+			return nil
 		}
 
 		c, err := newClient()
@@ -321,41 +314,11 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
-
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete stack %d. Continue? (y/n): ", id)
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
-		}
-
-		if err := c.DeleteStack(id); err != nil {
-			return err
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, id)
-			return nil
-		}
-
-		printer.PrintMessage("Deleted stack %d", id)
-		return nil
+		return deleteByID(cmd, args,
+			"This will permanently delete stack %d. Continue? (y/n): ",
+			func(c *client.Client, id uint) error { return c.DeleteStack(id) },
+			"Deleted stack %d",
+		)
 	},
 }
 

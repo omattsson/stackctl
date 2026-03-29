@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -11,6 +9,8 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
 )
+
+const flagDescIDs = "Comma-separated list of instance IDs"
 
 var bulkCmd = &cobra.Command{
 	Use:   "bulk",
@@ -105,18 +105,13 @@ Examples:
 			return err
 		}
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will clean %d stack instances. Continue? (y/n): ", len(ids))
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will clean %d stack instances. Continue? (y/n): ", len(ids)))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage("Aborted.")
+			return nil
 		}
 
 		c, err := newClient()
@@ -154,18 +149,13 @@ Examples:
 			return err
 		}
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete %d stack instances. Continue? (y/n): ", len(ids))
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d stack instances. Continue? (y/n): ", len(ids)))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage("Aborted.")
+			return nil
 		}
 
 		c, err := newClient()
@@ -183,14 +173,14 @@ Examples:
 }
 
 func init() {
-	bulkDeployCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
+	bulkDeployCmd.Flags().String("ids", "", flagDescIDs)
 
-	bulkStopCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
+	bulkStopCmd.Flags().String("ids", "", flagDescIDs)
 
-	bulkCleanCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
+	bulkCleanCmd.Flags().String("ids", "", flagDescIDs)
 	bulkCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
-	bulkDeleteCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
+	bulkDeleteCmd.Flags().String("ids", "", flagDescIDs)
 	bulkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	bulkCmd.AddCommand(bulkDeployCmd)

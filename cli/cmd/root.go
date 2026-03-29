@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bufio"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/config"
@@ -175,4 +178,56 @@ type configError struct {
 
 func (e *configError) Error() string {
 	return e.msg
+}
+
+// confirmAction prompts the user for confirmation unless --yes is set.
+// Returns true if the action should proceed, false if aborted.
+func confirmAction(cmd *cobra.Command, message string) (bool, error) {
+	yes, _ := cmd.Flags().GetBool("yes")
+	if yes {
+		return true, nil
+	}
+	fmt.Fprint(cmd.ErrOrStderr(), message)
+	reader := bufio.NewReader(cmd.InOrStdin())
+	answer, err := reader.ReadString('\n')
+	if err != nil && (err != io.EOF || answer == "") {
+		return false, fmt.Errorf("reading confirmation: %w", err)
+	}
+	if strings.TrimSpace(strings.ToLower(answer)) != "y" {
+		return false, nil
+	}
+	return true, nil
+}
+
+func deleteByID(cmd *cobra.Command, args []string, promptFmt string, deleteFn func(*client.Client, uint) error, successFmt string) error {
+	id, err := parseID(args[0])
+	if err != nil {
+		return err
+	}
+
+	confirmed, err := confirmAction(cmd, fmt.Sprintf(promptFmt, id))
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		printer.PrintMessage("Aborted.")
+		return nil
+	}
+
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+
+	if err := deleteFn(c, id); err != nil {
+		return err
+	}
+
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, id)
+		return nil
+	}
+
+	printer.PrintMessage(successFmt, id)
+	return nil
 }

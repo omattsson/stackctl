@@ -1,18 +1,23 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
+)
+
+const (
+	flagFromFile     = "from-file"
+	msgPathTraversal = "file path must not contain '..' segments"
 )
 
 var definitionCmd = &cobra.Command{
@@ -132,19 +137,19 @@ Examples:
   stackctl definition create --from-file definition.json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fromFile, _ := cmd.Flags().GetString("from-file")
+		fromFile, _ := cmd.Flags().GetString(flagFromFile)
 
 		var req types.CreateDefinitionRequest
 		if fromFile != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
 				if segment == ".." {
-					return fmt.Errorf("file path must not contain '..' segments")
+					return errors.New(msgPathTraversal)
 				}
 			}
 			fromFile = filepath.Clean(fromFile)
 			data, err := os.ReadFile(fromFile)
 			if err != nil {
-				return fmt.Errorf("reading file %s: %w", fromFile, err)
+				return readFileErr(fromFile, err)
 			}
 			if err := json.Unmarshal(data, &req); err != nil {
 				return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
@@ -194,7 +199,7 @@ Examples:
 			return err
 		}
 
-		fromFile, _ := cmd.Flags().GetString("from-file")
+		fromFile, _ := cmd.Flags().GetString(flagFromFile)
 		name, _ := cmd.Flags().GetString("name")
 		description, _ := cmd.Flags().GetString("description")
 
@@ -206,13 +211,13 @@ Examples:
 		if fromFile != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
 				if segment == ".." {
-					return fmt.Errorf("file path must not contain '..' segments")
+					return errors.New(msgPathTraversal)
 				}
 			}
 			fromFile = filepath.Clean(fromFile)
 			data, err := os.ReadFile(fromFile)
 			if err != nil {
-				return fmt.Errorf("reading file %s: %w", fromFile, err)
+				return readFileErr(fromFile, err)
 			}
 			if err := json.Unmarshal(data, &req); err != nil {
 				return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
@@ -254,41 +259,11 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
-
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete definition %d. Continue? (y/n): ", id)
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
-		}
-
-		if err := c.DeleteDefinition(id); err != nil {
-			return err
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, id)
-			return nil
-		}
-
-		printer.PrintMessage("Deleted definition %d", id)
-		return nil
+		return deleteByID(cmd, args,
+			"This will permanently delete definition %d. Continue? (y/n): ",
+			func(c *client.Client, id uint) error { return c.DeleteDefinition(id) },
+			"Deleted definition %d",
+		)
 	},
 }
 
@@ -365,14 +340,14 @@ Examples:
 
 		for _, segment := range strings.Split(filepath.ToSlash(file), "/") {
 			if segment == ".." {
-				return fmt.Errorf("file path must not contain '..' segments")
+				return errors.New(msgPathTraversal)
 			}
 		}
 		file = filepath.Clean(file)
 
 		data, err := os.ReadFile(file)
 		if err != nil {
-			return fmt.Errorf("reading file %s: %w", file, err)
+			return readFileErr(file, err)
 		}
 
 		if !json.Valid(data) {
@@ -432,12 +407,12 @@ func init() {
 	// definition create flags
 	definitionCreateCmd.Flags().String("name", "", "Definition name")
 	definitionCreateCmd.Flags().String("description", "", "Definition description")
-	definitionCreateCmd.Flags().String("from-file", "", "Create from JSON file")
+	definitionCreateCmd.Flags().String(flagFromFile, "", "Create from JSON file")
 
 	// definition update flags
 	definitionUpdateCmd.Flags().String("name", "", "New definition name")
 	definitionUpdateCmd.Flags().String("description", "", "New definition description")
-	definitionUpdateCmd.Flags().String("from-file", "", "Update from JSON file")
+	definitionUpdateCmd.Flags().String(flagFromFile, "", "Update from JSON file")
 
 	// definition delete flags
 	definitionDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
@@ -458,4 +433,8 @@ func init() {
 	definitionCmd.AddCommand(definitionExportCmd)
 	definitionCmd.AddCommand(definitionImportCmd)
 	rootCmd.AddCommand(definitionCmd)
+}
+
+func readFileErr(path string, err error) error {
+	return fmt.Errorf("reading file %s: %w", path, err)
 }
