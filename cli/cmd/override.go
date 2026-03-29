@@ -1,15 +1,14 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
@@ -17,9 +16,8 @@ import (
 )
 
 const (
-	errReadConfirmationFmt = "reading confirmation: %w"
-	msgAborted             = "Aborted."
-	flagDescSkipConfirm    = "Skip confirmation prompt"
+	msgAborted          = "Aborted."
+	flagDescSkipConfirm = "Skip confirmation prompt"
 )
 
 var overrideCmd = &cobra.Command{
@@ -194,45 +192,9 @@ Examples:
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
-		chartID, err := parseID(args[1])
-		if err != nil {
-			return err
-		}
-
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will delete the value override for chart %d on instance %d. Continue? (y/n): ", chartID, instanceID)
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf(errReadConfirmationFmt, err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage(msgAborted)
-				return nil
-			}
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
-		}
-
-		if err := c.DeleteValueOverride(instanceID, chartID); err != nil {
-			return err
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, chartID)
-			return nil
-		}
-
-		printer.PrintMessage("Deleted value override for chart %d on instance %d", chartID, instanceID)
-		return nil
+		return deleteChartOverride(cmd, args, "value", func(c *client.Client, instanceID, chartID uint) error {
+			return c.DeleteValueOverride(instanceID, chartID)
+		})
 	},
 }
 
@@ -362,45 +324,9 @@ Examples:
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
-		chartID, err := parseID(args[1])
-		if err != nil {
-			return err
-		}
-
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will delete the branch override for chart %d on instance %d. Continue? (y/n): ", chartID, instanceID)
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf(errReadConfirmationFmt, err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage(msgAborted)
-				return nil
-			}
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
-		}
-
-		if err := c.DeleteBranchOverride(instanceID, chartID); err != nil {
-			return err
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, chartID)
-			return nil
-		}
-
-		printer.PrintMessage("Deleted branch override for chart %d on instance %d", chartID, instanceID)
-		return nil
+		return deleteChartOverride(cmd, args, "branch", func(c *client.Client, instanceID, chartID uint) error {
+			return c.DeleteBranchOverride(instanceID, chartID)
+		})
 	},
 }
 
@@ -540,18 +466,13 @@ Examples:
 			return err
 		}
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will delete the quota override for instance %d. Continue? (y/n): ", instanceID)
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf(errReadConfirmationFmt, err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage(msgAborted)
-				return nil
-			}
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the quota override for instance %d. Continue? (y/n): ", instanceID))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage(msgAborted)
+			return nil
 		}
 
 		c, err := newClient()
@@ -571,6 +492,43 @@ Examples:
 		printer.PrintMessage("Deleted quota override for instance %d", instanceID)
 		return nil
 	},
+}
+
+func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteFn func(*client.Client, uint, uint) error) error {
+	instanceID, err := parseID(args[0])
+	if err != nil {
+		return err
+	}
+	chartID, err := parseID(args[1])
+	if err != nil {
+		return err
+	}
+
+	confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the %s override for chart %d on instance %d. Continue? (y/n): ", kind, chartID, instanceID))
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		printer.PrintMessage(msgAborted)
+		return nil
+	}
+
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+
+	if err := deleteFn(c, instanceID, chartID); err != nil {
+		return err
+	}
+
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, chartID)
+		return nil
+	}
+
+	printer.PrintMessage("Deleted %s override for chart %d on instance %d", kind, chartID, instanceID)
+	return nil
 }
 
 // parseScalarValue converts a string value to the appropriate Go type.

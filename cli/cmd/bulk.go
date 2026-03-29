@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -107,18 +105,13 @@ Examples:
 			return err
 		}
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will clean %d stack instances. Continue? (y/n): ", len(ids))
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will clean %d stack instances. Continue? (y/n): ", len(ids)))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage("Aborted.")
+			return nil
 		}
 
 		c, err := newClient()
@@ -156,18 +149,13 @@ Examples:
 			return err
 		}
 
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete %d stack instances. Continue? (y/n): ", len(ids))
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d stack instances. Continue? (y/n): ", len(ids)))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage("Aborted.")
+			return nil
 		}
 
 		c, err := newClient()

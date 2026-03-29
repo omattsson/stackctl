@@ -1,16 +1,15 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
@@ -150,7 +149,7 @@ Examples:
 			fromFile = filepath.Clean(fromFile)
 			data, err := os.ReadFile(fromFile)
 			if err != nil {
-				return fmt.Errorf("reading file %s: %w", fromFile, err)
+				return readFileErr(fromFile, err)
 			}
 			if err := json.Unmarshal(data, &req); err != nil {
 				return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
@@ -218,7 +217,7 @@ Examples:
 			fromFile = filepath.Clean(fromFile)
 			data, err := os.ReadFile(fromFile)
 			if err != nil {
-				return fmt.Errorf("reading file %s: %w", fromFile, err)
+				return readFileErr(fromFile, err)
 			}
 			if err := json.Unmarshal(data, &req); err != nil {
 				return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
@@ -260,41 +259,11 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
-
-		yes, _ := cmd.Flags().GetBool("yes")
-		if !yes {
-			fmt.Fprintf(cmd.ErrOrStderr(), "This will permanently delete definition %d. Continue? (y/n): ", id)
-			reader := bufio.NewReader(cmd.InOrStdin())
-			answer, err := reader.ReadString('\n')
-			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
-			}
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
-		}
-
-		if err := c.DeleteDefinition(id); err != nil {
-			return err
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, id)
-			return nil
-		}
-
-		printer.PrintMessage("Deleted definition %d", id)
-		return nil
+		return deleteByID(cmd, args,
+			"This will permanently delete definition %d. Continue? (y/n): ",
+			func(c *client.Client, id uint) error { return c.DeleteDefinition(id) },
+			"Deleted definition %d",
+		)
 	},
 }
 
@@ -378,7 +347,7 @@ Examples:
 
 		data, err := os.ReadFile(file)
 		if err != nil {
-			return fmt.Errorf("reading file %s: %w", file, err)
+			return readFileErr(file, err)
 		}
 
 		if !json.Valid(data) {
@@ -464,4 +433,8 @@ func init() {
 	definitionCmd.AddCommand(definitionExportCmd)
 	definitionCmd.AddCommand(definitionImportCmd)
 	rootCmd.AddCommand(definitionCmd)
+}
+
+func readFileErr(path string, err error) error {
+	return fmt.Errorf("reading file %s: %w", path, err)
 }
