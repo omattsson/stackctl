@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const flagDescIDs = "Comma-separated list of instance IDs"
+
 var bulkCmd = &cobra.Command{
 	Use:   "bulk",
 	Short: "Bulk operations on stack instances",
@@ -183,14 +185,14 @@ Examples:
 }
 
 func init() {
-	bulkDeployCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
+	bulkDeployCmd.Flags().String("ids", "", flagDescIDs)
 
-	bulkStopCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
+	bulkStopCmd.Flags().String("ids", "", flagDescIDs)
 
-	bulkCleanCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
+	bulkCleanCmd.Flags().String("ids", "", flagDescIDs)
 	bulkCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
-	bulkDeleteCmd.Flags().String("ids", "", "Comma-separated list of instance IDs")
+	bulkDeleteCmd.Flags().String("ids", "", flagDescIDs)
 	bulkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	bulkCmd.AddCommand(bulkDeployCmd)

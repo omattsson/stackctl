@@ -16,6 +16,13 @@ import (
 const defaultTimeout = 30 * time.Second
 const maxServerMessageLen = 256
 
+const (
+	pathDefinition     = "/api/v1/stack-definitions/%d"
+	pathOverride       = "/api/v1/stack-instances/%d/overrides/%d"
+	pathBranchOverride = "/api/v1/stack-instances/%d/branches/%d"
+	pathQuotaOverride  = "/api/v1/stack-instances/%d/quota-overrides"
+)
+
 // Client is the HTTP client for the k8s-stack-manager API.
 // TLS configuration (insecure mode) is handled by the caller setting
 // HTTPClient.Transport before making requests.
@@ -417,7 +424,7 @@ func (c *Client) ListDefinitions(params map[string]string) (*types.ListResponse[
 // GetDefinition returns a single stack definition by ID.
 func (c *Client) GetDefinition(id uint) (*types.StackDefinition, error) {
 	var def types.StackDefinition
-	err := c.Get(fmt.Sprintf("/api/v1/stack-definitions/%d", id), &def)
+	err := c.Get(fmt.Sprintf(pathDefinition, id), &def)
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +444,7 @@ func (c *Client) CreateDefinition(req *types.CreateDefinitionRequest) (*types.St
 // UpdateDefinition updates an existing stack definition.
 func (c *Client) UpdateDefinition(id uint, req *types.UpdateDefinitionRequest) (*types.StackDefinition, error) {
 	var def types.StackDefinition
-	err := c.Put(fmt.Sprintf("/api/v1/stack-definitions/%d", id), req, &def)
+	err := c.Put(fmt.Sprintf(pathDefinition, id), req, &def)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +453,7 @@ func (c *Client) UpdateDefinition(id uint, req *types.UpdateDefinitionRequest) (
 
 // DeleteDefinition deletes a stack definition by ID.
 func (c *Client) DeleteDefinition(id uint) error {
-	return c.Delete(fmt.Sprintf("/api/v1/stack-definitions/%d", id))
+	return c.Delete(fmt.Sprintf(pathDefinition, id))
 }
 
 // ExportDefinition exports a stack definition as raw JSON bytes.
@@ -496,7 +503,7 @@ func (c *Client) ListValueOverrides(instanceID uint) ([]types.ValueOverride, err
 // GetValueOverride returns a single value override for a chart.
 func (c *Client) GetValueOverride(instanceID, chartID uint) (*types.ValueOverride, error) {
 	var override types.ValueOverride
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/overrides/%d", instanceID, chartID), &override)
+	err := c.Get(fmt.Sprintf(pathOverride, instanceID, chartID), &override)
 	if err != nil {
 		return nil, err
 	}
@@ -506,7 +513,7 @@ func (c *Client) GetValueOverride(instanceID, chartID uint) (*types.ValueOverrid
 // SetValueOverride sets value overrides for a chart.
 func (c *Client) SetValueOverride(instanceID, chartID uint, req *types.SetValueOverrideRequest) (*types.ValueOverride, error) {
 	var override types.ValueOverride
-	err := c.Put(fmt.Sprintf("/api/v1/stack-instances/%d/overrides/%d", instanceID, chartID), req, &override)
+	err := c.Put(fmt.Sprintf(pathOverride, instanceID, chartID), req, &override)
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +522,7 @@ func (c *Client) SetValueOverride(instanceID, chartID uint, req *types.SetValueO
 
 // DeleteValueOverride deletes a value override for a chart.
 func (c *Client) DeleteValueOverride(instanceID, chartID uint) error {
-	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%d/overrides/%d", instanceID, chartID))
+	return c.Delete(fmt.Sprintf(pathOverride, instanceID, chartID))
 }
 
 // ListBranchOverrides returns all branch overrides for a stack instance.
@@ -531,7 +538,7 @@ func (c *Client) ListBranchOverrides(instanceID uint) ([]types.BranchOverride, e
 // GetBranchOverride returns a single branch override for a chart.
 func (c *Client) GetBranchOverride(instanceID, chartID uint) (*types.BranchOverride, error) {
 	var override types.BranchOverride
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/branches/%d", instanceID, chartID), &override)
+	err := c.Get(fmt.Sprintf(pathBranchOverride, instanceID, chartID), &override)
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +548,7 @@ func (c *Client) GetBranchOverride(instanceID, chartID uint) (*types.BranchOverr
 // SetBranchOverride sets a branch override for a chart.
 func (c *Client) SetBranchOverride(instanceID, chartID uint, req *types.SetBranchOverrideRequest) (*types.BranchOverride, error) {
 	var override types.BranchOverride
-	err := c.Put(fmt.Sprintf("/api/v1/stack-instances/%d/branches/%d", instanceID, chartID), req, &override)
+	err := c.Put(fmt.Sprintf(pathBranchOverride, instanceID, chartID), req, &override)
 	if err != nil {
 		return nil, err
 	}
@@ -550,13 +557,13 @@ func (c *Client) SetBranchOverride(instanceID, chartID uint, req *types.SetBranc
 
 // DeleteBranchOverride deletes a branch override for a chart.
 func (c *Client) DeleteBranchOverride(instanceID, chartID uint) error {
-	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%d/branches/%d", instanceID, chartID))
+	return c.Delete(fmt.Sprintf(pathBranchOverride, instanceID, chartID))
 }
 
 // GetQuotaOverride returns the quota override for a stack instance.
 func (c *Client) GetQuotaOverride(instanceID uint) (*types.QuotaOverride, error) {
 	var override types.QuotaOverride
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/quota-overrides", instanceID), &override)
+	err := c.Get(fmt.Sprintf(pathQuotaOverride, instanceID), &override)
 	if err != nil {
 		return nil, err
 	}
@@ -566,7 +573,7 @@ func (c *Client) GetQuotaOverride(instanceID uint) (*types.QuotaOverride, error)
 // SetQuotaOverride sets the quota override for a stack instance.
 func (c *Client) SetQuotaOverride(instanceID uint, req *types.SetQuotaOverrideRequest) (*types.QuotaOverride, error) {
 	var override types.QuotaOverride
-	err := c.Put(fmt.Sprintf("/api/v1/stack-instances/%d/quota-overrides", instanceID), req, &override)
+	err := c.Put(fmt.Sprintf(pathQuotaOverride, instanceID), req, &override)
 	if err != nil {
 		return nil, err
 	}
@@ -575,7 +582,7 @@ func (c *Client) SetQuotaOverride(instanceID uint, req *types.SetQuotaOverrideRe
 
 // DeleteQuotaOverride deletes the quota override for a stack instance.
 func (c *Client) DeleteQuotaOverride(instanceID uint) error {
-	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%d/quota-overrides", instanceID))
+	return c.Delete(fmt.Sprintf(pathQuotaOverride, instanceID))
 }
 
 // GetMergedValues returns the merged Helm values for a stack instance.

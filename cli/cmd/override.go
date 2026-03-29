@@ -16,6 +16,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	errReadConfirmation = "reading confirmation: %w"
+	msgAborted          = "Aborted."
+	flagDescSkipConfirm = "Skip confirmation prompt"
+)
+
 var overrideCmd = &cobra.Command{
 	Use:   "override",
 	Short: "Manage value, branch, and quota overrides",
@@ -203,10 +209,10 @@ Examples:
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
 			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
+				return fmt.Errorf(errReadConfirmation, err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
+				printer.PrintMessage(msgAborted)
 				return nil
 			}
 		}
@@ -371,10 +377,10 @@ Examples:
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
 			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
+				return fmt.Errorf(errReadConfirmation, err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
+				printer.PrintMessage(msgAborted)
 				return nil
 			}
 		}
@@ -540,10 +546,10 @@ Examples:
 			reader := bufio.NewReader(cmd.InOrStdin())
 			answer, err := reader.ReadString('\n')
 			if err != nil && (err != io.EOF || answer == "") {
-				return fmt.Errorf("reading confirmation: %w", err)
+				return fmt.Errorf(errReadConfirmation, err)
 			}
 			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				printer.PrintMessage("Aborted.")
+				printer.PrintMessage(msgAborted)
 				return nil
 			}
 		}
@@ -615,10 +621,10 @@ func init() {
 	overrideSetCmd.Flags().StringSlice("set", nil, "Set a value (key=value), repeatable")
 
 	// override delete flags
-	overrideDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	overrideDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
 
 	// branch delete flags
-	overrideBranchDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	overrideBranchDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
 
 	// quota set flags
 	overrideQuotaSetCmd.Flags().String("cpu-request", "", "CPU request (e.g. 100m)")
@@ -627,7 +633,7 @@ func init() {
 	overrideQuotaSetCmd.Flags().String("memory-limit", "", "Memory limit (e.g. 512Mi)")
 
 	// quota delete flags
-	overrideQuotaDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	overrideQuotaDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
 
 	// Wire up branch subcommands
 	overrideBranchCmd.AddCommand(overrideBranchListCmd)
