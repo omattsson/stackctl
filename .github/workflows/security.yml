@@ -27,7 +27,7 @@ jobs:
           cache-dependency-path: cli/go.sum
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
       - name: Run govulncheck
         working-directory: cli
@@ -37,6 +37,7 @@ jobs:
     name: CodeQL
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
 
