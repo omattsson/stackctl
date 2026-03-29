@@ -2,6 +2,10 @@
 
 Command-line interface for [K8s Stack Manager](https://github.com/omattsson/k8s-stack-manager) — create, deploy, monitor, and manage Helm-based application stacks across Kubernetes clusters.
 
+<p align="center">
+  <img src="assets/stackctl-help.svg" alt="stackctl CLI" width="700">
+</p>
+
 ## Installation
 
 ### From source
@@ -97,6 +101,10 @@ Configuration values are resolved in this order (highest priority first):
 ## Usage
 
 ### Stack Instances
+
+<p align="center">
+  <img src="assets/stackctl-stack.svg" alt="stackctl stack commands" width="700">
+</p>
 
 ```bash
 # List instances
