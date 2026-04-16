@@ -17,7 +17,7 @@ const defaultTimeout = 30 * time.Second
 const maxServerMessageLen = 256
 
 const (
-	pathDefinition     = "/api/v1/stack-definitions/%d"
+	pathDefinition     = "/api/v1/stack-definitions/%s"
 	pathOverride       = "/api/v1/stack-instances/%s/overrides/%s"
 	pathBranchOverride = "/api/v1/stack-instances/%s/branches/%s"
 	pathQuotaOverride  = "/api/v1/stack-instances/%s/quota-overrides"
@@ -303,7 +303,7 @@ func (c *Client) DeleteStack(id string) error {
 // DeployStack triggers a deployment for a stack instance.
 func (c *Client) DeployStack(id string) (*types.DeploymentLog, error) {
 	var log types.DeploymentLog
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/deploy", id), nil, &log)
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/deploy", id), nil, &log)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +313,7 @@ func (c *Client) DeployStack(id string) (*types.DeploymentLog, error) {
 // StopStack triggers a stop for a stack instance.
 func (c *Client) StopStack(id string) (*types.DeploymentLog, error) {
 	var log types.DeploymentLog
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/stop", id), nil, &log)
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/stop", id), nil, &log)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,7 @@ func (c *Client) StopStack(id string) (*types.DeploymentLog, error) {
 // CleanStack triggers an undeploy and namespace removal for a stack instance.
 func (c *Client) CleanStack(id string) (*types.DeploymentLog, error) {
 	var log types.DeploymentLog
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/clean", id), nil, &log)
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/clean", id), nil, &log)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +333,7 @@ func (c *Client) CleanStack(id string) (*types.DeploymentLog, error) {
 // GetStackStatus returns the current status and pod states for a stack instance.
 func (c *Client) GetStackStatus(id string) (*types.InstanceStatus, error) {
 	var status types.InstanceStatus
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/status", id), &status)
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/status", id), &status)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +343,7 @@ func (c *Client) GetStackStatus(id string) (*types.InstanceStatus, error) {
 // GetStackLogs returns the latest deployment log for a stack instance.
 func (c *Client) GetStackLogs(id string) (*types.DeploymentLog, error) {
 	var log types.DeploymentLog
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/deploy-log", id), &log)
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/deploy-log", id), &log)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +353,7 @@ func (c *Client) GetStackLogs(id string) (*types.DeploymentLog, error) {
 // CloneStack clones a stack instance and returns the new instance.
 func (c *Client) CloneStack(id string) (*types.StackInstance, error) {
 	var instance types.StackInstance
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/clone", id), nil, &instance)
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/clone", id), nil, &instance)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +364,7 @@ func (c *Client) CloneStack(id string) (*types.StackInstance, error) {
 func (c *Client) ExtendStack(id string, minutes int) (*types.StackInstance, error) {
 	var instance types.StackInstance
 	body := map[string]int{"ttl_minutes": minutes}
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/extend", id), body, &instance)
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/extend", id), body, &instance)
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +394,7 @@ func (c *Client) GetTemplate(id string) (*types.StackTemplate, error) {
 // InstantiateTemplate creates a new stack instance from a template.
 func (c *Client) InstantiateTemplate(id string, req *types.InstantiateTemplateRequest) (*types.StackInstance, error) {
 	var instance types.StackInstance
-	err := c.Post(fmt.Sprintf("/api/v1/templates/%d/instantiate", id), req, &instance)
+	err := c.Post(fmt.Sprintf("/api/v1/templates/%s/instantiate", id), req, &instance)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +404,7 @@ func (c *Client) InstantiateTemplate(id string, req *types.InstantiateTemplateRe
 // QuickDeployTemplate creates and deploys a stack instance from a template in one step.
 func (c *Client) QuickDeployTemplate(id string, req *types.QuickDeployRequest) (*types.StackInstance, error) {
 	var instance types.StackInstance
-	err := c.Post(fmt.Sprintf("/api/v1/templates/%d/quick-deploy", id), req, &instance)
+	err := c.Post(fmt.Sprintf("/api/v1/templates/%s/quick-deploy", id), req, &instance)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +458,7 @@ func (c *Client) DeleteDefinition(id string) error {
 
 // ExportDefinition exports a stack definition as raw JSON bytes.
 func (c *Client) ExportDefinition(id string) ([]byte, error) {
-	resp, err := c.do(http.MethodGet, fmt.Sprintf("/api/v1/stack-definitions/%d/export", id), nil)
+	resp, err := c.do(http.MethodGet, fmt.Sprintf("/api/v1/stack-definitions/%s/export", id), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -603,8 +603,8 @@ func (c *Client) GetMergedValues(instanceID string, chartName string) (*types.Me
 func (c *Client) CompareInstances(leftID, rightID string) (*types.CompareResult, error) {
 	var result types.CompareResult
 	params := map[string]string{
-		"left":  fmt.Sprintf("%d", leftID),
-		"right": fmt.Sprintf("%d", rightID),
+		"left":  leftID,
+		"right": rightID,
 	}
 	err := c.GetWithQuery("/api/v1/stack-instances/compare", params, &result)
 	if err != nil {
@@ -697,7 +697,7 @@ func (c *Client) GetCluster(id string) (*types.Cluster, error) {
 // GetClusterHealth returns the health summary for a cluster.
 func (c *Client) GetClusterHealth(id string) (*types.ClusterHealthSummary, error) {
 	var health types.ClusterHealthSummary
-	err := c.Get(fmt.Sprintf("/api/v1/clusters/%d/health/summary", id), &health)
+	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/health/summary", id), &health)
 	if err != nil {
 		return nil, err
 	}

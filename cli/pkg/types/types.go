@@ -161,9 +161,9 @@ type InstantiateTemplateRequest struct {
 
 // QuickDeployRequest is the request body for POST /api/v1/templates/:id/quick-deploy.
 type QuickDeployRequest struct {
-	Name      string `json:"name" yaml:"name"`
+	Name      string `json:"instance_name" yaml:"instance_name"`
 	Branch    string `json:"branch,omitempty" yaml:"branch,omitempty"`
-	ClusterID string   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	ClusterID string `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
 }
 
 // CreateDefinitionRequest is the request body for POST /api/v1/stack-definitions.

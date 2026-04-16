@@ -260,9 +260,9 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return deleteByID(cmd, args,
-			"This will permanently delete definition %d. Continue? (y/n): ",
+			"This will permanently delete definition %s. Continue? (y/n): ",
 			func(c *client.Client, id string) error { return c.DeleteDefinition(id) },
-			"Deleted definition %d",
+			"Deleted definition %s",
 		)
 	},
 }
@@ -309,7 +309,7 @@ Examples:
 			if printer.Quiet {
 				fmt.Fprintln(printer.Writer, id)
 			} else {
-				printer.PrintMessage("Exported definition %d to %s", id, outputFile)
+				printer.PrintMessage("Exported definition %s to %s", id, outputFile)
 			}
 			return nil
 		}

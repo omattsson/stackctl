@@ -213,7 +213,7 @@ Examples:
 			return nil
 		}
 
-		printer.PrintMessage("Deploying stack %d... (log ID: %d)", id, log.ID)
+		printer.PrintMessage("Deploying stack %s... (log ID: %s)", id, log.ID)
 		return nil
 	},
 }
@@ -248,7 +248,7 @@ Examples:
 			return nil
 		}
 
-		printer.PrintMessage("Stopping stack %d... (log ID: %d)", id, log.ID)
+		printer.PrintMessage("Stopping stack %s... (log ID: %s)", id, log.ID)
 		return nil
 	},
 }
@@ -296,7 +296,7 @@ Examples:
 			return nil
 		}
 
-		printer.PrintMessage("Cleaning stack %d... (log ID: %d)", id, log.ID)
+		printer.PrintMessage("Cleaning stack %s... (log ID: %s)", id, log.ID)
 		return nil
 	},
 }
@@ -316,9 +316,9 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return deleteByID(cmd, args,
-			"This will permanently delete stack %d. Continue? (y/n): ",
+			"This will permanently delete stack %s. Continue? (y/n): ",
 			func(c *client.Client, id string) error { return c.DeleteStack(id) },
-			"Deleted stack %d",
+			"Deleted stack %s",
 		)
 	},
 }
@@ -464,7 +464,7 @@ Examples:
 			return nil
 		}
 
-		printer.PrintMessage("Cloned stack %d → new stack %d", id, instance.ID)
+		printer.PrintMessage("Cloned stack %s → new stack %s", id, instance.ID)
 		return nil
 	},
 }
@@ -505,7 +505,7 @@ Examples:
 			return nil
 		}
 
-		printer.PrintMessage("Extended stack %d TTL by %d minutes", id, minutes)
+		printer.PrintMessage("Extended stack %s TTL by %d minutes", id, minutes)
 		return nil
 	},
 }

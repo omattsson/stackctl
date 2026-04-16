@@ -466,7 +466,7 @@ Examples:
 			return err
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the quota override for instance %d. Continue? (y/n): ", instanceID))
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the quota override for instance %s. Continue? (y/n): ", instanceID))
 		if err != nil {
 			return err
 		}
@@ -504,7 +504,7 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 		return err
 	}
 
-	confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the %s override for chart %d on instance %d. Continue? (y/n): ", kind, chartID, instanceID))
+	confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the %s override for chart %s on instance %s. Continue? (y/n): ", kind, chartID, instanceID))
 	if err != nil {
 		return err
 	}
