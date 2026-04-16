@@ -673,14 +673,15 @@ func (c *Client) ValidateGitBranch(repo, branch string) (*types.GitValidateRespo
 	return &resp, nil
 }
 
-// ListClusters returns a paginated list of clusters.
-func (c *Client) ListClusters() (*types.ListResponse[types.Cluster], error) {
-	var resp types.ListResponse[types.Cluster]
+// ListClusters returns all registered clusters.
+// The backend returns a plain array, not a paginated ListResponse.
+func (c *Client) ListClusters() ([]types.Cluster, error) {
+	var resp []types.Cluster
 	err := c.Get("/api/v1/clusters", &resp)
 	if err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	return resp, nil
 }
 
 // GetCluster returns a single cluster by ID.

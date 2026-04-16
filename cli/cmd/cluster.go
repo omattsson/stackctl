@@ -32,14 +32,14 @@ Examples:
 			return err
 		}
 
-		resp, err := c.ListClusters()
+		clusters, err := c.ListClusters()
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			ids := make([]string, len(resp.Data))
-			for i, cl := range resp.Data {
+			ids := make([]string, len(clusters))
+			for i, cl := range clusters {
 				ids[i] = cl.ID
 			}
 			printer.PrintIDs(ids)
@@ -48,13 +48,13 @@ Examples:
 
 		switch printer.Format {
 		case output.FormatJSON:
-			return printer.PrintJSON(resp)
+			return printer.PrintJSON(clusters)
 		case output.FormatYAML:
-			return printer.PrintYAML(resp)
+			return printer.PrintYAML(clusters)
 		default:
 			headers := []string{"ID", "NAME", "STATUS", "DEFAULT", "NODES"}
-			rows := make([][]string, len(resp.Data))
-			for i, cl := range resp.Data {
+			rows := make([][]string, len(clusters))
+			for i, cl := range clusters {
 				isDefault := "false"
 				if cl.IsDefault {
 					isDefault = "true"
