@@ -67,7 +67,7 @@ Examples:
 		}
 
 		if printer.Quiet {
-			ids := make([]uint, len(resp.Data))
+			ids := make([]string, len(resp.Data))
 			for i, d := range resp.Data {
 				ids[i] = d.ID
 			}
@@ -85,7 +85,7 @@ Examples:
 			rows := make([][]string, len(resp.Data))
 			for i, d := range resp.Data {
 				rows[i] = []string{
-					strconv.FormatUint(uint64(d.ID), 10),
+					d.ID,
 					d.Name,
 					d.Description,
 					d.Owner,
@@ -261,7 +261,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return deleteByID(cmd, args,
 			"This will permanently delete definition %d. Continue? (y/n): ",
-			func(c *client.Client, id uint) error { return c.DeleteDefinition(id) },
+			func(c *client.Client, id string) error { return c.DeleteDefinition(id) },
 			"Deleted definition %d",
 		)
 	},
@@ -382,7 +382,7 @@ func printDefinition(def *types.StackDefinition) error {
 		return printer.PrintYAML(def)
 	default:
 		fields := []output.KeyValue{
-			{Key: "ID", Value: strconv.FormatUint(uint64(def.ID), 10)},
+			{Key: "ID", Value: def.ID},
 			{Key: "Name", Value: def.Name},
 			{Key: "Description", Value: def.Description},
 			{Key: "Owner", Value: def.Owner},

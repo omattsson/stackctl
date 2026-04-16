@@ -190,7 +190,7 @@ func init() {
 	rootCmd.AddCommand(bulkCmd)
 }
 
-func parseBulkIDs(cmd *cobra.Command, args []string) ([]uint, error) {
+func parseBulkIDs(cmd *cobra.Command, args []string) ([]string, error) {
 	var rawParts []string
 
 	idsStr, _ := cmd.Flags().GetString("ids")
@@ -199,8 +199,8 @@ func parseBulkIDs(cmd *cobra.Command, args []string) ([]uint, error) {
 	}
 	rawParts = append(rawParts, args...)
 
-	seen := make(map[uint]bool)
-	ids := make([]uint, 0, len(rawParts))
+	seen := make(map[string]bool)
+	ids := make([]string, 0, len(rawParts))
 	for _, p := range rawParts {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -210,11 +210,11 @@ func parseBulkIDs(cmd *cobra.Command, args []string) ([]uint, error) {
 		if err != nil || id == 0 {
 			return nil, fmt.Errorf("invalid ID %q: must be a positive integer", p)
 		}
-		if seen[uint(id)] {
+		if seen[p] {
 			continue
 		}
-		seen[uint(id)] = true
-		ids = append(ids, uint(id))
+		seen[p] = true
+		ids = append(ids, p)
 	}
 
 	if len(ids) == 0 {
@@ -252,7 +252,7 @@ func printBulkResults(resp *types.BulkResponse) error {
 				status = "failed"
 			}
 			rows[i] = []string{
-				strconv.FormatUint(uint64(r.ID), 10),
+				r.ID,
 				printer.StatusColor(status),
 				r.Error,
 			}

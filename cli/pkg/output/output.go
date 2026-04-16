@@ -63,7 +63,7 @@ func (p *Printer) PrintYAML(v interface{}) error {
 }
 
 // PrintIDs outputs a list of IDs, one per line (for --quiet mode).
-func (p *Printer) PrintIDs(ids []uint) {
+func (p *Printer) PrintIDs(ids []string) {
 	for _, id := range ids {
 		fmt.Fprintln(p.Writer, id)
 	}
@@ -115,7 +115,7 @@ func (p *Printer) PrintTable(headers []string, rows [][]string) error {
 
 // Print outputs data in the configured format. For table format, it uses the provided
 // headers and rows. For JSON/YAML, it outputs the raw data.
-func (p *Printer) Print(data interface{}, headers []string, rows [][]string, ids []uint) error {
+func (p *Printer) Print(data interface{}, headers []string, rows [][]string, ids []string) error {
 	if p.Quiet {
 		p.PrintIDs(ids)
 		return nil

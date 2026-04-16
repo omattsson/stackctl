@@ -4,24 +4,24 @@ import "time"
 
 // Base fields shared by all API resources.
 type Base struct {
-	ID        uint       `json:"id" yaml:"id"`
+	ID        string       `json:"id" yaml:"id"`
 	CreatedAt time.Time  `json:"created_at" yaml:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at" yaml:"updated_at"`
 	DeletedAt *time.Time `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
-	Version   uint       `json:"version" yaml:"version"`
+	Version   string       `json:"version" yaml:"version"`
 }
 
 // StackInstance represents a deployed stack instance.
 type StackInstance struct {
 	Base
 	Name              string     `json:"name" yaml:"name"`
-	StackDefinitionID uint       `json:"stack_definition_id" yaml:"stack_definition_id"`
+	StackDefinitionID string       `json:"stack_definition_id" yaml:"stack_definition_id"`
 	DefinitionName    string     `json:"definition_name,omitempty" yaml:"definition_name,omitempty"`
 	Owner             string     `json:"owner" yaml:"owner"`
 	Branch            string     `json:"branch" yaml:"branch"`
 	Namespace         string     `json:"namespace" yaml:"namespace"`
 	Status            string     `json:"status" yaml:"status"`
-	ClusterID         *uint      `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	ClusterID         *string      `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
 	ClusterName       string     `json:"cluster_name,omitempty" yaml:"cluster_name,omitempty"`
 	TTLMinutes        int        `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
@@ -81,9 +81,9 @@ type User struct {
 // namespace, status are excluded to avoid backend validation errors.
 type CreateStackRequest struct {
 	Name              string `json:"name" yaml:"name"`
-	StackDefinitionID uint   `json:"stack_definition_id" yaml:"stack_definition_id"`
+	StackDefinitionID string   `json:"stack_definition_id" yaml:"stack_definition_id"`
 	Branch            string `json:"branch,omitempty" yaml:"branch,omitempty"`
-	ClusterID         uint   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	ClusterID         string   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
 	TTLMinutes        int    `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
 }
 
@@ -103,7 +103,7 @@ type LoginResponse struct {
 // DeploymentLog represents a deployment log entry.
 type DeploymentLog struct {
 	Base
-	InstanceID uint   `json:"instance_id" yaml:"instance_id"`
+	InstanceID string   `json:"instance_id" yaml:"instance_id"`
 	Action     string `json:"action" yaml:"action"`
 	Status     string `json:"status" yaml:"status"`
 	Output     string `json:"output,omitempty" yaml:"output,omitempty"`
@@ -120,7 +120,7 @@ type ListResponse[T any] struct {
 
 // BulkOperationResult represents the result of a bulk operation.
 type BulkOperationResult struct {
-	ID      uint   `json:"id" yaml:"id"`
+	ID      string   `json:"id" yaml:"id"`
 	Success bool   `json:"success" yaml:"success"`
 	Error   string `json:"error,omitempty" yaml:"error,omitempty"`
 }
@@ -133,16 +133,16 @@ type BulkResponse struct {
 // ValueOverride represents a per-chart value override.
 type ValueOverride struct {
 	Base
-	InstanceID uint   `json:"instance_id" yaml:"instance_id"`
-	ChartID    uint   `json:"chart_id" yaml:"chart_id"`
+	InstanceID string   `json:"instance_id" yaml:"instance_id"`
+	ChartID    string   `json:"chart_id" yaml:"chart_id"`
 	Values     string `json:"values" yaml:"values"`
 }
 
 // BranchOverride represents a per-chart branch override.
 type BranchOverride struct {
 	Base
-	InstanceID uint   `json:"instance_id" yaml:"instance_id"`
-	ChartID    uint   `json:"chart_id" yaml:"chart_id"`
+	InstanceID string   `json:"instance_id" yaml:"instance_id"`
+	ChartID    string   `json:"chart_id" yaml:"chart_id"`
 	Branch     string `json:"branch" yaml:"branch"`
 }
 
@@ -156,14 +156,14 @@ type GitBranch struct {
 type InstantiateTemplateRequest struct {
 	Name      string `json:"name" yaml:"name"`
 	Branch    string `json:"branch,omitempty" yaml:"branch,omitempty"`
-	ClusterID uint   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	ClusterID string   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
 }
 
 // QuickDeployRequest is the request body for POST /api/v1/templates/:id/quick-deploy.
 type QuickDeployRequest struct {
 	Name      string `json:"name" yaml:"name"`
 	Branch    string `json:"branch,omitempty" yaml:"branch,omitempty"`
-	ClusterID uint   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	ClusterID string   `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
 }
 
 // CreateDefinitionRequest is the request body for POST /api/v1/stack-definitions.
@@ -182,7 +182,7 @@ type UpdateDefinitionRequest struct {
 
 // BulkRequest is the request body for bulk operations.
 type BulkRequest struct {
-	IDs []uint `json:"ids" yaml:"ids"`
+	IDs []string `json:"ids" yaml:"ids"`
 }
 
 // GitValidateResponse represents the result of branch validation.
@@ -230,7 +230,7 @@ type InstanceStatus struct {
 // QuotaOverride represents a per-instance resource quota override.
 // Unlike other override types, the API returns quota overrides without standard Base fields (ID, Version).
 type QuotaOverride struct {
-	InstanceID uint      `json:"instance_id" yaml:"instance_id"`
+	InstanceID string      `json:"instance_id" yaml:"instance_id"`
 	CPURequest string    `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
 	CPULimit   string    `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
 	MemRequest string    `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
@@ -258,7 +258,7 @@ type SetQuotaOverrideRequest struct {
 
 // MergedValues represents the merged Helm values for an instance.
 type MergedValues struct {
-	InstanceID uint                              `json:"instance_id" yaml:"instance_id"`
+	InstanceID string                              `json:"instance_id" yaml:"instance_id"`
 	Charts     map[string]map[string]interface{} `json:"charts" yaml:"charts"`
 }
 

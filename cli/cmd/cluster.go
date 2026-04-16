@@ -38,7 +38,7 @@ Examples:
 		}
 
 		if printer.Quiet {
-			ids := make([]uint, len(resp.Data))
+			ids := make([]string, len(resp.Data))
 			for i, cl := range resp.Data {
 				ids[i] = cl.ID
 			}
@@ -60,7 +60,7 @@ Examples:
 					isDefault = "true"
 				}
 				rows[i] = []string{
-					strconv.FormatUint(uint64(cl.ID), 10),
+					cl.ID,
 					cl.Name,
 					printer.StatusColor(cl.Status),
 					isDefault,
@@ -140,7 +140,7 @@ Examples:
 				isDefault = "true"
 			}
 			fields := []output.KeyValue{
-				{Key: "ID", Value: strconv.FormatUint(uint64(cluster.ID), 10)},
+				{Key: "ID", Value: cluster.ID},
 				{Key: "Name", Value: cluster.Name},
 				{Key: "Description", Value: cluster.Description},
 				{Key: "Status", Value: printer.StatusColor(cluster.Status)},

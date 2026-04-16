@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"sort"
 	"strconv"
 	"time"
@@ -50,11 +51,11 @@ Examples:
 		if status, _ := cmd.Flags().GetString("status"); status != "" {
 			params["status"] = status
 		}
-		if cluster, _ := cmd.Flags().GetUint("cluster"); cluster != 0 {
-			params["cluster_id"] = strconv.FormatUint(uint64(cluster), 10)
+		if cluster, _ := cmd.Flags().GetString("cluster"); cluster != "" {
+			params["cluster_id"] = cluster
 		}
-		if def, _ := cmd.Flags().GetUint("definition"); def != 0 {
-			params["definition_id"] = strconv.FormatUint(uint64(def), 10)
+		if def, _ := cmd.Flags().GetString("definition"); def != "" {
+			params["definition_id"] = def
 		}
 		if cmd.Flags().Changed("page") {
 			page, _ := cmd.Flags().GetInt("page")
@@ -75,7 +76,7 @@ Examples:
 		}
 
 		if printer.Quiet {
-			ids := make([]uint, len(resp.Data))
+			ids := make([]string, len(resp.Data))
 			for i, s := range resp.Data {
 				ids[i] = s.ID
 			}
@@ -94,10 +95,10 @@ Examples:
 			for i, s := range resp.Data {
 				cluster := s.ClusterName
 				if cluster == "" && s.ClusterID != nil {
-					cluster = strconv.FormatUint(uint64(*s.ClusterID), 10)
+					cluster = *s.ClusterID
 				}
 				rows[i] = []string{
-					strconv.FormatUint(uint64(s.ID), 10),
+					s.ID,
 					s.Name,
 					printer.StatusColor(s.Status),
 					s.Owner,
@@ -152,9 +153,9 @@ Examples:
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-		defID, _ := cmd.Flags().GetUint("definition")
+		defID, _ := cmd.Flags().GetString("definition")
 		branch, _ := cmd.Flags().GetString("branch")
-		clusterID, _ := cmd.Flags().GetUint("cluster")
+		clusterID, _ := cmd.Flags().GetString("cluster")
 		ttl, _ := cmd.Flags().GetInt("ttl")
 		if ttl < 0 {
 			return fmt.Errorf("--ttl must be a non-negative integer (0 means no TTL)")
@@ -271,7 +272,7 @@ Examples:
 			return err
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will undeploy and remove the namespace for stack %d. Continue? (y/n): ", id))
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will undeploy and remove the namespace for stack %s. Continue? (y/n): ", id))
 		if err != nil {
 			return err
 		}
@@ -316,7 +317,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return deleteByID(cmd, args,
 			"This will permanently delete stack %d. Continue? (y/n): ",
-			func(c *client.Client, id uint) error { return c.DeleteStack(id) },
+			func(c *client.Client, id string) error { return c.DeleteStack(id) },
 			"Deleted stack %d",
 		)
 	},
@@ -422,7 +423,7 @@ Examples:
 			return printer.PrintYAML(log)
 		default:
 			fields := []output.KeyValue{
-				{Key: "Log ID", Value: strconv.FormatUint(uint64(log.ID), 10)},
+				{Key: "Log ID", Value: log.ID},
 				{Key: "Action", Value: log.Action},
 				{Key: "Status", Value: printer.StatusColor(log.Status)},
 				{Key: "Output", Value: log.Output},
@@ -631,17 +632,17 @@ func init() {
 	stackListCmd.Flags().Bool("mine", false, "Show only my stacks")
 	stackListCmd.Flags().String("owner", "", "Filter by owner")
 	stackListCmd.Flags().String("status", "", "Filter by status")
-	stackListCmd.Flags().Uint("cluster", 0, "Filter by cluster ID")
-	stackListCmd.Flags().Uint("definition", 0, "Filter by definition ID")
+	stackListCmd.Flags().String("cluster", "", "Filter by cluster ID")
+	stackListCmd.Flags().String("definition", "", "Filter by definition ID")
 	stackListCmd.Flags().Int("page", 0, "Page number")
 	stackListCmd.Flags().Int(flagPageSize, 0, "Page size")
 	stackListCmd.MarkFlagsMutuallyExclusive("mine", "owner")
 
 	// stack create flags
 	stackCreateCmd.Flags().String("name", "", "Stack instance name (required)")
-	stackCreateCmd.Flags().Uint("definition", 0, "Stack definition ID (required)")
+	stackCreateCmd.Flags().String("definition", "", "Stack definition ID (required)")
 	stackCreateCmd.Flags().String("branch", "", "Git branch")
-	stackCreateCmd.Flags().Uint("cluster", 0, "Target cluster ID")
+	stackCreateCmd.Flags().String("cluster", "", "Target cluster ID")
 	stackCreateCmd.Flags().Int("ttl", 0, "Time to live in minutes")
 	_ = stackCreateCmd.MarkFlagRequired("name")
 	_ = stackCreateCmd.MarkFlagRequired("definition")
@@ -677,12 +678,12 @@ func init() {
 }
 
 // parseID parses a string argument as a uint ID.
-func parseID(s string) (uint, error) {
-	id, err := strconv.ParseUint(s, 10, 64)
-	if err != nil || id == 0 {
-		return 0, fmt.Errorf("invalid ID %q: must be a positive integer", s)
+func parseID(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", fmt.Errorf("invalid ID: must not be empty")
 	}
-	return uint(id), nil
+	return s, nil
 }
 
 // formatTime formats a *time.Time as RFC3339 or returns "-" if nil.
@@ -708,17 +709,17 @@ func printInstance(instance *types.StackInstance) error {
 	default:
 		clusterID := "-"
 		if instance.ClusterID != nil {
-			clusterID = strconv.FormatUint(uint64(*instance.ClusterID), 10)
+			clusterID = *instance.ClusterID
 		}
 		fields := []output.KeyValue{
-			{Key: "ID", Value: strconv.FormatUint(uint64(instance.ID), 10)},
+			{Key: "ID", Value: instance.ID},
 			{Key: "Name", Value: instance.Name},
 			{Key: "Status", Value: printer.StatusColor(instance.Status)},
 			{Key: "Owner", Value: instance.Owner},
 			{Key: "Branch", Value: instance.Branch},
 			{Key: "Namespace", Value: instance.Namespace},
 			{Key: "Cluster ID", Value: clusterID},
-			{Key: "Definition ID", Value: strconv.FormatUint(uint64(instance.StackDefinitionID), 10)},
+			{Key: "Definition ID", Value: instance.StackDefinitionID},
 			{Key: "TTL", Value: strconv.Itoa(instance.TTLMinutes) + " minutes"},
 			{Key: "Expires At", Value: formatTime(instance.ExpiresAt)},
 			{Key: "Deployed At", Value: formatTime(instance.DeployedAt)},

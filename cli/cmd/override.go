@@ -76,8 +76,8 @@ Examples:
 					hasValues = "true"
 				}
 				rows[i] = []string{
-					strconv.FormatUint(uint64(o.ChartID), 10),
-					strconv.FormatUint(uint64(o.InstanceID), 10),
+					o.ChartID,
+					o.InstanceID,
 					hasValues,
 					o.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 				}
@@ -192,7 +192,7 @@ Examples:
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return deleteChartOverride(cmd, args, "value", func(c *client.Client, instanceID, chartID uint) error {
+		return deleteChartOverride(cmd, args, "value", func(c *client.Client, instanceID, chartID string) error {
 			return c.DeleteValueOverride(instanceID, chartID)
 		})
 	},
@@ -249,8 +249,8 @@ Examples:
 			rows := make([][]string, len(overrides))
 			for i, o := range overrides {
 				rows[i] = []string{
-					strconv.FormatUint(uint64(o.ChartID), 10),
-					strconv.FormatUint(uint64(o.InstanceID), 10),
+					o.ChartID,
+					o.InstanceID,
 					o.Branch,
 					o.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 				}
@@ -324,7 +324,7 @@ Examples:
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return deleteChartOverride(cmd, args, "branch", func(c *client.Client, instanceID, chartID uint) error {
+		return deleteChartOverride(cmd, args, "branch", func(c *client.Client, instanceID, chartID string) error {
 			return c.DeleteBranchOverride(instanceID, chartID)
 		})
 	},
@@ -376,7 +376,7 @@ Examples:
 			return printer.PrintYAML(quota)
 		default:
 			fields := []output.KeyValue{
-				{Key: "Instance ID", Value: strconv.FormatUint(uint64(quota.InstanceID), 10)},
+				{Key: "Instance ID", Value: quota.InstanceID},
 				{Key: "CPU Request", Value: quota.CPURequest},
 				{Key: "CPU Limit", Value: quota.CPULimit},
 				{Key: "Memory Request", Value: quota.MemRequest},
@@ -494,7 +494,7 @@ Examples:
 	},
 }
 
-func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteFn func(*client.Client, uint, uint) error) error {
+func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteFn func(*client.Client, string, string) error) error {
 	instanceID, err := parseID(args[0])
 	if err != nil {
 		return err

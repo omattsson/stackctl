@@ -18,9 +18,9 @@ const maxServerMessageLen = 256
 
 const (
 	pathDefinition     = "/api/v1/stack-definitions/%d"
-	pathOverride       = "/api/v1/stack-instances/%d/overrides/%d"
-	pathBranchOverride = "/api/v1/stack-instances/%d/branches/%d"
-	pathQuotaOverride  = "/api/v1/stack-instances/%d/quota-overrides"
+	pathOverride       = "/api/v1/stack-instances/%s/overrides/%s"
+	pathBranchOverride = "/api/v1/stack-instances/%s/branches/%s"
+	pathQuotaOverride  = "/api/v1/stack-instances/%s/quota-overrides"
 )
 
 // Client is the HTTP client for the k8s-stack-manager API.
@@ -276,9 +276,9 @@ func (c *Client) ListStacks(params map[string]string) (*types.ListResponse[types
 }
 
 // GetStack returns a single stack instance by ID.
-func (c *Client) GetStack(id uint) (*types.StackInstance, error) {
+func (c *Client) GetStack(id string) (*types.StackInstance, error) {
 	var instance types.StackInstance
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d", id), &instance)
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s", id), &instance)
 	if err != nil {
 		return nil, err
 	}
@@ -296,12 +296,12 @@ func (c *Client) CreateStack(req *types.CreateStackRequest) (*types.StackInstanc
 }
 
 // DeleteStack deletes a stack instance by ID.
-func (c *Client) DeleteStack(id uint) error {
-	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%d", id))
+func (c *Client) DeleteStack(id string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/stack-instances/%s", id))
 }
 
 // DeployStack triggers a deployment for a stack instance.
-func (c *Client) DeployStack(id uint) (*types.DeploymentLog, error) {
+func (c *Client) DeployStack(id string) (*types.DeploymentLog, error) {
 	var log types.DeploymentLog
 	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/deploy", id), nil, &log)
 	if err != nil {
@@ -311,7 +311,7 @@ func (c *Client) DeployStack(id uint) (*types.DeploymentLog, error) {
 }
 
 // StopStack triggers a stop for a stack instance.
-func (c *Client) StopStack(id uint) (*types.DeploymentLog, error) {
+func (c *Client) StopStack(id string) (*types.DeploymentLog, error) {
 	var log types.DeploymentLog
 	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/stop", id), nil, &log)
 	if err != nil {
@@ -321,7 +321,7 @@ func (c *Client) StopStack(id uint) (*types.DeploymentLog, error) {
 }
 
 // CleanStack triggers an undeploy and namespace removal for a stack instance.
-func (c *Client) CleanStack(id uint) (*types.DeploymentLog, error) {
+func (c *Client) CleanStack(id string) (*types.DeploymentLog, error) {
 	var log types.DeploymentLog
 	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/clean", id), nil, &log)
 	if err != nil {
@@ -331,7 +331,7 @@ func (c *Client) CleanStack(id uint) (*types.DeploymentLog, error) {
 }
 
 // GetStackStatus returns the current status and pod states for a stack instance.
-func (c *Client) GetStackStatus(id uint) (*types.InstanceStatus, error) {
+func (c *Client) GetStackStatus(id string) (*types.InstanceStatus, error) {
 	var status types.InstanceStatus
 	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/status", id), &status)
 	if err != nil {
@@ -341,7 +341,7 @@ func (c *Client) GetStackStatus(id uint) (*types.InstanceStatus, error) {
 }
 
 // GetStackLogs returns the latest deployment log for a stack instance.
-func (c *Client) GetStackLogs(id uint) (*types.DeploymentLog, error) {
+func (c *Client) GetStackLogs(id string) (*types.DeploymentLog, error) {
 	var log types.DeploymentLog
 	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/deploy-log", id), &log)
 	if err != nil {
@@ -351,7 +351,7 @@ func (c *Client) GetStackLogs(id uint) (*types.DeploymentLog, error) {
 }
 
 // CloneStack clones a stack instance and returns the new instance.
-func (c *Client) CloneStack(id uint) (*types.StackInstance, error) {
+func (c *Client) CloneStack(id string) (*types.StackInstance, error) {
 	var instance types.StackInstance
 	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/clone", id), nil, &instance)
 	if err != nil {
@@ -361,7 +361,7 @@ func (c *Client) CloneStack(id uint) (*types.StackInstance, error) {
 }
 
 // ExtendStack extends the TTL of a stack instance by the given number of minutes.
-func (c *Client) ExtendStack(id uint, minutes int) (*types.StackInstance, error) {
+func (c *Client) ExtendStack(id string, minutes int) (*types.StackInstance, error) {
 	var instance types.StackInstance
 	body := map[string]int{"ttl_minutes": minutes}
 	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%d/extend", id), body, &instance)
@@ -382,9 +382,9 @@ func (c *Client) ListTemplates(params map[string]string) (*types.ListResponse[ty
 }
 
 // GetTemplate returns a single stack template by ID.
-func (c *Client) GetTemplate(id uint) (*types.StackTemplate, error) {
+func (c *Client) GetTemplate(id string) (*types.StackTemplate, error) {
 	var tmpl types.StackTemplate
-	err := c.Get(fmt.Sprintf("/api/v1/templates/%d", id), &tmpl)
+	err := c.Get(fmt.Sprintf("/api/v1/templates/%s", id), &tmpl)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +392,7 @@ func (c *Client) GetTemplate(id uint) (*types.StackTemplate, error) {
 }
 
 // InstantiateTemplate creates a new stack instance from a template.
-func (c *Client) InstantiateTemplate(id uint, req *types.InstantiateTemplateRequest) (*types.StackInstance, error) {
+func (c *Client) InstantiateTemplate(id string, req *types.InstantiateTemplateRequest) (*types.StackInstance, error) {
 	var instance types.StackInstance
 	err := c.Post(fmt.Sprintf("/api/v1/templates/%d/instantiate", id), req, &instance)
 	if err != nil {
@@ -402,7 +402,7 @@ func (c *Client) InstantiateTemplate(id uint, req *types.InstantiateTemplateRequ
 }
 
 // QuickDeployTemplate creates and deploys a stack instance from a template in one step.
-func (c *Client) QuickDeployTemplate(id uint, req *types.QuickDeployRequest) (*types.StackInstance, error) {
+func (c *Client) QuickDeployTemplate(id string, req *types.QuickDeployRequest) (*types.StackInstance, error) {
 	var instance types.StackInstance
 	err := c.Post(fmt.Sprintf("/api/v1/templates/%d/quick-deploy", id), req, &instance)
 	if err != nil {
@@ -422,7 +422,7 @@ func (c *Client) ListDefinitions(params map[string]string) (*types.ListResponse[
 }
 
 // GetDefinition returns a single stack definition by ID.
-func (c *Client) GetDefinition(id uint) (*types.StackDefinition, error) {
+func (c *Client) GetDefinition(id string) (*types.StackDefinition, error) {
 	var def types.StackDefinition
 	err := c.Get(fmt.Sprintf(pathDefinition, id), &def)
 	if err != nil {
@@ -442,7 +442,7 @@ func (c *Client) CreateDefinition(req *types.CreateDefinitionRequest) (*types.St
 }
 
 // UpdateDefinition updates an existing stack definition.
-func (c *Client) UpdateDefinition(id uint, req *types.UpdateDefinitionRequest) (*types.StackDefinition, error) {
+func (c *Client) UpdateDefinition(id string, req *types.UpdateDefinitionRequest) (*types.StackDefinition, error) {
 	var def types.StackDefinition
 	err := c.Put(fmt.Sprintf(pathDefinition, id), req, &def)
 	if err != nil {
@@ -452,12 +452,12 @@ func (c *Client) UpdateDefinition(id uint, req *types.UpdateDefinitionRequest) (
 }
 
 // DeleteDefinition deletes a stack definition by ID.
-func (c *Client) DeleteDefinition(id uint) error {
+func (c *Client) DeleteDefinition(id string) error {
 	return c.Delete(fmt.Sprintf(pathDefinition, id))
 }
 
 // ExportDefinition exports a stack definition as raw JSON bytes.
-func (c *Client) ExportDefinition(id uint) ([]byte, error) {
+func (c *Client) ExportDefinition(id string) ([]byte, error) {
 	resp, err := c.do(http.MethodGet, fmt.Sprintf("/api/v1/stack-definitions/%d/export", id), nil)
 	if err != nil {
 		return nil, err
@@ -491,9 +491,9 @@ func (c *Client) ImportDefinition(data []byte) (*types.StackDefinition, error) {
 }
 
 // ListValueOverrides returns all value overrides for a stack instance.
-func (c *Client) ListValueOverrides(instanceID uint) ([]types.ValueOverride, error) {
+func (c *Client) ListValueOverrides(instanceID string) ([]types.ValueOverride, error) {
 	var overrides []types.ValueOverride
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/overrides", instanceID), &overrides)
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/overrides", instanceID), &overrides)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +501,7 @@ func (c *Client) ListValueOverrides(instanceID uint) ([]types.ValueOverride, err
 }
 
 // GetValueOverride returns a single value override for a chart.
-func (c *Client) GetValueOverride(instanceID, chartID uint) (*types.ValueOverride, error) {
+func (c *Client) GetValueOverride(instanceID, chartID string) (*types.ValueOverride, error) {
 	var override types.ValueOverride
 	err := c.Get(fmt.Sprintf(pathOverride, instanceID, chartID), &override)
 	if err != nil {
@@ -511,7 +511,7 @@ func (c *Client) GetValueOverride(instanceID, chartID uint) (*types.ValueOverrid
 }
 
 // SetValueOverride sets value overrides for a chart.
-func (c *Client) SetValueOverride(instanceID, chartID uint, req *types.SetValueOverrideRequest) (*types.ValueOverride, error) {
+func (c *Client) SetValueOverride(instanceID, chartID string, req *types.SetValueOverrideRequest) (*types.ValueOverride, error) {
 	var override types.ValueOverride
 	err := c.Put(fmt.Sprintf(pathOverride, instanceID, chartID), req, &override)
 	if err != nil {
@@ -521,14 +521,14 @@ func (c *Client) SetValueOverride(instanceID, chartID uint, req *types.SetValueO
 }
 
 // DeleteValueOverride deletes a value override for a chart.
-func (c *Client) DeleteValueOverride(instanceID, chartID uint) error {
+func (c *Client) DeleteValueOverride(instanceID, chartID string) error {
 	return c.Delete(fmt.Sprintf(pathOverride, instanceID, chartID))
 }
 
 // ListBranchOverrides returns all branch overrides for a stack instance.
-func (c *Client) ListBranchOverrides(instanceID uint) ([]types.BranchOverride, error) {
+func (c *Client) ListBranchOverrides(instanceID string) ([]types.BranchOverride, error) {
 	var overrides []types.BranchOverride
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%d/branches", instanceID), &overrides)
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/branches", instanceID), &overrides)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +536,7 @@ func (c *Client) ListBranchOverrides(instanceID uint) ([]types.BranchOverride, e
 }
 
 // GetBranchOverride returns a single branch override for a chart.
-func (c *Client) GetBranchOverride(instanceID, chartID uint) (*types.BranchOverride, error) {
+func (c *Client) GetBranchOverride(instanceID, chartID string) (*types.BranchOverride, error) {
 	var override types.BranchOverride
 	err := c.Get(fmt.Sprintf(pathBranchOverride, instanceID, chartID), &override)
 	if err != nil {
@@ -546,7 +546,7 @@ func (c *Client) GetBranchOverride(instanceID, chartID uint) (*types.BranchOverr
 }
 
 // SetBranchOverride sets a branch override for a chart.
-func (c *Client) SetBranchOverride(instanceID, chartID uint, req *types.SetBranchOverrideRequest) (*types.BranchOverride, error) {
+func (c *Client) SetBranchOverride(instanceID, chartID string, req *types.SetBranchOverrideRequest) (*types.BranchOverride, error) {
 	var override types.BranchOverride
 	err := c.Put(fmt.Sprintf(pathBranchOverride, instanceID, chartID), req, &override)
 	if err != nil {
@@ -556,12 +556,12 @@ func (c *Client) SetBranchOverride(instanceID, chartID uint, req *types.SetBranc
 }
 
 // DeleteBranchOverride deletes a branch override for a chart.
-func (c *Client) DeleteBranchOverride(instanceID, chartID uint) error {
+func (c *Client) DeleteBranchOverride(instanceID, chartID string) error {
 	return c.Delete(fmt.Sprintf(pathBranchOverride, instanceID, chartID))
 }
 
 // GetQuotaOverride returns the quota override for a stack instance.
-func (c *Client) GetQuotaOverride(instanceID uint) (*types.QuotaOverride, error) {
+func (c *Client) GetQuotaOverride(instanceID string) (*types.QuotaOverride, error) {
 	var override types.QuotaOverride
 	err := c.Get(fmt.Sprintf(pathQuotaOverride, instanceID), &override)
 	if err != nil {
@@ -571,7 +571,7 @@ func (c *Client) GetQuotaOverride(instanceID uint) (*types.QuotaOverride, error)
 }
 
 // SetQuotaOverride sets the quota override for a stack instance.
-func (c *Client) SetQuotaOverride(instanceID uint, req *types.SetQuotaOverrideRequest) (*types.QuotaOverride, error) {
+func (c *Client) SetQuotaOverride(instanceID string, req *types.SetQuotaOverrideRequest) (*types.QuotaOverride, error) {
 	var override types.QuotaOverride
 	err := c.Put(fmt.Sprintf(pathQuotaOverride, instanceID), req, &override)
 	if err != nil {
@@ -581,18 +581,18 @@ func (c *Client) SetQuotaOverride(instanceID uint, req *types.SetQuotaOverrideRe
 }
 
 // DeleteQuotaOverride deletes the quota override for a stack instance.
-func (c *Client) DeleteQuotaOverride(instanceID uint) error {
+func (c *Client) DeleteQuotaOverride(instanceID string) error {
 	return c.Delete(fmt.Sprintf(pathQuotaOverride, instanceID))
 }
 
 // GetMergedValues returns the merged Helm values for a stack instance.
-func (c *Client) GetMergedValues(instanceID uint, chartName string) (*types.MergedValues, error) {
+func (c *Client) GetMergedValues(instanceID string, chartName string) (*types.MergedValues, error) {
 	var values types.MergedValues
 	params := map[string]string{}
 	if chartName != "" {
 		params["chart"] = chartName
 	}
-	err := c.GetWithQuery(fmt.Sprintf("/api/v1/stack-instances/%d/values", instanceID), params, &values)
+	err := c.GetWithQuery(fmt.Sprintf("/api/v1/stack-instances/%s/values", instanceID), params, &values)
 	if err != nil {
 		return nil, err
 	}
@@ -600,7 +600,7 @@ func (c *Client) GetMergedValues(instanceID uint, chartName string) (*types.Merg
 }
 
 // CompareInstances compares two stack instances.
-func (c *Client) CompareInstances(leftID, rightID uint) (*types.CompareResult, error) {
+func (c *Client) CompareInstances(leftID, rightID string) (*types.CompareResult, error) {
 	var result types.CompareResult
 	params := map[string]string{
 		"left":  fmt.Sprintf("%d", leftID),
@@ -614,7 +614,7 @@ func (c *Client) CompareInstances(leftID, rightID uint) (*types.CompareResult, e
 }
 
 // BulkDeploy triggers deployment for multiple stack instances.
-func (c *Client) BulkDeploy(ids []uint) (*types.BulkResponse, error) {
+func (c *Client) BulkDeploy(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
 	err := c.Post("/api/v1/stack-instances/bulk/deploy", types.BulkRequest{IDs: ids}, &resp)
 	if err != nil {
@@ -624,7 +624,7 @@ func (c *Client) BulkDeploy(ids []uint) (*types.BulkResponse, error) {
 }
 
 // BulkStop stops multiple stack instances.
-func (c *Client) BulkStop(ids []uint) (*types.BulkResponse, error) {
+func (c *Client) BulkStop(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
 	err := c.Post("/api/v1/stack-instances/bulk/stop", types.BulkRequest{IDs: ids}, &resp)
 	if err != nil {
@@ -634,7 +634,7 @@ func (c *Client) BulkStop(ids []uint) (*types.BulkResponse, error) {
 }
 
 // BulkClean undeploys and removes namespaces for multiple stack instances.
-func (c *Client) BulkClean(ids []uint) (*types.BulkResponse, error) {
+func (c *Client) BulkClean(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
 	err := c.Post("/api/v1/stack-instances/bulk/clean", types.BulkRequest{IDs: ids}, &resp)
 	if err != nil {
@@ -644,7 +644,7 @@ func (c *Client) BulkClean(ids []uint) (*types.BulkResponse, error) {
 }
 
 // BulkDelete deletes multiple stack instances.
-func (c *Client) BulkDelete(ids []uint) (*types.BulkResponse, error) {
+func (c *Client) BulkDelete(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
 	err := c.Post("/api/v1/stack-instances/bulk/delete", types.BulkRequest{IDs: ids}, &resp)
 	if err != nil {
@@ -684,9 +684,9 @@ func (c *Client) ListClusters() (*types.ListResponse[types.Cluster], error) {
 }
 
 // GetCluster returns a single cluster by ID.
-func (c *Client) GetCluster(id uint) (*types.Cluster, error) {
+func (c *Client) GetCluster(id string) (*types.Cluster, error) {
 	var cluster types.Cluster
-	err := c.Get(fmt.Sprintf("/api/v1/clusters/%d", id), &cluster)
+	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s", id), &cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -694,7 +694,7 @@ func (c *Client) GetCluster(id uint) (*types.Cluster, error) {
 }
 
 // GetClusterHealth returns the health summary for a cluster.
-func (c *Client) GetClusterHealth(id uint) (*types.ClusterHealthSummary, error) {
+func (c *Client) GetClusterHealth(id string) (*types.ClusterHealthSummary, error) {
 	var health types.ClusterHealthSummary
 	err := c.Get(fmt.Sprintf("/api/v1/clusters/%d/health/summary", id), &health)
 	if err != nil {

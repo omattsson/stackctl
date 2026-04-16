@@ -56,7 +56,7 @@ Examples:
 		}
 
 		if printer.Quiet {
-			ids := make([]uint, len(resp.Data))
+			ids := make([]string, len(resp.Data))
 			for i, t := range resp.Data {
 				ids[i] = t.ID
 			}
@@ -78,7 +78,7 @@ Examples:
 					published = "true"
 				}
 				rows[i] = []string{
-					strconv.FormatUint(uint64(t.ID), 10),
+					t.ID,
 					t.Name,
 					t.Description,
 					published,
@@ -132,7 +132,7 @@ Examples:
 				published = "true"
 			}
 			fields := []output.KeyValue{
-				{Key: "ID", Value: strconv.FormatUint(uint64(tmpl.ID), 10)},
+				{Key: "ID", Value: tmpl.ID},
 				{Key: "Name", Value: tmpl.Name},
 				{Key: "Description", Value: tmpl.Description},
 				{Key: "Published", Value: published},
@@ -167,7 +167,7 @@ Examples:
 
 		name, _ := cmd.Flags().GetString("name")
 		branch, _ := cmd.Flags().GetString("branch")
-		clusterID, _ := cmd.Flags().GetUint("cluster")
+		clusterID, _ := cmd.Flags().GetString("cluster")
 
 		req := &types.InstantiateTemplateRequest{
 			Name:      name,
@@ -207,7 +207,7 @@ Examples:
 
 		name, _ := cmd.Flags().GetString("name")
 		branch, _ := cmd.Flags().GetString("branch")
-		clusterID, _ := cmd.Flags().GetUint("cluster")
+		clusterID, _ := cmd.Flags().GetString("cluster")
 
 		req := &types.QuickDeployRequest{
 			Name:      name,
@@ -238,13 +238,13 @@ func init() {
 	// template instantiate flags
 	templateInstantiateCmd.Flags().String("name", "", "Stack instance name (required)")
 	templateInstantiateCmd.Flags().String("branch", "", "Git branch")
-	templateInstantiateCmd.Flags().Uint("cluster", 0, "Target cluster ID")
+	templateInstantiateCmd.Flags().String("cluster", "", "Target cluster ID")
 	_ = templateInstantiateCmd.MarkFlagRequired("name")
 
 	// template quick-deploy flags
 	templateQuickDeployCmd.Flags().String("name", "", "Stack instance name (required)")
 	templateQuickDeployCmd.Flags().String("branch", "", "Git branch")
-	templateQuickDeployCmd.Flags().Uint("cluster", 0, "Target cluster ID")
+	templateQuickDeployCmd.Flags().String("cluster", "", "Target cluster ID")
 	_ = templateQuickDeployCmd.MarkFlagRequired("name")
 
 	// Wire up subcommands

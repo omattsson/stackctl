@@ -199,7 +199,7 @@ func confirmAction(cmd *cobra.Command, message string) (bool, error) {
 	return true, nil
 }
 
-func deleteByID(cmd *cobra.Command, args []string, promptFmt string, deleteFn func(*client.Client, uint) error, successFmt string) error {
+func deleteByID(cmd *cobra.Command, args []string, promptFmt string, deleteFn func(*client.Client, string) error, successFmt string) error {
 	id, err := parseID(args[0])
 	if err != nil {
 		return err
