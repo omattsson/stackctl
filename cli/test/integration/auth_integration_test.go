@@ -38,7 +38,7 @@ func startAuthMockServer(t *testing.T) *httptest.Server {
 					Token:     "integration-jwt-token",
 					ExpiresAt: time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
 					User: types.User{
-						Base:     types.Base{ID: 1, CreatedAt: time.Now().UTC()},
+						Base:     types.Base{ID: "1", CreatedAt: time.Now().UTC()},
 						Username: "admin",
 						Role:     "admin",
 					},
@@ -54,7 +54,7 @@ func startAuthMockServer(t *testing.T) *httptest.Server {
 			if auth == "Bearer integration-jwt-token" || apiKey == "sk_integration_key" {
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.User{
-					Base:     types.Base{ID: 1, CreatedAt: time.Now().UTC()},
+					Base:     types.Base{ID: "1", CreatedAt: time.Now().UTC()},
 					Username: "admin",
 					Role:     "admin",
 				})
@@ -138,7 +138,7 @@ func TestAuthWorkflow_LoginWhoamiLogout(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "admin", user.Username)
 	assert.Equal(t, "admin", user.Role)
-	assert.Equal(t, uint(1), user.ID)
+	assert.Equal(t, "1", user.ID)
 
 	// 3. Logout (remove token file and clear token)
 	require.NoError(t, os.Remove(tokenPath))

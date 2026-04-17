@@ -22,21 +22,21 @@ import (
 func sampleTemplate() types.StackTemplate {
 	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	return types.StackTemplate{
-		Base:        types.Base{ID: 10, CreatedAt: now, UpdatedAt: now, Version: 1},
+		Base:        types.Base{ID: "10", CreatedAt: now, UpdatedAt: now, Version: "1"},
 		Name:        "web-app-template",
 		Description: "Full web app stack",
 		Published:   true,
 		Owner:       "admin",
 		Charts: []types.ChartConfig{
 			{
-				Base:         types.Base{ID: 1},
+				Base:         types.Base{ID: "1"},
 				Name:         "frontend",
 				RepoURL:      "https://charts.example.com",
 				ChartName:    "react-app",
 				ChartVersion: "1.2.0",
 			},
 			{
-				Base:         types.Base{ID: 2},
+				Base:         types.Base{ID: "2"},
 				Name:         "backend",
 				RepoURL:      "https://charts.example.com",
 				ChartName:    "api-server",
@@ -123,7 +123,7 @@ func TestTemplateListCmd_YAMLOutput(t *testing.T) {
 func TestTemplateListCmd_QuietOutput(t *testing.T) {
 	t1 := sampleTemplate()
 	t2 := sampleTemplate()
-	t2.ID = 20
+	t2.ID = "20"
 	t2.Name = "second-template"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -237,7 +237,7 @@ func TestTemplateGetCmd_JSONOutput(t *testing.T) {
 
 	var result types.StackTemplate
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(10), result.ID)
+	assert.Equal(t, "10", result.ID)
 	assert.Equal(t, "web-app-template", result.Name)
 	assert.True(t, result.Published)
 }
@@ -256,30 +256,6 @@ func TestTemplateGetCmd_QuietOutput(t *testing.T) {
 	err := templateGetCmd.RunE(templateGetCmd, []string{"10"})
 	require.NoError(t, err)
 	assert.Equal(t, "10\n", buf.String())
-}
-
-func TestTemplateGetCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := templateGetCmd.RunE(templateGetCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
-func TestTemplateGetCmd_ZeroID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for zero ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := templateGetCmd.RunE(templateGetCmd, []string{"0"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestTemplateGetCmd_NotFound(t *testing.T) {
@@ -337,11 +313,11 @@ func TestTemplateInstantiateCmd_WithBranchAndCluster(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "my-instance", body.Name)
 		assert.Equal(t, "feature/xyz", body.Branch)
-		assert.Equal(t, uint(2), body.ClusterID)
+		assert.Equal(t, "2", body.ClusterID)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: 50}, Name: "my-instance"})
+		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "50"}, Name: "my-instance"})
 	}))
 	defer server.Close()
 
@@ -371,24 +347,6 @@ func TestTemplateInstantiateCmd_MissingName(t *testing.T) {
 	assert.Contains(t, nameFlag.Annotations, cobra.BashCompOneRequiredFlag)
 }
 
-func TestTemplateInstantiateCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-
-	templateInstantiateCmd.Flags().Set("name", "test")
-	t.Cleanup(func() {
-		templateInstantiateCmd.Flags().Set("name", "")
-	})
-
-	err := templateInstantiateCmd.RunE(templateInstantiateCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestTemplateInstantiateCmd_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -413,7 +371,7 @@ func TestTemplateInstantiateCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: 50}})
+		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "50"}})
 	}))
 	defer server.Close()
 
@@ -496,7 +454,7 @@ func TestTemplateQuickDeployCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: 60}, Status: "deploying"})
+		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "60"}, Status: "deploying"})
 	}))
 	defer server.Close()
 
@@ -514,7 +472,7 @@ func TestTemplateQuickDeployCmd_QuietOutput(t *testing.T) {
 }
 
 func TestTemplateQuickDeployCmd_JSONOutput(t *testing.T) {
-	instance := types.StackInstance{Base: types.Base{ID: 60}, Name: "quick-stack", Status: "deploying"}
+	instance := types.StackInstance{Base: types.Base{ID: "60"}, Name: "quick-stack", Status: "deploying"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -535,26 +493,8 @@ func TestTemplateQuickDeployCmd_JSONOutput(t *testing.T) {
 
 	var result types.StackInstance
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(60), result.ID)
+	assert.Equal(t, "60", result.ID)
 	assert.Equal(t, "deploying", result.Status)
-}
-
-func TestTemplateQuickDeployCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-
-	templateQuickDeployCmd.Flags().Set("name", "test")
-	t.Cleanup(func() {
-		templateQuickDeployCmd.Flags().Set("name", "")
-	})
-
-	err := templateQuickDeployCmd.RunE(templateQuickDeployCmd, []string{"0"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 // ---------- template list auth error ----------

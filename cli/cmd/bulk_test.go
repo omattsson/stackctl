@@ -24,9 +24,9 @@ func setupBulkTestCmd(t *testing.T, apiURL string) *bytes.Buffer {
 func sampleBulkResponse() types.BulkResponse {
 	return types.BulkResponse{
 		Results: []types.BulkOperationResult{
-			{ID: 1, Success: true},
-			{ID: 2, Success: true},
-			{ID: 3, Success: false, Error: "not found"},
+			{ID: "1", Success: true},
+			{ID: "2", Success: true},
+			{ID: "3", Success: false, Error: "not found"},
 		},
 	}
 }
@@ -41,7 +41,7 @@ func TestBulkDeployCmd_TableOutput(t *testing.T) {
 
 		var body types.BulkRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []uint{1, 2, 3}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -318,7 +318,7 @@ func TestParseBulkIDs_Valid(t *testing.T) {
 
 	ids, err := parseBulkIDs(cmd, nil)
 	require.NoError(t, err)
-	assert.Equal(t, []uint{1, 2, 3}, ids)
+	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
 
 func TestParseBulkIDs_InvalidID(t *testing.T) {
@@ -402,7 +402,7 @@ func TestBulkDeployCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: 1")
+	assert.Contains(t, out, "id: \"1\"")
 	assert.Contains(t, out, "success: true")
 	assert.Contains(t, out, "error: not found")
 }
@@ -452,7 +452,7 @@ func TestBulkStopCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: 1")
+	assert.Contains(t, out, "id: \"1\"")
 	assert.Contains(t, out, "success: true")
 }
 
@@ -521,7 +521,7 @@ func TestBulkCleanCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: 1")
+	assert.Contains(t, out, "id: \"1\"")
 	assert.Contains(t, out, "success: true")
 }
 
@@ -550,7 +550,7 @@ func TestBulkDeleteCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: 1")
+	assert.Contains(t, out, "id: \"1\"")
 	assert.Contains(t, out, "success: true")
 }
 
@@ -573,7 +573,7 @@ func TestParseBulkIDs_WhitespaceHandling(t *testing.T) {
 
 	ids, err := parseBulkIDs(cmd, nil)
 	require.NoError(t, err)
-	assert.Equal(t, []uint{1, 2, 3}, ids)
+	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
 
 func TestParseBulkIDs_NegativeID(t *testing.T) {
@@ -594,7 +594,7 @@ func TestParseBulkIDs_PositionalArgs(t *testing.T) {
 
 	ids, err := parseBulkIDs(cmd, []string{"1", "2", "3"})
 	require.NoError(t, err)
-	assert.Equal(t, []uint{1, 2, 3}, ids)
+	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
 
 func TestParseBulkIDs_MixedFlagAndPositional(t *testing.T) {
@@ -604,7 +604,7 @@ func TestParseBulkIDs_MixedFlagAndPositional(t *testing.T) {
 
 	ids, err := parseBulkIDs(cmd, []string{"3"})
 	require.NoError(t, err)
-	assert.Equal(t, []uint{1, 2, 3}, ids)
+	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
 
 func TestParseBulkIDs_MixedDedup(t *testing.T) {
@@ -614,7 +614,7 @@ func TestParseBulkIDs_MixedDedup(t *testing.T) {
 
 	ids, err := parseBulkIDs(cmd, []string{"2", "3"})
 	require.NoError(t, err)
-	assert.Equal(t, []uint{1, 2, 3}, ids)
+	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
 
 func TestBulkDeployCmd_PositionalArgs(t *testing.T) {
@@ -624,7 +624,7 @@ func TestBulkDeployCmd_PositionalArgs(t *testing.T) {
 
 		var body types.BulkRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []uint{1, 2, 3}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -647,7 +647,7 @@ func TestBulkDeployCmd_MixedArgs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body types.BulkRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []uint{1, 2, 3}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

@@ -22,7 +22,7 @@ func setupClusterTestCmd(t *testing.T, apiURL string) *bytes.Buffer {
 func sampleCluster() types.Cluster {
 	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	return types.Cluster{
-		Base:        types.Base{ID: 1, CreatedAt: now, UpdatedAt: now, Version: 1},
+		Base:        types.Base{ID: "1", CreatedAt: now, UpdatedAt: now, Version: "1"},
 		Name:        "dev-cluster",
 		Description: "Development cluster",
 		Status:      "online",
@@ -51,9 +51,7 @@ func TestClusterListCmd_TableOutput(t *testing.T) {
 		require.Equal(t, http.MethodGet, r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
-			Data: []types.Cluster{cl}, Total: 1, Page: 1, PageSize: 20, TotalPages: 1,
-		})
+		json.NewEncoder(w).Encode([]types.Cluster{cl})
 	}))
 	defer server.Close()
 
@@ -80,9 +78,7 @@ func TestClusterListCmd_JSONOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
-			Data: []types.Cluster{cl}, Total: 1, Page: 1, PageSize: 20, TotalPages: 1,
-		})
+		json.NewEncoder(w).Encode([]types.Cluster{cl})
 	}))
 	defer server.Close()
 
@@ -92,23 +88,21 @@ func TestClusterListCmd_JSONOutput(t *testing.T) {
 	err := clusterListCmd.RunE(clusterListCmd, []string{})
 	require.NoError(t, err)
 
-	var result types.ListResponse[types.Cluster]
+	var result []types.Cluster
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, 1, result.Total)
-	assert.Equal(t, "dev-cluster", result.Data[0].Name)
+	assert.Len(t, result, 1)
+	assert.Equal(t, "dev-cluster", result[0].Name)
 }
 
 func TestClusterListCmd_QuietOutput(t *testing.T) {
 	c1 := sampleCluster()
 	c2 := sampleCluster()
-	c2.ID = 2
+	c2.ID = "2"
 	c2.Name = "prod-cluster"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
-			Data: []types.Cluster{c1, c2}, Total: 2, Page: 1, PageSize: 20, TotalPages: 1,
-		})
+		json.NewEncoder(w).Encode([]types.Cluster{c1, c2})
 	}))
 	defer server.Close()
 
@@ -126,9 +120,7 @@ func TestClusterListCmd_YAMLOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
-			Data: []types.Cluster{cl}, Total: 1, Page: 1, PageSize: 20, TotalPages: 1,
-		})
+		json.NewEncoder(w).Encode([]types.Cluster{cl})
 	}))
 	defer server.Close()
 
@@ -147,9 +139,7 @@ func TestClusterListCmd_EmptyResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
-			Data: []types.Cluster{}, Total: 0, Page: 1, PageSize: 20, TotalPages: 0,
-		})
+		json.NewEncoder(w).Encode([]types.Cluster{})
 	}))
 	defer server.Close()
 
@@ -334,19 +324,6 @@ func TestClusterGetCmd_JSONOutput_HealthUnavailable(t *testing.T) {
 	assert.Contains(t, string(result["cluster"]), "dev-cluster")
 	_, hasHealth := result["health"]
 	assert.False(t, hasHealth, "health key should not be present when unavailable")
-}
-
-func TestClusterGetCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterGetCmd.RunE(clusterGetCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestClusterGetCmd_NotFound(t *testing.T) {

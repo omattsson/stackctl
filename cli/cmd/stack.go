@@ -301,6 +301,65 @@ Examples:
 	},
 }
 
+var stackRefreshDBCmd = &cobra.Command{
+	Use:   "refresh-db <id>",
+	Short: "Refresh a stack's MySQL database from the golden-db snapshot",
+	Long: `Refresh the MySQL database for a running stack instance without a full
+clean+redeploy. Wipes the MySQL PVC so the init container re-extracts the
+golden-db snapshot on next boot, flushes Redis, and deletes the storefront
+sync Job so the next ` + "`stack deploy`" + ` re-fires the Helm hook that repopulates
+Redis.
+
+Does NOT re-run helm — only scales deployments and runs a short-lived
+cleanup Job. The stack must be in 'running' state.
+
+This is a destructive operation (wipes all MySQL data for this stack).
+You will be prompted for confirmation unless --yes is specified.
+
+After refresh-db completes, run ` + "`stack deploy`" + ` to re-populate Redis via
+the sync Job.
+
+Examples:
+  stackctl stack refresh-db 42
+  stackctl stack refresh-db 42 --yes`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will wipe MySQL data for stack %s and reload from golden-db. Continue? (y/n): ", id))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage("Aborted.")
+			return nil
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		log, err := c.RefreshDBStack(id)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, log.ID)
+			return nil
+		}
+
+		printer.PrintMessage("Refreshing database for stack %s... (log ID: %s)", id, log.ID)
+		printer.PrintMessage("Run 'stackctl stack logs %s' to check progress, or 'stackctl stack deploy %s' afterwards to re-populate Redis.", id, id)
+		return nil
+	},
+}
+
 var stackDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a stack instance",
@@ -578,7 +637,7 @@ Examples:
 		}
 
 		if leftID == rightID {
-			return fmt.Errorf("cannot compare an instance with itself (both IDs are %d)", leftID)
+			return fmt.Errorf("cannot compare an instance with itself (both IDs are %s)", leftID)
 		}
 
 		c, err := newClient()
@@ -619,7 +678,7 @@ Examples:
 				}
 			}
 			if len(rows) == 0 {
-				printer.PrintMessage("No differences found between stack %d and %d", leftID, rightID)
+				printer.PrintMessage("No differences found between stack %s and %s", leftID, rightID)
 				return nil
 			}
 			return printer.PrintTable(headers, rows)
@@ -650,6 +709,9 @@ func init() {
 	// stack clean flags
 	stackCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
+	// stack refresh-db flags
+	stackRefreshDBCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+
 	// stack delete flags
 	stackDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
@@ -667,6 +729,7 @@ func init() {
 	stackCmd.AddCommand(stackDeployCmd)
 	stackCmd.AddCommand(stackStopCmd)
 	stackCmd.AddCommand(stackCleanCmd)
+	stackCmd.AddCommand(stackRefreshDBCmd)
 	stackCmd.AddCommand(stackDeleteCmd)
 	stackCmd.AddCommand(stackStatusCmd)
 	stackCmd.AddCommand(stackLogsCmd)

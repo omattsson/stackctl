@@ -48,12 +48,12 @@ func setupStackTestCmd(t *testing.T, apiURL string) *bytes.Buffer {
 
 // sampleStackJSON returns a StackInstance object used across many tests.
 func sampleStack() types.StackInstance {
-	clusterID := uint(1)
+	clusterID := "1"
 	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	return types.StackInstance{
-		Base:              types.Base{ID: 42, CreatedAt: now, UpdatedAt: now, Version: 1},
+		Base:              types.Base{ID: "42", CreatedAt: now, UpdatedAt: now, Version: "1"},
 		Name:              "my-stack",
-		StackDefinitionID: 5,
+		StackDefinitionID: "5",
 		DefinitionName:    "api-service",
 		Owner:             "admin",
 		Branch:            "main",
@@ -122,7 +122,7 @@ func TestStackListCmd_JSONOutput(t *testing.T) {
 func TestStackListCmd_QuietOutput(t *testing.T) {
 	s1 := sampleStack()
 	s2 := sampleStack()
-	s2.ID = 99
+	s2.ID = "99"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -248,20 +248,8 @@ func TestStackGetCmd_JSONOutput(t *testing.T) {
 
 	var result types.StackInstance
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(42), result.ID)
+	assert.Equal(t, "42", result.ID)
 	assert.Equal(t, "my-stack", result.Name)
-}
-
-func TestStackGetCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackGetCmd.RunE(stackGetCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestStackGetCmd_NotFound(t *testing.T) {
@@ -289,7 +277,7 @@ func TestStackCreateCmd_Success(t *testing.T) {
 		var body types.CreateStackRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "my-stack", body.Name)
-		assert.Equal(t, uint(5), body.StackDefinitionID)
+		assert.Equal(t, "5", body.StackDefinitionID)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -335,14 +323,14 @@ func TestStackCreateCmd_AllFlags(t *testing.T) {
 		var body types.CreateStackRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "feat-stack", body.Name)
-		assert.Equal(t, uint(3), body.StackDefinitionID)
+		assert.Equal(t, "3", body.StackDefinitionID)
 		assert.Equal(t, "feature/xyz", body.Branch)
-		assert.Equal(t, uint(2), body.ClusterID)
+		assert.Equal(t, "2", body.ClusterID)
 		assert.Equal(t, 120, body.TTLMinutes)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: 50}, Name: "feat-stack"})
+		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "50"}, Name: "feat-stack"})
 	}))
 	defer server.Close()
 
@@ -377,7 +365,7 @@ func TestStackDeployCmd_Success(t *testing.T) {
 		require.Equal(t, http.MethodPost, r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: 100}, InstanceID: 42, Action: "deploy", Status: "started"})
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "100"}, InstanceID: "42", Action: "deploy", Status: "started"})
 	}))
 	defer server.Close()
 
@@ -394,7 +382,7 @@ func TestStackDeployCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: 100}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "100"}})
 	}))
 	defer server.Close()
 
@@ -413,7 +401,7 @@ func TestStackStopCmd_Success(t *testing.T) {
 		require.Equal(t, http.MethodPost, r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: 101}, InstanceID: 42, Action: "stop", Status: "started"})
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "101"}, InstanceID: "42", Action: "stop", Status: "started"})
 	}))
 	defer server.Close()
 
@@ -435,7 +423,7 @@ func TestStackCleanCmd_WithConfirmation(t *testing.T) {
 		require.Equal(t, "/api/v1/stack-instances/42/clean", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: 102}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "102"}})
 	}))
 	defer server.Close()
 
@@ -486,7 +474,7 @@ func TestStackCleanCmd_WithYesFlag(t *testing.T) {
 		called = true
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: 103}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "103"}})
 	}))
 	defer server.Close()
 
@@ -499,6 +487,112 @@ func TestStackCleanCmd_WithYesFlag(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, called, "API should be called with --yes flag")
 	assert.Contains(t, buf.String(), "Cleaning stack 42")
+}
+
+// ---------- stack refresh-db (destructive) ----------
+
+func TestStackRefreshDBCmd_WithConfirmation(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/stack-instances/42/refresh-db", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "log-104"}})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	stackRefreshDBCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		stackRefreshDBCmd.Flags().Set("yes", "false")
+		stackRefreshDBCmd.SetIn(nil)
+		stackRefreshDBCmd.SetErr(nil)
+	})
+
+	stackRefreshDBCmd.SetIn(strings.NewReader("y\n"))
+	stackRefreshDBCmd.SetErr(&bytes.Buffer{})
+
+	err := stackRefreshDBCmd.RunE(stackRefreshDBCmd, []string{"42"})
+	require.NoError(t, err)
+	assert.True(t, called, "API should be called after confirming with y")
+	assert.Contains(t, buf.String(), "Refreshing database for stack 42")
+	assert.Contains(t, buf.String(), "log-104")
+}
+
+func TestStackRefreshDBCmd_Declined(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called when user declines")
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	stackRefreshDBCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		stackRefreshDBCmd.Flags().Set("yes", "false")
+		stackRefreshDBCmd.SetIn(nil)
+		stackRefreshDBCmd.SetErr(nil)
+	})
+
+	stackRefreshDBCmd.SetIn(strings.NewReader("n\n"))
+	stackRefreshDBCmd.SetErr(&bytes.Buffer{})
+
+	err := stackRefreshDBCmd.RunE(stackRefreshDBCmd, []string{"42"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Aborted")
+}
+
+func TestStackRefreshDBCmd_WithYesFlag(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/stack-instances/42/refresh-db", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "log-105"}})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	stackRefreshDBCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { stackRefreshDBCmd.Flags().Set("yes", "false") })
+
+	err := stackRefreshDBCmd.RunE(stackRefreshDBCmd, []string{"42"})
+	require.NoError(t, err)
+	assert.True(t, called, "API should be called with --yes flag")
+	assert.Contains(t, buf.String(), "Refreshing database for stack 42")
+}
+
+func TestStackRefreshDBCmd_QuietPrintsOnlyLogID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "log-quiet-106"}})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	stackRefreshDBCmd.Flags().Set("yes", "true")
+	prevQuiet := printer.Quiet
+	printer.Quiet = true
+	t.Cleanup(func() {
+		stackRefreshDBCmd.Flags().Set("yes", "false")
+		printer.Quiet = prevQuiet
+	})
+
+	err := stackRefreshDBCmd.RunE(stackRefreshDBCmd, []string{"42"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "log-quiet-106")
+	// Quiet mode must not print the human-readable prefix.
+	assert.NotContains(t, out, "Refreshing database for stack")
+	assert.NotContains(t, out, "Run 'stackctl stack logs")
 }
 
 // ---------- stack delete (destructive) ----------
@@ -655,8 +749,8 @@ func TestStackLogsCmd_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: 200},
-			InstanceID: 42,
+			Base:       types.Base{ID: "200"},
+			InstanceID: "42",
 			Action:     "deploy",
 			Status:     "completed",
 			Output:     "Deployment succeeded.\nAll charts installed.",
@@ -677,8 +771,8 @@ func TestStackLogsCmd_Success(t *testing.T) {
 
 func TestStackLogsCmd_JSONOutput(t *testing.T) {
 	logEntry := types.DeploymentLog{
-		Base:       types.Base{ID: 200},
-		InstanceID: 42,
+		Base:       types.Base{ID: "200"},
+		InstanceID: "42",
 		Action:     "deploy",
 		Status:     "completed",
 		Output:     "OK",
@@ -697,7 +791,7 @@ func TestStackLogsCmd_JSONOutput(t *testing.T) {
 
 	var result types.DeploymentLog
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(200), result.ID)
+	assert.Equal(t, "200", result.ID)
 	assert.Equal(t, "deploy", result.Action)
 }
 
@@ -709,7 +803,7 @@ func TestStackCloneCmd_Success(t *testing.T) {
 		require.Equal(t, http.MethodPost, r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: 55}, Name: "my-stack-clone"})
+		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "55"}, Name: "my-stack-clone"})
 	}))
 	defer server.Close()
 
@@ -726,7 +820,7 @@ func TestStackCloneCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: 55}})
+		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "55"}})
 	}))
 	defer server.Close()
 
@@ -751,7 +845,7 @@ func TestStackExtendCmd_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: 42}, TTLMinutes: 120})
+		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "42"}, TTLMinutes: 120})
 	}))
 	defer server.Close()
 
@@ -813,18 +907,6 @@ func TestStackStopCmd_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "stack not found")
 }
 
-func TestStackCloneCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackCloneCmd.RunE(stackCloneCmd, []string{"not-a-number"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestStackStatusCmd_NoPods(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -846,7 +928,7 @@ func TestStackLogsCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: 200}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "200"}})
 	}))
 	defer server.Close()
 
@@ -909,7 +991,7 @@ func TestStackStopCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: 101}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "101"}})
 	}))
 	defer server.Close()
 
@@ -924,7 +1006,7 @@ func TestStackExtendCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: 42}})
+		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "42"}})
 	}))
 	defer server.Close()
 
@@ -943,7 +1025,7 @@ func TestStackCleanCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: 102}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "102"}})
 	}))
 	defer server.Close()
 
@@ -1026,7 +1108,7 @@ func TestStackLogsCmd_YAMLOutput(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base: types.Base{ID: 200}, Action: "deploy", Status: "completed", Output: "OK",
+			Base: types.Base{ID: "200"}, Action: "deploy", Status: "completed", Output: "OK",
 		})
 	}))
 	defer server.Close()
@@ -1039,12 +1121,6 @@ func TestStackLogsCmd_YAMLOutput(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "action: deploy")
 	assert.Contains(t, out, "status: completed")
-}
-
-func TestParseID_Zero(t *testing.T) {
-	_, err := parseID("0")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 // ========== Additional coverage tests ==========
@@ -1069,18 +1145,6 @@ func TestStackCleanCmd_ServerError(t *testing.T) {
 	assert.Contains(t, err.Error(), "backend failure")
 }
 
-func TestStackCleanCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackCleanCmd.RunE(stackCleanCmd, []string{"bad"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestStackCleanCmd_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1100,18 +1164,6 @@ func TestStackCleanCmd_NotFound(t *testing.T) {
 }
 
 // ---------- stack delete: additional error cases ----------
-
-func TestStackDeleteCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackDeleteCmd.RunE(stackDeleteCmd, []string{"xyz"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
 
 func TestStackDeleteCmd_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1179,22 +1231,6 @@ func TestStackExtendCmd_NegativeMinutes(t *testing.T) {
 	assert.Contains(t, err.Error(), "--minutes must be a positive integer")
 }
 
-func TestStackExtendCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-
-	stackExtendCmd.Flags().Set("minutes", "60")
-	t.Cleanup(func() { stackExtendCmd.Flags().Set("minutes", "0") })
-
-	err := stackExtendCmd.RunE(stackExtendCmd, []string{"not-a-number"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestStackExtendCmd_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1229,18 +1265,6 @@ func TestStackStatusCmd_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "stack not found")
 }
 
-func TestStackStatusCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackStatusCmd.RunE(stackStatusCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 // ---------- stack logs: additional tests ----------
 
 func TestStackLogsCmd_NotFound(t *testing.T) {
@@ -1255,18 +1279,6 @@ func TestStackLogsCmd_NotFound(t *testing.T) {
 	err := stackLogsCmd.RunE(stackLogsCmd, []string{"999"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no logs found")
-}
-
-func TestStackLogsCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackLogsCmd.RunE(stackLogsCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 // ---------- stack list: additional filter tests ----------
@@ -1331,9 +1343,9 @@ func TestStackListCmd_ServerError(t *testing.T) {
 // ---------- stack list: table with no cluster name (uses cluster ID) ----------
 
 func TestStackListCmd_ClusterIDFallback(t *testing.T) {
-	clusterID := uint(5)
+	clusterID := "5"
 	stack := types.StackInstance{
-		Base:      types.Base{ID: 10},
+		Base:      types.Base{ID: "10"},
 		Name:      "no-cluster-name",
 		Status:    "running",
 		ClusterID: &clusterID,
@@ -1383,31 +1395,7 @@ func TestStackCreateCmd_NegativeTTL(t *testing.T) {
 
 // ---------- stack deploy: invalid ID ----------
 
-func TestStackDeployCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackDeployCmd.RunE(stackDeployCmd, []string{"not-valid"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 // ---------- stack stop: additional tests ----------
-
-func TestStackStopCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackStopCmd.RunE(stackStopCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
 
 func TestStackStopCmd_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1427,7 +1415,7 @@ func TestStackStopCmd_ServerError(t *testing.T) {
 
 func TestStackValuesCmd_JSONOutput(t *testing.T) {
 	values := types.MergedValues{
-		InstanceID: 42,
+		InstanceID: "42",
 		Charts: map[string]map[string]interface{}{
 			"frontend": {"replicas": float64(3), "image": map[string]interface{}{"tag": "v2"}},
 			"backend":  {"replicas": float64(1)},
@@ -1449,14 +1437,14 @@ func TestStackValuesCmd_JSONOutput(t *testing.T) {
 
 	var result types.MergedValues
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(42), result.InstanceID)
+	assert.Equal(t, "42", result.InstanceID)
 	assert.Contains(t, result.Charts, "frontend")
 	assert.Contains(t, result.Charts, "backend")
 }
 
 func TestStackValuesCmd_TableOutputFallsBackToJSON(t *testing.T) {
 	values := types.MergedValues{
-		InstanceID: 42,
+		InstanceID: "42",
 		Charts:     map[string]map[string]interface{}{"api": {"replicas": float64(2)}},
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1473,12 +1461,12 @@ func TestStackValuesCmd_TableOutputFallsBackToJSON(t *testing.T) {
 
 	var result types.MergedValues
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(42), result.InstanceID)
+	assert.Equal(t, "42", result.InstanceID)
 }
 
 func TestStackValuesCmd_YAMLOutput(t *testing.T) {
 	values := types.MergedValues{
-		InstanceID: 42,
+		InstanceID: "42",
 		Charts:     map[string]map[string]interface{}{"api": {"replicas": float64(2)}},
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1494,11 +1482,11 @@ func TestStackValuesCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "instance_id: 42")
+	assert.Contains(t, out, "instance_id: \"42\"")
 }
 
 func TestStackValuesCmd_QuietOutput(t *testing.T) {
-	values := types.MergedValues{InstanceID: 42}
+	values := types.MergedValues{InstanceID: "42"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1518,7 +1506,7 @@ func TestStackValuesCmd_WithChartFilter(t *testing.T) {
 		assert.Equal(t, "frontend", r.URL.Query().Get("chart"))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.MergedValues{InstanceID: 42})
+		json.NewEncoder(w).Encode(types.MergedValues{InstanceID: "42"})
 	}))
 	defer server.Close()
 
@@ -1529,18 +1517,6 @@ func TestStackValuesCmd_WithChartFilter(t *testing.T) {
 
 	err := stackValuesCmd.RunE(stackValuesCmd, []string{"42"})
 	require.NoError(t, err)
-}
-
-func TestStackValuesCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackValuesCmd.RunE(stackValuesCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestStackValuesCmd_ServerError(t *testing.T) {
@@ -1576,7 +1552,7 @@ func TestStackValuesCmd_NotFound(t *testing.T) {
 func TestStackCompareCmd_TableOutput_WithDiffs(t *testing.T) {
 	left := sampleStack()
 	right := sampleStack()
-	right.ID = 43
+	right.ID = "43"
 	right.Name = "other-stack"
 	right.Status = "stopped"
 	right.Branch = "feature/x"
@@ -1616,7 +1592,7 @@ func TestStackCompareCmd_TableOutput_WithDiffs(t *testing.T) {
 func TestStackCompareCmd_TableOutput_NoDiffs(t *testing.T) {
 	left := sampleStack()
 	right := sampleStack()
-	right.ID = 43
+	right.ID = "43"
 
 	result := types.CompareResult{Left: &left, Right: &right, Diffs: map[string]interface{}{}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1637,7 +1613,7 @@ func TestStackCompareCmd_TableOutput_NoDiffs(t *testing.T) {
 func TestStackCompareCmd_JSONOutput(t *testing.T) {
 	left := sampleStack()
 	right := sampleStack()
-	right.ID = 43
+	right.ID = "43"
 
 	result := types.CompareResult{Left: &left, Right: &right}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1654,14 +1630,14 @@ func TestStackCompareCmd_JSONOutput(t *testing.T) {
 
 	var res types.CompareResult
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &res))
-	assert.Equal(t, uint(42), res.Left.ID)
-	assert.Equal(t, uint(43), res.Right.ID)
+	assert.Equal(t, "42", res.Left.ID)
+	assert.Equal(t, "43", res.Right.ID)
 }
 
 func TestStackCompareCmd_YAMLOutput(t *testing.T) {
 	left := sampleStack()
 	right := sampleStack()
-	right.ID = 43
+	right.ID = "43"
 
 	result := types.CompareResult{Left: &left, Right: &right}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1694,30 +1670,6 @@ func TestStackCompareCmd_QuietOutput(t *testing.T) {
 	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "43"})
 	require.NoError(t, err)
 	assert.Equal(t, "42\n43\n", buf.String())
-}
-
-func TestStackCompareCmd_InvalidLeftID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackCompareCmd.RunE(stackCompareCmd, []string{"abc", "43"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
-func TestStackCompareCmd_InvalidRightID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := stackCompareCmd.RunE(stackCompareCmd, []string{"42", "xyz"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestStackCompareCmd_ServerError(t *testing.T) {

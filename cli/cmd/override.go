@@ -172,7 +172,7 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(override)
 		default:
-			printer.PrintMessage("Set value override for chart %d on instance %d", chartID, instanceID)
+			printer.PrintMessage("Set value override for chart %s on instance %s", chartID, instanceID)
 			return nil
 		}
 	},
@@ -304,7 +304,7 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(override)
 		default:
-			printer.PrintMessage("Set branch override %q for chart %d on instance %d", branch, chartID, instanceID)
+			printer.PrintMessage("Set branch override %q for chart %s on instance %s", branch, chartID, instanceID)
 			return nil
 		}
 	},
@@ -441,7 +441,7 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(quota)
 		default:
-			printer.PrintMessage("Set quota override for instance %d", instanceID)
+			printer.PrintMessage("Set quota override for instance %s", instanceID)
 			return nil
 		}
 	},
@@ -489,7 +489,7 @@ Examples:
 			return nil
 		}
 
-		printer.PrintMessage("Deleted quota override for instance %d", instanceID)
+		printer.PrintMessage("Deleted quota override for instance %s", instanceID)
 		return nil
 	},
 }
@@ -527,7 +527,7 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 		return nil
 	}
 
-	printer.PrintMessage("Deleted %s override for chart %d on instance %d", kind, chartID, instanceID)
+	printer.PrintMessage("Deleted %s override for chart %s on instance %s", kind, chartID, instanceID)
 	return nil
 }
 

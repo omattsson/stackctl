@@ -52,7 +52,7 @@ func TestEdgeCase_ExpiredTokenHandling(t *testing.T) {
 		{
 			name: "GetStack",
 			fn: func() error {
-				_, err := c.GetStack(1)
+				_, err := c.GetStack("1")
 				return err
 			},
 		},
@@ -61,7 +61,7 @@ func TestEdgeCase_ExpiredTokenHandling(t *testing.T) {
 			fn: func() error {
 				_, err := c.CreateStack(&types.CreateStackRequest{
 					Name:              "test",
-					StackDefinitionID: 1,
+					StackDefinitionID: "1",
 				})
 				return err
 			},
@@ -69,7 +69,7 @@ func TestEdgeCase_ExpiredTokenHandling(t *testing.T) {
 		{
 			name: "DeployStack",
 			fn: func() error {
-				_, err := c.DeployStack(1)
+				_, err := c.DeployStack("1")
 				return err
 			},
 		},
@@ -125,14 +125,14 @@ func TestEdgeCase_NetworkErrors(t *testing.T) {
 		{
 			name: "GetStack",
 			fn: func() error {
-				_, err := c.GetStack(1)
+				_, err := c.GetStack("1")
 				return err
 			},
 		},
 		{
 			name: "DeployStack",
 			fn: func() error {
-				_, err := c.DeployStack(1)
+				_, err := c.DeployStack("1")
 				return err
 			},
 		},
@@ -146,13 +146,13 @@ func TestEdgeCase_NetworkErrors(t *testing.T) {
 		{
 			name: "DeleteStack",
 			fn: func() error {
-				return c.DeleteStack(1)
+				return c.DeleteStack("1")
 			},
 		},
 		{
 			name: "BulkDeploy",
 			fn: func() error {
-				_, err := c.BulkDeploy([]uint{1, 2, 3})
+				_, err := c.BulkDeploy([]string{"1", "2", "3"})
 				return err
 			},
 		},
@@ -189,7 +189,7 @@ func TestEdgeCase_InvalidInputValidation(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(types.StackInstance{
-				Base: types.Base{ID: 1},
+				Base: types.Base{ID: "1"},
 				Name: name,
 			})
 
@@ -212,9 +212,9 @@ func TestEdgeCase_InvalidInputValidation(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(types.ValueOverride{
-				Base:       types.Base{ID: 10},
-				InstanceID: 1,
-				ChartID:    1,
+				Base:       types.Base{ID: "10"},
+				InstanceID: "1",
+				ChartID:    "1",
 				Values:     "{}",
 			})
 
@@ -231,7 +231,7 @@ func TestEdgeCase_InvalidInputValidation(t *testing.T) {
 		t.Parallel()
 		_, err := c.CreateStack(&types.CreateStackRequest{
 			Name:              "",
-			StackDefinitionID: 1,
+			StackDefinitionID: "1",
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "name is required")
@@ -239,14 +239,14 @@ func TestEdgeCase_InvalidInputValidation(t *testing.T) {
 
 	t.Run("GetStackIDZero", func(t *testing.T) {
 		t.Parallel()
-		_, err := c.GetStack(0)
+		_, err := c.GetStack("0")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid stack ID")
 	})
 
 	t.Run("SetValueOverrideNilValues", func(t *testing.T) {
 		t.Parallel()
-		_, err := c.SetValueOverride(1, 1, &types.SetValueOverrideRequest{
+		_, err := c.SetValueOverride("1", "1", &types.SetValueOverrideRequest{
 			Values: nil,
 		})
 		require.Error(t, err)
@@ -256,11 +256,11 @@ func TestEdgeCase_InvalidInputValidation(t *testing.T) {
 	t.Run("SetValueOverrideEmptyValues", func(t *testing.T) {
 		t.Parallel()
 		// Empty map (not nil) should succeed
-		override, err := c.SetValueOverride(1, 1, &types.SetValueOverrideRequest{
+		override, err := c.SetValueOverride("1", "1", &types.SetValueOverrideRequest{
 			Values: map[string]interface{}{},
 		})
 		require.NoError(t, err)
-		assert.Equal(t, uint(10), override.ID)
+		assert.Equal(t, "10", override.ID)
 	})
 }
 
@@ -280,8 +280,8 @@ func TestEdgeCase_ConcurrentOperations(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{
 				Data: []types.StackInstance{
-					{Base: types.Base{ID: 1}, Name: "stack-1", Status: "running"},
-					{Base: types.Base{ID: 2}, Name: "stack-2", Status: "running"},
+					{Base: types.Base{ID: "1"}, Name: "stack-1", Status: "running"},
+					{Base: types.Base{ID: "2"}, Name: "stack-2", Status: "running"},
 				},
 				Total:      2,
 				Page:       1,
@@ -294,7 +294,7 @@ func TestEdgeCase_ConcurrentOperations(t *testing.T) {
 			json.NewDecoder(r.Body).Decode(&req)
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(types.StackInstance{
-				Base:   types.Base{ID: 100},
+				Base:   types.Base{ID: "100"},
 				Name:   req.Name,
 				Status: "draft",
 			})
@@ -355,7 +355,7 @@ func TestEdgeCase_ConcurrentOperations(t *testing.T) {
 				defer wg.Done()
 				_, err := c.CreateStack(&types.CreateStackRequest{
 					Name:              fmt.Sprintf("concurrent-stack-%d", idx),
-					StackDefinitionID: 1,
+					StackDefinitionID: "1",
 				})
 				createErrs[idx] = err
 			}(i)
@@ -381,7 +381,7 @@ func TestEdgeCase_LargeResponseHandling(t *testing.T) {
 	stacks := make([]types.StackInstance, itemCount)
 	for i := 0; i < itemCount; i++ {
 		stacks[i] = types.StackInstance{
-			Base:      types.Base{ID: uint(i + 1)},
+			Base:      types.Base{ID: fmt.Sprintf("%d", i+1)},
 			Name:      fmt.Sprintf("stack-%d", i+1),
 			Status:    "running",
 			Owner:     "admin",
@@ -410,8 +410,8 @@ func TestEdgeCase_LargeResponseHandling(t *testing.T) {
 		resp, err := c.ListStacks(nil)
 		require.NoError(t, err)
 		require.Len(t, resp.Data, itemCount)
-		assert.Equal(t, uint(1), resp.Data[0].ID)
-		assert.Equal(t, uint(itemCount), resp.Data[itemCount-1].ID)
+		assert.Equal(t, "1", resp.Data[0].ID)
+		assert.Equal(t, fmt.Sprintf("%d", itemCount), resp.Data[itemCount-1].ID)
 		assert.Equal(t, "stack-1", resp.Data[0].Name)
 		assert.Equal(t, fmt.Sprintf("stack-%d", itemCount), resp.Data[itemCount-1].Name)
 	})
@@ -488,12 +488,12 @@ func TestEdgeCase_ServerErrorUserFacingMessages(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantMsg)
 
 			// Test with GetStack
-			_, err = c.GetStack(1)
+			_, err = c.GetStack("1")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantMsg)
 
 			// Test with DeployStack
-			_, err = c.DeployStack(1)
+			_, err = c.DeployStack("1")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantMsg)
 		})
