@@ -25,9 +25,9 @@ import (
 func sampleValueOverride() types.ValueOverride {
 	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	return types.ValueOverride{
-		Base:       types.Base{ID: 1, CreatedAt: now, UpdatedAt: now, Version: 1},
-		InstanceID: 42,
-		ChartID:    1,
+		Base:       types.Base{ID: "1", CreatedAt: now, UpdatedAt: now, Version: "1"},
+		InstanceID: "42",
+		ChartID:    "1",
 		Values:     `{"replicas":3}`,
 	}
 }
@@ -36,9 +36,9 @@ func sampleValueOverride() types.ValueOverride {
 func sampleBranchOverride() types.BranchOverride {
 	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	return types.BranchOverride{
-		Base:       types.Base{ID: 2, CreatedAt: now, UpdatedAt: now, Version: 1},
-		InstanceID: 42,
-		ChartID:    1,
+		Base:       types.Base{ID: "2", CreatedAt: now, UpdatedAt: now, Version: "1"},
+		InstanceID: "42",
+		ChartID:    "1",
 		Branch:     "feature/my-branch",
 	}
 }
@@ -46,7 +46,7 @@ func sampleBranchOverride() types.BranchOverride {
 // sampleQuotaOverride returns a QuotaOverride used across override tests.
 func sampleQuotaOverride() types.QuotaOverride {
 	return types.QuotaOverride{
-		InstanceID: 42,
+		InstanceID: "42",
 		CPURequest: "100m",
 		CPULimit:   "500m",
 		MemRequest: "128Mi",
@@ -111,8 +111,8 @@ func TestOverrideListCmd_JSONOutput(t *testing.T) {
 	var result []types.ValueOverride
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	require.Len(t, result, 1)
-	assert.Equal(t, uint(1), result[0].ChartID)
-	assert.Equal(t, uint(42), result[0].InstanceID)
+	assert.Equal(t, "1", result[0].ChartID)
+	assert.Equal(t, "42", result[0].InstanceID)
 }
 
 func TestOverrideListCmd_YAMLOutput(t *testing.T) {
@@ -130,14 +130,14 @@ func TestOverrideListCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "instance_id: 42")
-	assert.Contains(t, out, "chart_id: 1")
+	assert.Contains(t, out, "instance_id: \"42\"")
+	assert.Contains(t, out, "chart_id: \"1\"")
 }
 
 func TestOverrideListCmd_QuietOutput(t *testing.T) {
 	o1 := sampleValueOverride()
 	o2 := sampleValueOverride()
-	o2.ChartID = 3
+	o2.ChartID = "3"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -168,30 +168,6 @@ func TestOverrideListCmd_EmptyList(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "CHART ID")
-}
-
-func TestOverrideListCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideListCmd.RunE(overrideListCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
-func TestOverrideListCmd_ZeroID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for zero ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideListCmd.RunE(overrideListCmd, []string{"0"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestOverrideListCmd_ServerError(t *testing.T) {
@@ -411,38 +387,6 @@ func TestOverrideSetCmd_InvalidSetFormat(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid --set format")
 }
 
-func TestOverrideSetCmd_InvalidInstanceID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-
-	overrideSetCmd.Flags().Set("set", "key=val")
-	t.Cleanup(func() { resetOverrideSetFlags(t) })
-
-	err := overrideSetCmd.RunE(overrideSetCmd, []string{"abc", "1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
-func TestOverrideSetCmd_InvalidChartID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-
-	overrideSetCmd.Flags().Set("set", "key=val")
-	t.Cleanup(func() { resetOverrideSetFlags(t) })
-
-	err := overrideSetCmd.RunE(overrideSetCmd, []string{"42", "bad"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestOverrideSetCmd_JSONOutput(t *testing.T) {
 	override := sampleValueOverride()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -463,7 +407,7 @@ func TestOverrideSetCmd_JSONOutput(t *testing.T) {
 
 	var result types.ValueOverride
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(1), result.ChartID)
+	assert.Equal(t, "1", result.ChartID)
 }
 
 func TestOverrideSetCmd_YAMLOutput(t *testing.T) {
@@ -485,7 +429,7 @@ func TestOverrideSetCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "chart_id: 1")
+	assert.Contains(t, out, "chart_id: \"1\"")
 }
 
 func TestOverrideSetCmd_QuietOutput(t *testing.T) {
@@ -615,30 +559,6 @@ func TestOverrideDeleteCmd_QuietOutput(t *testing.T) {
 	assert.Equal(t, "1\n", buf.String())
 }
 
-func TestOverrideDeleteCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideDeleteCmd.RunE(overrideDeleteCmd, []string{"abc", "1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
-func TestOverrideDeleteCmd_InvalidChartID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideDeleteCmd.RunE(overrideDeleteCmd, []string{"42", "bad"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestOverrideDeleteCmd_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -740,7 +660,7 @@ func TestOverrideBranchListCmd_YAMLOutput(t *testing.T) {
 func TestOverrideBranchListCmd_QuietOutput(t *testing.T) {
 	o1 := sampleBranchOverride()
 	o2 := sampleBranchOverride()
-	o2.ChartID = 5
+	o2.ChartID = "5"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -755,18 +675,6 @@ func TestOverrideBranchListCmd_QuietOutput(t *testing.T) {
 
 	lines := strings.TrimSpace(buf.String())
 	assert.Equal(t, "1\n5", lines)
-}
-
-func TestOverrideBranchListCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideBranchListCmd.RunE(overrideBranchListCmd, []string{"xyz"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestOverrideBranchListCmd_ServerError(t *testing.T) {
@@ -861,30 +769,6 @@ func TestOverrideBranchSetCmd_QuietOutput(t *testing.T) {
 	err := overrideBranchSetCmd.RunE(overrideBranchSetCmd, []string{"42", "1", "main"})
 	require.NoError(t, err)
 	assert.Equal(t, "1\n", buf.String())
-}
-
-func TestOverrideBranchSetCmd_InvalidInstanceID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideBranchSetCmd.RunE(overrideBranchSetCmd, []string{"abc", "1", "main"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
-func TestOverrideBranchSetCmd_InvalidChartID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideBranchSetCmd.RunE(overrideBranchSetCmd, []string{"42", "bad", "main"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestOverrideBranchSetCmd_ServerError(t *testing.T) {
@@ -990,18 +874,6 @@ func TestOverrideBranchDeleteCmd_QuietOutput(t *testing.T) {
 	assert.Equal(t, "1\n", buf.String())
 }
 
-func TestOverrideBranchDeleteCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideBranchDeleteCmd.RunE(overrideBranchDeleteCmd, []string{"abc", "1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestOverrideBranchDeleteCmd_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1061,7 +933,7 @@ func TestOverrideQuotaGetCmd_JSONOutput(t *testing.T) {
 
 	var result types.QuotaOverride
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(42), result.InstanceID)
+	assert.Equal(t, "42", result.InstanceID)
 	assert.Equal(t, "100m", result.CPURequest)
 }
 
@@ -1080,7 +952,7 @@ func TestOverrideQuotaGetCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "instance_id: 42")
+	assert.Contains(t, out, "instance_id: \"42\"")
 	assert.Contains(t, out, "cpu_request: 100m")
 }
 
@@ -1098,18 +970,6 @@ func TestOverrideQuotaGetCmd_QuietOutput(t *testing.T) {
 	err := overrideQuotaGetCmd.RunE(overrideQuotaGetCmd, []string{"42"})
 	require.NoError(t, err)
 	assert.Equal(t, "42\n", buf.String())
-}
-
-func TestOverrideQuotaGetCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideQuotaGetCmd.RunE(overrideQuotaGetCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestOverrideQuotaGetCmd_ServerError(t *testing.T) {
@@ -1284,7 +1144,7 @@ func TestOverrideQuotaSetCmd_JSONOutput(t *testing.T) {
 
 	var result types.QuotaOverride
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(42), result.InstanceID)
+	assert.Equal(t, "42", result.InstanceID)
 }
 
 func TestOverrideQuotaSetCmd_YAMLOutput(t *testing.T) {
@@ -1309,7 +1169,7 @@ func TestOverrideQuotaSetCmd_YAMLOutput(t *testing.T) {
 
 	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "instance_id: 42")
+	assert.Contains(t, buf.String(), "instance_id: \"42\"")
 }
 
 func TestOverrideQuotaSetCmd_QuietOutput(t *testing.T) {
@@ -1335,27 +1195,6 @@ func TestOverrideQuotaSetCmd_QuietOutput(t *testing.T) {
 	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
 	require.NoError(t, err)
 	assert.Equal(t, "42\n", buf.String())
-}
-
-func TestOverrideQuotaSetCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-
-	overrideQuotaSetCmd.Flags().Set("cpu-request", "100m")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
-
-	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestOverrideQuotaSetCmd_ServerError(t *testing.T) {
@@ -1468,18 +1307,6 @@ func TestOverrideQuotaDeleteCmd_QuietOutput(t *testing.T) {
 	err := overrideQuotaDeleteCmd.RunE(overrideQuotaDeleteCmd, []string{"42"})
 	require.NoError(t, err)
 	assert.Equal(t, "42\n", buf.String())
-}
-
-func TestOverrideQuotaDeleteCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := overrideQuotaDeleteCmd.RunE(overrideQuotaDeleteCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestOverrideQuotaDeleteCmd_ServerError(t *testing.T) {

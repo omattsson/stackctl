@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -282,7 +283,9 @@ func startTemplateDefMockServer(t *testing.T, state *templateDefMockState) *http
 					if req.Description != "" {
 						def.Description = req.Description
 					}
-					def.Version = def.Version + "+1"
+					if v, err := strconv.Atoi(def.Version); err == nil {
+						def.Version = strconv.Itoa(v + 1)
+					}
 					state.mu.Unlock()
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(def)

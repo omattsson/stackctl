@@ -67,7 +67,7 @@ func TestLoginCmd_WithFlags(t *testing.T) {
 		json.NewEncoder(w).Encode(types.LoginResponse{
 			Token:     "jwt-test-token",
 			ExpiresAt: expiresAt.Format(time.RFC3339),
-			User:      types.User{Base: types.Base{ID: 1}, Username: "admin", Role: "admin"},
+			User:      types.User{Base: types.Base{ID: "1"}, Username: "admin", Role: "admin"},
 		})
 	}))
 	defer server.Close()
@@ -348,7 +348,7 @@ func TestWhoamiCmd_TableOutput(t *testing.T) {
 		require.Equal(t, "/api/v1/auth/me", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.User{
-			Base:     types.Base{ID: 1, CreatedAt: createdAt},
+			Base:     types.Base{ID: "1", CreatedAt: createdAt},
 			Username: "admin",
 			Role:     "admin",
 		})
@@ -373,7 +373,7 @@ func TestWhoamiCmd_JSONOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.User{
-			Base:     types.Base{ID: 42},
+			Base:     types.Base{ID: "42"},
 			Username: "jsonuser",
 			Role:     "viewer",
 		})
@@ -392,14 +392,14 @@ func TestWhoamiCmd_JSONOutput(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &user))
 	assert.Equal(t, "jsonuser", user.Username)
 	assert.Equal(t, "viewer", user.Role)
-	assert.Equal(t, uint(42), user.ID)
+	assert.Equal(t, "42", user.ID)
 }
 
 func TestWhoamiCmd_YAMLOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.User{
-			Base:     types.Base{ID: 7},
+			Base:     types.Base{ID: "7"},
 			Username: "yamluser",
 			Role:     "operator",
 		})
@@ -423,7 +423,7 @@ func TestWhoamiCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.User{
-			Base:     types.Base{ID: 1},
+			Base:     types.Base{ID: "1"},
 			Username: "quietuser",
 			Role:     "admin",
 		})
@@ -477,7 +477,7 @@ func TestWhoamiCmd_TokenNotInOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.User{
-			Base:     types.Base{ID: 1},
+			Base:     types.Base{ID: "1"},
 			Username: "admin",
 			Role:     "admin",
 		})
@@ -537,7 +537,7 @@ func TestWhoamiCmd_OutputModes(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.User{
-					Base:     types.Base{ID: 1, CreatedAt: createdAt},
+					Base:     types.Base{ID: "1", CreatedAt: createdAt},
 					Username: "admin",
 					Role:     "admin",
 				})
@@ -613,7 +613,7 @@ func TestLoginCmd_EmptyTokenFromServer(t *testing.T) {
 		json.NewEncoder(w).Encode(types.LoginResponse{
 			Token:     "",
 			ExpiresAt: "2030-01-01T00:00:00Z",
-			User:      types.User{Base: types.Base{ID: 1}, Username: "test", Role: "admin"},
+			User:      types.User{Base: types.Base{ID: "1"}, Username: "test", Role: "admin"},
 		})
 	}))
 	defer server.Close()

@@ -25,14 +25,14 @@ import (
 func sampleDefinition() types.StackDefinition {
 	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	return types.StackDefinition{
-		Base:          types.Base{ID: 5, CreatedAt: now, UpdatedAt: now, Version: 1},
+		Base:          types.Base{ID: "5", CreatedAt: now, UpdatedAt: now, Version: "1"},
 		Name:          "api-service",
 		Description:   "API microservice stack",
 		DefaultBranch: "main",
 		Owner:         "admin",
 		Charts: []types.ChartConfig{
 			{
-				Base:         types.Base{ID: 1},
+				Base:         types.Base{ID: "1"},
 				Name:         "api",
 				RepoURL:      "https://charts.example.com",
 				ChartName:    "api-chart",
@@ -119,7 +119,7 @@ func TestDefinitionListCmd_YAMLOutput(t *testing.T) {
 func TestDefinitionListCmd_QuietOutput(t *testing.T) {
 	d1 := sampleDefinition()
 	d2 := sampleDefinition()
-	d2.ID = 15
+	d2.ID = "15"
 	d2.Name = "second-def"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -215,7 +215,7 @@ func TestDefinitionGetCmd_JSONOutput(t *testing.T) {
 
 	var result types.StackDefinition
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, uint(5), result.ID)
+	assert.Equal(t, "5", result.ID)
 	assert.Equal(t, "api-service", result.Name)
 }
 
@@ -233,30 +233,6 @@ func TestDefinitionGetCmd_QuietOutput(t *testing.T) {
 	err := definitionGetCmd.RunE(definitionGetCmd, []string{"5"})
 	require.NoError(t, err)
 	assert.Equal(t, "5\n", buf.String())
-}
-
-func TestDefinitionGetCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := definitionGetCmd.RunE(definitionGetCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
-func TestDefinitionGetCmd_ZeroID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for zero ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := definitionGetCmd.RunE(definitionGetCmd, []string{"0"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestDefinitionGetCmd_NotFound(t *testing.T) {
@@ -317,7 +293,7 @@ func TestDefinitionCreateCmd_WithDescription(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: 20}, Name: "test-def"})
+		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: "20"}, Name: "test-def"})
 	}))
 	defer server.Close()
 
@@ -351,7 +327,7 @@ func TestDefinitionCreateCmd_WithFromFile(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: 25}, Name: "file-def"})
+		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: "25"}, Name: "file-def"})
 	}))
 	defer server.Close()
 
@@ -412,7 +388,7 @@ func TestDefinitionCreateCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: 30}})
+		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: "30"}})
 	}))
 	defer server.Close()
 
@@ -479,7 +455,7 @@ func TestDefinitionUpdateCmd_WithFromFile(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: 5}, Name: "file-update"})
+		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: "5"}, Name: "file-update"})
 	}))
 	defer server.Close()
 
@@ -495,18 +471,6 @@ func TestDefinitionUpdateCmd_WithFromFile(t *testing.T) {
 	err := definitionUpdateCmd.RunE(definitionUpdateCmd, []string{"5"})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "file-update")
-}
-
-func TestDefinitionUpdateCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := definitionUpdateCmd.RunE(definitionUpdateCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 func TestDefinitionUpdateCmd_ServerError(t *testing.T) {
@@ -602,22 +566,6 @@ func TestDefinitionDeleteCmd_Declined(t *testing.T) {
 	assert.Contains(t, buf.String(), "Aborted")
 }
 
-func TestDefinitionDeleteCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-
-	definitionDeleteCmd.Flags().Set("yes", "true")
-	t.Cleanup(func() { definitionDeleteCmd.Flags().Set("yes", "false") })
-
-	err := definitionDeleteCmd.RunE(definitionDeleteCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestDefinitionDeleteCmd_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -709,18 +657,6 @@ func TestDefinitionExportCmd_ToFile(t *testing.T) {
 	assert.Contains(t, buf.String(), "Exported definition 5")
 }
 
-func TestDefinitionExportCmd_InvalidID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("API should not be called for invalid ID")
-	}))
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	err := definitionExportCmd.RunE(definitionExportCmd, []string{"abc"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
-}
-
 func TestDefinitionExportCmd_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -750,7 +686,7 @@ func TestDefinitionImportCmd_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: 50}, Name: "imported-def"})
+		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: "50"}, Name: "imported-def"})
 	}))
 	defer server.Close()
 
@@ -826,7 +762,7 @@ func TestDefinitionImportCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: 55}})
+		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: "55"}})
 	}))
 	defer server.Close()
 

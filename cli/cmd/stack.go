@@ -637,7 +637,7 @@ Examples:
 		}
 
 		if leftID == rightID {
-			return fmt.Errorf("cannot compare an instance with itself (both IDs are %d)", leftID)
+			return fmt.Errorf("cannot compare an instance with itself (both IDs are %s)", leftID)
 		}
 
 		c, err := newClient()
@@ -678,7 +678,7 @@ Examples:
 				}
 			}
 			if len(rows) == 0 {
-				printer.PrintMessage("No differences found between stack %d and %d", leftID, rightID)
+				printer.PrintMessage("No differences found between stack %s and %s", leftID, rightID)
 				return nil
 			}
 			return printer.PrintTable(headers, rows)
