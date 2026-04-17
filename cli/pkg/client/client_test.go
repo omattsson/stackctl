@@ -384,7 +384,7 @@ func TestWhoami(t *testing.T) {
 		assert.Equal(t, "/api/v1/auth/me", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.User{
-			Base:     types.Base{ID: 1},
+			Base:     types.Base{ID: "1"},
 			Username: "admin",
 			Role:     "admin",
 		})
@@ -395,7 +395,7 @@ func TestWhoami(t *testing.T) {
 	c.Token = "valid-token"
 	user, err := c.Whoami()
 	require.NoError(t, err)
-	assert.Equal(t, uint(1), user.ID)
+	assert.Equal(t, "1", user.ID)
 	assert.Equal(t, "admin", user.Username)
 	assert.Equal(t, "admin", user.Role)
 }
@@ -500,7 +500,7 @@ func TestWhoami_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.User{
-			Base:     types.Base{ID: 5},
+			Base:     types.Base{ID: "5"},
 			Username: "testuser",
 			Role:     "operator",
 		})
@@ -511,7 +511,7 @@ func TestWhoami_Success(t *testing.T) {
 	c.Token = "my-jwt"
 	user, err := c.Whoami()
 	require.NoError(t, err)
-	assert.Equal(t, uint(5), user.ID)
+	assert.Equal(t, "5", user.ID)
 	assert.Equal(t, "testuser", user.Username)
 	assert.Equal(t, "operator", user.Role)
 }
@@ -561,7 +561,7 @@ func TestListStacks_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{
-			Data:       []types.StackInstance{{Base: types.Base{ID: 1}, Name: "stack-1"}},
+			Data:       []types.StackInstance{{Base: types.Base{ID: "1"}, Name: "stack-1"}},
 			Total:      1,
 			Page:       1,
 			PageSize:   20,
@@ -605,7 +605,7 @@ func TestGetStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.StackInstance{
-			Base:   types.Base{ID: 42},
+			Base:   types.Base{ID: "42"},
 			Name:   "my-stack",
 			Status: "running",
 			Owner:  "admin",
@@ -614,9 +614,9 @@ func TestGetStack_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	stack, err := c.GetStack(42)
+	stack, err := c.GetStack("42")
 	require.NoError(t, err)
-	assert.Equal(t, uint(42), stack.ID)
+	assert.Equal(t, "42", stack.ID)
 	assert.Equal(t, "my-stack", stack.Name)
 	assert.Equal(t, "running", stack.Status)
 }
@@ -630,7 +630,7 @@ func TestGetStack_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	stack, err := c.GetStack(999)
+	stack, err := c.GetStack("999")
 	require.Error(t, err)
 	assert.Nil(t, stack)
 
@@ -648,13 +648,13 @@ func TestCreateStack_Success(t *testing.T) {
 		var body types.CreateStackRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "new-stack", body.Name)
-		assert.Equal(t, uint(3), body.StackDefinitionID)
+		assert.Equal(t, "3", body.StackDefinitionID)
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(types.StackInstance{
-			Base:              types.Base{ID: 50},
+			Base:              types.Base{ID: "50"},
 			Name:              "new-stack",
-			StackDefinitionID: 3,
+			StackDefinitionID: "3",
 			Status:            "draft",
 		})
 	}))
@@ -663,10 +663,10 @@ func TestCreateStack_Success(t *testing.T) {
 	c := New(server.URL)
 	stack, err := c.CreateStack(&types.CreateStackRequest{
 		Name:              "new-stack",
-		StackDefinitionID: 3,
+		StackDefinitionID: "3",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, uint(50), stack.ID)
+	assert.Equal(t, "50", stack.ID)
 	assert.Equal(t, "new-stack", stack.Name)
 	assert.Equal(t, "draft", stack.Status)
 }
@@ -681,7 +681,7 @@ func TestDeleteStack_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteStack(42)
+	err := c.DeleteStack("42")
 	require.NoError(t, err)
 }
 
@@ -694,7 +694,7 @@ func TestDeleteStack_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteStack(999)
+	err := c.DeleteStack("999")
 	require.Error(t, err)
 
 	apiErr, ok := err.(*APIError)
@@ -709,8 +709,8 @@ func TestDeployStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/deploy", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: 100},
-			InstanceID: 42,
+			Base:       types.Base{ID: "100"},
+			InstanceID: "42",
 			Action:     "deploy",
 			Status:     "started",
 		})
@@ -718,10 +718,10 @@ func TestDeployStack_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	log, err := c.DeployStack(42)
+	log, err := c.DeployStack("42")
 	require.NoError(t, err)
-	assert.Equal(t, uint(100), log.ID)
-	assert.Equal(t, uint(42), log.InstanceID)
+	assert.Equal(t, "100", log.ID)
+	assert.Equal(t, "42", log.InstanceID)
 	assert.Equal(t, "deploy", log.Action)
 }
 
@@ -732,8 +732,8 @@ func TestStopStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/stop", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: 101},
-			InstanceID: 42,
+			Base:       types.Base{ID: "101"},
+			InstanceID: "42",
 			Action:     "stop",
 			Status:     "started",
 		})
@@ -741,9 +741,9 @@ func TestStopStack_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	log, err := c.StopStack(42)
+	log, err := c.StopStack("42")
 	require.NoError(t, err)
-	assert.Equal(t, uint(101), log.ID)
+	assert.Equal(t, "101", log.ID)
 	assert.Equal(t, "stop", log.Action)
 }
 
@@ -754,8 +754,8 @@ func TestCleanStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/clean", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: 102},
-			InstanceID: 42,
+			Base:       types.Base{ID: "102"},
+			InstanceID: "42",
 			Action:     "clean",
 			Status:     "started",
 		})
@@ -763,10 +763,50 @@ func TestCleanStack_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	log, err := c.CleanStack(42)
+	log, err := c.CleanStack("42")
 	require.NoError(t, err)
-	assert.Equal(t, uint(102), log.ID)
+	assert.Equal(t, "102", log.ID)
 	assert.Equal(t, "clean", log.Action)
+}
+
+func TestRefreshDBStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/refresh-db", r.URL.Path)
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeploymentLog{
+			Base:       types.Base{ID: "log-103"},
+			InstanceID: "42",
+			Action:     "refresh-db",
+			Status:     "started",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	log, err := c.RefreshDBStack("42")
+	require.NoError(t, err)
+	assert.Equal(t, "log-103", log.ID)
+	assert.Equal(t, "refresh-db", log.Action)
+}
+
+func TestRefreshDBStack_Conflict(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Cannot refresh-db: instance is currently deploying"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	log, err := c.RefreshDBStack("42")
+	require.Error(t, err)
+	assert.Nil(t, log)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok, "expected APIError, got %T", err)
+	assert.Equal(t, http.StatusConflict, apiErr.StatusCode)
 }
 
 func TestGetStackStatus_Success(t *testing.T) {
@@ -786,7 +826,7 @@ func TestGetStackStatus_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	status, err := c.GetStackStatus(42)
+	status, err := c.GetStackStatus("42")
 	require.NoError(t, err)
 	assert.Equal(t, "running", status.Status)
 	assert.Len(t, status.Pods, 2)
@@ -802,8 +842,8 @@ func TestGetStackLogs_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/deploy-log", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: 200},
-			InstanceID: 42,
+			Base:       types.Base{ID: "200"},
+			InstanceID: "42",
 			Action:     "deploy",
 			Status:     "completed",
 			Output:     "All charts installed successfully.",
@@ -812,9 +852,9 @@ func TestGetStackLogs_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	log, err := c.GetStackLogs(42)
+	log, err := c.GetStackLogs("42")
 	require.NoError(t, err)
-	assert.Equal(t, uint(200), log.ID)
+	assert.Equal(t, "200", log.ID)
 	assert.Equal(t, "deploy", log.Action)
 	assert.Equal(t, "completed", log.Status)
 	assert.Contains(t, log.Output, "All charts installed")
@@ -827,7 +867,7 @@ func TestCloneStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/clone", r.URL.Path)
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(types.StackInstance{
-			Base:   types.Base{ID: 55},
+			Base:   types.Base{ID: "55"},
 			Name:   "my-stack-clone",
 			Status: "draft",
 		})
@@ -835,9 +875,9 @@ func TestCloneStack_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	clone, err := c.CloneStack(42)
+	clone, err := c.CloneStack("42")
 	require.NoError(t, err)
-	assert.Equal(t, uint(55), clone.ID)
+	assert.Equal(t, "55", clone.ID)
 	assert.Equal(t, "my-stack-clone", clone.Name)
 	assert.Equal(t, "draft", clone.Status)
 }
@@ -854,7 +894,7 @@ func TestExtendStack_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.StackInstance{
-			Base:       types.Base{ID: 42},
+			Base:       types.Base{ID: "42"},
 			Name:       "my-stack",
 			TTLMinutes: 120,
 		})
@@ -862,9 +902,9 @@ func TestExtendStack_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	stack, err := c.ExtendStack(42, 60)
+	stack, err := c.ExtendStack("42", 60)
 	require.NoError(t, err)
-	assert.Equal(t, uint(42), stack.ID)
+	assert.Equal(t, "42", stack.ID)
 	assert.Equal(t, 120, stack.TTLMinutes)
 }
 
@@ -877,7 +917,7 @@ func TestListTemplates_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/templates", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
-			Data:       []types.StackTemplate{{Base: types.Base{ID: 1}, Name: "tmpl-1", Published: true}},
+			Data:       []types.StackTemplate{{Base: types.Base{ID: "1"}, Name: "tmpl-1", Published: true}},
 			Total:      1,
 			Page:       1,
 			PageSize:   20,
@@ -920,7 +960,7 @@ func TestGetTemplate_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/templates/10", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.StackTemplate{
-			Base:        types.Base{ID: 10},
+			Base:        types.Base{ID: "10"},
 			Name:        "web-template",
 			Description: "A web app template",
 			Published:   true,
@@ -933,9 +973,9 @@ func TestGetTemplate_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	tmpl, err := c.GetTemplate(10)
+	tmpl, err := c.GetTemplate("10")
 	require.NoError(t, err)
-	assert.Equal(t, uint(10), tmpl.ID)
+	assert.Equal(t, "10", tmpl.ID)
 	assert.Equal(t, "web-template", tmpl.Name)
 	assert.True(t, tmpl.Published)
 	assert.Len(t, tmpl.Charts, 1)
@@ -951,7 +991,7 @@ func TestGetTemplate_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	tmpl, err := c.GetTemplate(999)
+	tmpl, err := c.GetTemplate("999")
 	require.Error(t, err)
 	assert.Nil(t, tmpl)
 
@@ -970,11 +1010,11 @@ func TestInstantiateTemplate_Success(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "my-instance", body.Name)
 		assert.Equal(t, "feature/xyz", body.Branch)
-		assert.Equal(t, uint(2), body.ClusterID)
+		assert.Equal(t, "2", body.ClusterID)
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(types.StackInstance{
-			Base:   types.Base{ID: 50},
+			Base:   types.Base{ID: "50"},
 			Name:   "my-instance",
 			Status: "draft",
 		})
@@ -982,13 +1022,13 @@ func TestInstantiateTemplate_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	instance, err := c.InstantiateTemplate(10, &types.InstantiateTemplateRequest{
+	instance, err := c.InstantiateTemplate("10", &types.InstantiateTemplateRequest{
 		Name:      "my-instance",
 		Branch:    "feature/xyz",
-		ClusterID: 2,
+		ClusterID: "2",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, uint(50), instance.ID)
+	assert.Equal(t, "50", instance.ID)
 	assert.Equal(t, "my-instance", instance.Name)
 	assert.Equal(t, "draft", instance.Status)
 }
@@ -1005,7 +1045,7 @@ func TestQuickDeployTemplate_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(types.StackInstance{
-			Base:   types.Base{ID: 60},
+			Base:   types.Base{ID: "60"},
 			Name:   "quick-stack",
 			Status: "deploying",
 		})
@@ -1013,11 +1053,11 @@ func TestQuickDeployTemplate_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	instance, err := c.QuickDeployTemplate(10, &types.QuickDeployRequest{
+	instance, err := c.QuickDeployTemplate("10", &types.QuickDeployRequest{
 		Name: "quick-stack",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, uint(60), instance.ID)
+	assert.Equal(t, "60", instance.ID)
 	assert.Equal(t, "quick-stack", instance.Name)
 	assert.Equal(t, "deploying", instance.Status)
 }
@@ -1031,7 +1071,7 @@ func TestListDefinitions_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-definitions", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
-			Data:       []types.StackDefinition{{Base: types.Base{ID: 1}, Name: "def-1", Owner: "admin"}},
+			Data:       []types.StackDefinition{{Base: types.Base{ID: "1"}, Name: "def-1", Owner: "admin"}},
 			Total:      1,
 			Page:       1,
 			PageSize:   20,
@@ -1069,7 +1109,7 @@ func TestGetDefinition_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-definitions/5", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.StackDefinition{
-			Base:          types.Base{ID: 5},
+			Base:          types.Base{ID: "5"},
 			Name:          "api-service",
 			Description:   "API stack",
 			DefaultBranch: "main",
@@ -1082,9 +1122,9 @@ func TestGetDefinition_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	def, err := c.GetDefinition(5)
+	def, err := c.GetDefinition("5")
 	require.NoError(t, err)
-	assert.Equal(t, uint(5), def.ID)
+	assert.Equal(t, "5", def.ID)
 	assert.Equal(t, "api-service", def.Name)
 	assert.Equal(t, "main", def.DefaultBranch)
 	assert.Len(t, def.Charts, 1)
@@ -1099,7 +1139,7 @@ func TestGetDefinition_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	def, err := c.GetDefinition(999)
+	def, err := c.GetDefinition("999")
 	require.Error(t, err)
 	assert.Nil(t, def)
 
@@ -1121,7 +1161,7 @@ func TestCreateDefinition_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(types.StackDefinition{
-			Base:        types.Base{ID: 20},
+			Base:        types.Base{ID: "20"},
 			Name:        "new-def",
 			Description: "A new definition",
 			Owner:       "admin",
@@ -1135,7 +1175,7 @@ func TestCreateDefinition_Success(t *testing.T) {
 		Description: "A new definition",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, uint(20), def.ID)
+	assert.Equal(t, "20", def.ID)
 	assert.Equal(t, "new-def", def.Name)
 }
 
@@ -1151,18 +1191,18 @@ func TestUpdateDefinition_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.StackDefinition{
-			Base: types.Base{ID: 5},
+			Base: types.Base{ID: "5"},
 			Name: "updated-name",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	def, err := c.UpdateDefinition(5, &types.UpdateDefinitionRequest{
+	def, err := c.UpdateDefinition("5", &types.UpdateDefinitionRequest{
 		Name: "updated-name",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, uint(5), def.ID)
+	assert.Equal(t, "5", def.ID)
 	assert.Equal(t, "updated-name", def.Name)
 }
 
@@ -1176,7 +1216,7 @@ func TestDeleteDefinition_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteDefinition(5)
+	err := c.DeleteDefinition("5")
 	require.NoError(t, err)
 }
 
@@ -1189,7 +1229,7 @@ func TestDeleteDefinition_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteDefinition(999)
+	err := c.DeleteDefinition("999")
 	require.Error(t, err)
 
 	apiErr, ok := err.(*APIError)
@@ -1210,7 +1250,7 @@ func TestExportDefinition_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	data, err := c.ExportDefinition(5)
+	data, err := c.ExportDefinition("5")
 	require.NoError(t, err)
 	assert.Equal(t, exportJSON, string(data))
 }
@@ -1224,7 +1264,7 @@ func TestExportDefinition_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	data, err := c.ExportDefinition(999)
+	data, err := c.ExportDefinition("999")
 	require.Error(t, err)
 	assert.Nil(t, data)
 }
@@ -1242,7 +1282,7 @@ func TestImportDefinition_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(types.StackDefinition{
-			Base:        types.Base{ID: 50},
+			Base:        types.Base{ID: "50"},
 			Name:        "imported-def",
 			Description: "test import",
 		})
@@ -1252,7 +1292,7 @@ func TestImportDefinition_Success(t *testing.T) {
 	c := New(server.URL)
 	def, err := c.ImportDefinition(importJSON)
 	require.NoError(t, err)
-	assert.Equal(t, uint(50), def.ID)
+	assert.Equal(t, "50", def.ID)
 	assert.Equal(t, "imported-def", def.Name)
 }
 
@@ -1279,18 +1319,18 @@ func TestListValueOverrides_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/overrides", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode([]types.ValueOverride{
-			{Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Values: `{"replicas":3}`},
-			{Base: types.Base{ID: 2}, InstanceID: 42, ChartID: 2, Values: `{"debug":true}`},
+			{Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Values: `{"replicas":3}`},
+			{Base: types.Base{ID: "2"}, InstanceID: "42", ChartID: "2", Values: `{"debug":true}`},
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	overrides, err := c.ListValueOverrides(42)
+	overrides, err := c.ListValueOverrides("42")
 	require.NoError(t, err)
 	assert.Len(t, overrides, 2)
-	assert.Equal(t, uint(1), overrides[0].ChartID)
-	assert.Equal(t, uint(2), overrides[1].ChartID)
+	assert.Equal(t, "1", overrides[0].ChartID)
+	assert.Equal(t, "2", overrides[1].ChartID)
 }
 
 func TestListValueOverrides_Error(t *testing.T) {
@@ -1302,7 +1342,7 @@ func TestListValueOverrides_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	overrides, err := c.ListValueOverrides(999)
+	overrides, err := c.ListValueOverrides("999")
 	require.Error(t, err)
 	assert.Nil(t, overrides)
 }
@@ -1314,16 +1354,16 @@ func TestGetValueOverride_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/overrides/1", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ValueOverride{
-			Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Values: `{"replicas":3}`,
+			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Values: `{"replicas":3}`,
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	override, err := c.GetValueOverride(42, 1)
+	override, err := c.GetValueOverride("42", "1")
 	require.NoError(t, err)
-	assert.Equal(t, uint(1), override.ChartID)
-	assert.Equal(t, uint(42), override.InstanceID)
+	assert.Equal(t, "1", override.ChartID)
+	assert.Equal(t, "42", override.InstanceID)
 	assert.Contains(t, override.Values, "replicas")
 }
 
@@ -1336,7 +1376,7 @@ func TestGetValueOverride_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	override, err := c.GetValueOverride(42, 99)
+	override, err := c.GetValueOverride("42", "99")
 	require.Error(t, err)
 	assert.Nil(t, override)
 }
@@ -1353,17 +1393,17 @@ func TestSetValueOverride_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ValueOverride{
-			Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Values: `{"replicas":5}`,
+			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Values: `{"replicas":5}`,
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	override, err := c.SetValueOverride(42, 1, &types.SetValueOverrideRequest{
+	override, err := c.SetValueOverride("42", "1", &types.SetValueOverrideRequest{
 		Values: map[string]interface{}{"replicas": float64(5)},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, uint(1), override.ChartID)
+	assert.Equal(t, "1", override.ChartID)
 }
 
 func TestSetValueOverride_Error(t *testing.T) {
@@ -1375,7 +1415,7 @@ func TestSetValueOverride_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	override, err := c.SetValueOverride(42, 1, &types.SetValueOverrideRequest{
+	override, err := c.SetValueOverride("42", "1", &types.SetValueOverrideRequest{
 		Values: map[string]interface{}{"key": "val"},
 	})
 	require.Error(t, err)
@@ -1392,7 +1432,7 @@ func TestDeleteValueOverride_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteValueOverride(42, 1)
+	err := c.DeleteValueOverride("42", "1")
 	require.NoError(t, err)
 }
 
@@ -1405,7 +1445,7 @@ func TestDeleteValueOverride_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteValueOverride(42, 99)
+	err := c.DeleteValueOverride("42", "99")
 	require.Error(t, err)
 
 	apiErr, ok := err.(*APIError)
@@ -1422,13 +1462,13 @@ func TestListBranchOverrides_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/branches", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode([]types.BranchOverride{
-			{Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Branch: "feature/xyz"},
+			{Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Branch: "feature/xyz"},
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	overrides, err := c.ListBranchOverrides(42)
+	overrides, err := c.ListBranchOverrides("42")
 	require.NoError(t, err)
 	assert.Len(t, overrides, 1)
 	assert.Equal(t, "feature/xyz", overrides[0].Branch)
@@ -1443,7 +1483,7 @@ func TestListBranchOverrides_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	overrides, err := c.ListBranchOverrides(999)
+	overrides, err := c.ListBranchOverrides("999")
 	require.Error(t, err)
 	assert.Nil(t, overrides)
 }
@@ -1455,16 +1495,16 @@ func TestGetBranchOverride_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/branches/1", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BranchOverride{
-			Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Branch: "main",
+			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Branch: "main",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	override, err := c.GetBranchOverride(42, 1)
+	override, err := c.GetBranchOverride("42", "1")
 	require.NoError(t, err)
 	assert.Equal(t, "main", override.Branch)
-	assert.Equal(t, uint(42), override.InstanceID)
+	assert.Equal(t, "42", override.InstanceID)
 }
 
 func TestGetBranchOverride_NotFound(t *testing.T) {
@@ -1476,7 +1516,7 @@ func TestGetBranchOverride_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	override, err := c.GetBranchOverride(42, 99)
+	override, err := c.GetBranchOverride("42", "99")
 	require.Error(t, err)
 	assert.Nil(t, override)
 }
@@ -1493,13 +1533,13 @@ func TestSetBranchOverride_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BranchOverride{
-			Base: types.Base{ID: 1}, InstanceID: 42, ChartID: 1, Branch: "feature/new",
+			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Branch: "feature/new",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	override, err := c.SetBranchOverride(42, 1, &types.SetBranchOverrideRequest{Branch: "feature/new"})
+	override, err := c.SetBranchOverride("42", "1", &types.SetBranchOverrideRequest{Branch: "feature/new"})
 	require.NoError(t, err)
 	assert.Equal(t, "feature/new", override.Branch)
 }
@@ -1513,7 +1553,7 @@ func TestSetBranchOverride_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	override, err := c.SetBranchOverride(42, 1, &types.SetBranchOverrideRequest{Branch: "main"})
+	override, err := c.SetBranchOverride("42", "1", &types.SetBranchOverrideRequest{Branch: "main"})
 	require.Error(t, err)
 	assert.Nil(t, override)
 }
@@ -1528,7 +1568,7 @@ func TestDeleteBranchOverride_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteBranchOverride(42, 1)
+	err := c.DeleteBranchOverride("42", "1")
 	require.NoError(t, err)
 }
 
@@ -1541,7 +1581,7 @@ func TestDeleteBranchOverride_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteBranchOverride(42, 99)
+	err := c.DeleteBranchOverride("42", "99")
 	require.Error(t, err)
 
 	apiErr, ok := err.(*APIError)
@@ -1558,16 +1598,16 @@ func TestGetQuotaOverride_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/quota-overrides", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.QuotaOverride{
-			InstanceID: 42, CPURequest: "100m", CPULimit: "500m",
+			InstanceID: "42", CPURequest: "100m", CPULimit: "500m",
 			MemRequest: "128Mi", MemLimit: "512Mi",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	quota, err := c.GetQuotaOverride(42)
+	quota, err := c.GetQuotaOverride("42")
 	require.NoError(t, err)
-	assert.Equal(t, uint(42), quota.InstanceID)
+	assert.Equal(t, "42", quota.InstanceID)
 	assert.Equal(t, "100m", quota.CPURequest)
 	assert.Equal(t, "500m", quota.CPULimit)
 	assert.Equal(t, "128Mi", quota.MemRequest)
@@ -1583,7 +1623,7 @@ func TestGetQuotaOverride_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	quota, err := c.GetQuotaOverride(999)
+	quota, err := c.GetQuotaOverride("999")
 	require.Error(t, err)
 	assert.Nil(t, quota)
 }
@@ -1601,13 +1641,13 @@ func TestSetQuotaOverride_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.QuotaOverride{
-			InstanceID: 42, CPURequest: "200m", MemLimit: "1Gi",
+			InstanceID: "42", CPURequest: "200m", MemLimit: "1Gi",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	quota, err := c.SetQuotaOverride(42, &types.SetQuotaOverrideRequest{
+	quota, err := c.SetQuotaOverride("42", &types.SetQuotaOverrideRequest{
 		CPURequest: "200m", MemLimit: "1Gi",
 	})
 	require.NoError(t, err)
@@ -1624,7 +1664,7 @@ func TestSetQuotaOverride_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	quota, err := c.SetQuotaOverride(42, &types.SetQuotaOverrideRequest{CPURequest: "100m"})
+	quota, err := c.SetQuotaOverride("42", &types.SetQuotaOverrideRequest{CPURequest: "100m"})
 	require.Error(t, err)
 	assert.Nil(t, quota)
 }
@@ -1639,7 +1679,7 @@ func TestDeleteQuotaOverride_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteQuotaOverride(42)
+	err := c.DeleteQuotaOverride("42")
 	require.NoError(t, err)
 }
 
@@ -1652,7 +1692,7 @@ func TestDeleteQuotaOverride_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	err := c.DeleteQuotaOverride(999)
+	err := c.DeleteQuotaOverride("999")
 	require.Error(t, err)
 
 	apiErr, ok := err.(*APIError)
@@ -1669,7 +1709,7 @@ func TestGetMergedValues_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/values", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.MergedValues{
-			InstanceID: 42,
+			InstanceID: "42",
 			Charts: map[string]map[string]interface{}{
 				"api": {"replicas": float64(3)},
 			},
@@ -1678,9 +1718,9 @@ func TestGetMergedValues_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	values, err := c.GetMergedValues(42, "")
+	values, err := c.GetMergedValues("42", "")
 	require.NoError(t, err)
-	assert.Equal(t, uint(42), values.InstanceID)
+	assert.Equal(t, "42", values.InstanceID)
 	assert.Contains(t, values.Charts, "api")
 }
 
@@ -1690,14 +1730,14 @@ func TestGetMergedValues_WithChartFilter(t *testing.T) {
 		assert.Equal(t, "frontend", r.URL.Query().Get("chart"))
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.MergedValues{
-			InstanceID: 42,
+			InstanceID: "42",
 			Charts:     map[string]map[string]interface{}{"frontend": {"port": float64(8080)}},
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	values, err := c.GetMergedValues(42, "frontend")
+	values, err := c.GetMergedValues("42", "frontend")
 	require.NoError(t, err)
 	assert.Contains(t, values.Charts, "frontend")
 }
@@ -1711,7 +1751,7 @@ func TestGetMergedValues_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	values, err := c.GetMergedValues(999, "")
+	values, err := c.GetMergedValues("999", "")
 	require.Error(t, err)
 	assert.Nil(t, values)
 }
@@ -1725,18 +1765,18 @@ func TestCompareInstances_Success(t *testing.T) {
 		assert.Equal(t, "43", r.URL.Query().Get("right"))
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.CompareResult{
-			Left:  &types.StackInstance{Base: types.Base{ID: 42}, Name: "stack-a"},
-			Right: &types.StackInstance{Base: types.Base{ID: 43}, Name: "stack-b"},
+			Left:  &types.StackInstance{Base: types.Base{ID: "42"}, Name: "stack-a"},
+			Right: &types.StackInstance{Base: types.Base{ID: "43"}, Name: "stack-b"},
 			Diffs: map[string]interface{}{"name": true},
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	result, err := c.CompareInstances(42, 43)
+	result, err := c.CompareInstances("42", "43")
 	require.NoError(t, err)
-	assert.Equal(t, uint(42), result.Left.ID)
-	assert.Equal(t, uint(43), result.Right.ID)
+	assert.Equal(t, "42", result.Left.ID)
+	assert.Equal(t, "43", result.Right.ID)
 	assert.Contains(t, result.Diffs, "name")
 }
 
@@ -1749,7 +1789,7 @@ func TestCompareInstances_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	result, err := c.CompareInstances(42, 43)
+	result, err := c.CompareInstances("42", "43")
 	require.Error(t, err)
 	assert.Nil(t, result)
 }
@@ -1763,20 +1803,20 @@ func TestBulkDeploy_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/bulk/deploy", r.URL.Path)
 		var body types.BulkRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []uint{1, 2, 3}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: 1, Success: true},
-				{ID: 2, Success: true},
-				{ID: 3, Success: false, Error: "not found"},
+				{ID: "1", Success: true},
+				{ID: "2", Success: true},
+				{ID: "3", Success: false, Error: "not found"},
 			},
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	resp, err := c.BulkDeploy([]uint{1, 2, 3})
+	resp, err := c.BulkDeploy([]string{"1", "2", "3"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 3)
 	assert.True(t, resp.Results[0].Success)
@@ -1793,7 +1833,7 @@ func TestBulkDeploy_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	resp, err := c.BulkDeploy([]uint{1, 2})
+	resp, err := c.BulkDeploy([]string{"1", "2"})
 	require.Error(t, err)
 	assert.Nil(t, resp)
 }
@@ -1806,14 +1846,14 @@ func TestBulkStop_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: 1, Success: true},
+				{ID: "1", Success: true},
 			},
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	resp, err := c.BulkStop([]uint{1})
+	resp, err := c.BulkStop([]string{"1"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 1)
 	assert.True(t, resp.Results[0].Success)
@@ -1828,7 +1868,7 @@ func TestBulkStop_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	resp, err := c.BulkStop([]uint{1})
+	resp, err := c.BulkStop([]string{"1"})
 	require.Error(t, err)
 	assert.Nil(t, resp)
 }
@@ -1841,15 +1881,15 @@ func TestBulkClean_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: 5, Success: true},
-				{ID: 6, Success: true},
+				{ID: "5", Success: true},
+				{ID: "6", Success: true},
 			},
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	resp, err := c.BulkClean([]uint{5, 6})
+	resp, err := c.BulkClean([]string{"5", "6"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 2)
 }
@@ -1863,7 +1903,7 @@ func TestBulkClean_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	resp, err := c.BulkClean([]uint{5, 6})
+	resp, err := c.BulkClean([]string{"5", "6"})
 	require.Error(t, err)
 	assert.Nil(t, resp)
 }
@@ -1876,14 +1916,14 @@ func TestBulkDelete_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: 10, Success: true},
+				{ID: "10", Success: true},
 			},
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	resp, err := c.BulkDelete([]uint{10})
+	resp, err := c.BulkDelete([]string{"10"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 1)
 	assert.True(t, resp.Results[0].Success)
@@ -1898,7 +1938,7 @@ func TestBulkDelete_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	resp, err := c.BulkDelete([]uint{999})
+	resp, err := c.BulkDelete([]string{"999"})
 	require.Error(t, err)
 	assert.Nil(t, resp)
 }
@@ -2018,12 +2058,8 @@ func TestListClusters_Success(t *testing.T) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/v1/clusters", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
-			Data:       []types.Cluster{{Base: types.Base{ID: 1}, Name: "dev-cluster", Status: "online"}},
-			Total:      1,
-			Page:       1,
-			PageSize:   20,
-			TotalPages: 1,
+		json.NewEncoder(w).Encode([]types.Cluster{
+			{Base: types.Base{ID: "1"}, Name: "dev-cluster", Status: "online"},
 		})
 	}))
 	defer server.Close()
@@ -2031,26 +2067,22 @@ func TestListClusters_Success(t *testing.T) {
 	c := New(server.URL)
 	resp, err := c.ListClusters()
 	require.NoError(t, err)
-	assert.Equal(t, 1, resp.Total)
-	assert.Len(t, resp.Data, 1)
-	assert.Equal(t, "dev-cluster", resp.Data[0].Name)
+	assert.Len(t, resp, 1)
+	assert.Equal(t, "dev-cluster", resp[0].Name)
 }
 
 func TestListClusters_Empty(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.ListResponse[types.Cluster]{
-			Data: []types.Cluster{}, Total: 0, Page: 1, PageSize: 20, TotalPages: 0,
-		})
+		json.NewEncoder(w).Encode([]types.Cluster{})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
 	resp, err := c.ListClusters()
 	require.NoError(t, err)
-	assert.Equal(t, 0, resp.Total)
-	assert.Empty(t, resp.Data)
+	assert.Empty(t, resp)
 }
 
 func TestListClusters_Error(t *testing.T) {
@@ -2074,7 +2106,7 @@ func TestGetCluster_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/clusters/1", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.Cluster{
-			Base:      types.Base{ID: 1},
+			Base:      types.Base{ID: "1"},
 			Name:      "dev-cluster",
 			Status:    "online",
 			IsDefault: true,
@@ -2084,9 +2116,9 @@ func TestGetCluster_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	cluster, err := c.GetCluster(1)
+	cluster, err := c.GetCluster("1")
 	require.NoError(t, err)
-	assert.Equal(t, uint(1), cluster.ID)
+	assert.Equal(t, "1", cluster.ID)
 	assert.Equal(t, "dev-cluster", cluster.Name)
 	assert.True(t, cluster.IsDefault)
 }
@@ -2100,7 +2132,7 @@ func TestGetCluster_NotFound(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	cluster, err := c.GetCluster(999)
+	cluster, err := c.GetCluster("999")
 	require.Error(t, err)
 	assert.Nil(t, cluster)
 }
@@ -2123,7 +2155,7 @@ func TestGetClusterHealth_Success(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	health, err := c.GetClusterHealth(1)
+	health, err := c.GetClusterHealth("1")
 	require.NoError(t, err)
 	assert.Equal(t, "healthy", health.Status)
 	assert.Equal(t, "2.5", health.CPUUsage)
@@ -2139,7 +2171,7 @@ func TestGetClusterHealth_Error(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	health, err := c.GetClusterHealth(1)
+	health, err := c.GetClusterHealth("1")
 	require.Error(t, err)
 	assert.Nil(t, health)
 }
@@ -2170,7 +2202,7 @@ func TestClient_EmptyResponseBody(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL)
-	stack, err := c.GetStack(1)
+	stack, err := c.GetStack("1")
 	require.Error(t, err)
 	assert.Nil(t, stack)
 	assert.Contains(t, err.Error(), "unexpected empty response body")

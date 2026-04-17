@@ -355,7 +355,7 @@ Examples:
 		}
 
 		printer.PrintMessage("Refreshing database for stack %s... (log ID: %s)", id, log.ID)
-		printer.PrintMessage("Run 'stackctl stack logs %s' to stream progress, or 'stackctl stack deploy %s' afterwards to re-populate Redis.", id, id)
+		printer.PrintMessage("Run 'stackctl stack logs %s' to check progress, or 'stackctl stack deploy %s' afterwards to re-populate Redis.", id, id)
 		return nil
 	},
 }

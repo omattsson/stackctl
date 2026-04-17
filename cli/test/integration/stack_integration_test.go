@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -19,13 +20,13 @@ import (
 type stackMockState struct {
 	mu        sync.Mutex
 	nextID    uint
-	instances map[uint]*types.StackInstance
+	instances map[string]*types.StackInstance
 }
 
 func newStackMockState() *stackMockState {
 	return &stackMockState{
 		nextID:    1,
-		instances: make(map[uint]*types.StackInstance),
+		instances: make(map[string]*types.StackInstance),
 	}
 }
 
@@ -44,7 +45,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				return
 			}
 			state.mu.Lock()
-			instance.ID = state.nextID
+			instance.ID = fmt.Sprintf("%d", state.nextID)
 			state.nextID++
 			instance.Status = "draft"
 			state.instances[instance.ID] = &instance
@@ -82,14 +83,27 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 		// Match specific instance routes
 		default:
 			// Parse /api/v1/stack-instances/<id>[/<action>]
-			var id uint
-			var action string
-			n, _ := fmt.Sscanf(r.URL.Path, "/api/v1/stack-instances/%d/%s", &id, &action)
-			if n == 0 {
-				// Try without action
-				n, _ = fmt.Sscanf(r.URL.Path, "/api/v1/stack-instances/%d", &id)
+			trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/stack-instances/")
+			if trimmed == r.URL.Path {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+				return
 			}
-			if n == 0 {
+			parts := strings.Split(trimmed, "/")
+			var id string
+			var action string
+			switch len(parts) {
+			case 1:
+				id = parts[0]
+			case 2:
+				id = parts[0]
+				action = parts[1]
+			default:
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+				return
+			}
+			if id == "" {
 				w.WriteHeader(http.StatusNotFound)
 				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
 				return
@@ -135,7 +149,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.DeploymentLog{
-					Base:       types.Base{ID: 100 + id},
+					Base:       types.Base{ID: "deploy-" + id},
 					InstanceID: id,
 					Action:     "deploy",
 					Status:     "started",
@@ -148,7 +162,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.DeploymentLog{
-					Base:       types.Base{ID: 200 + id},
+					Base:       types.Base{ID: "stop-" + id},
 					InstanceID: id,
 					Action:     "stop",
 					Status:     "started",
@@ -161,7 +175,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.DeploymentLog{
-					Base:       types.Base{ID: 300 + id},
+					Base:       types.Base{ID: "clean-" + id},
 					InstanceID: id,
 					Action:     "clean",
 					Status:     "started",
@@ -181,7 +195,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 			case action == "deploy-log" && r.Method == http.MethodGet:
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.DeploymentLog{
-					Base:       types.Base{ID: 400 + id},
+					Base:       types.Base{ID: "log-" + id},
 					InstanceID: id,
 					Action:     "deploy",
 					Status:     "completed",
@@ -192,7 +206,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 			case action == "clone" && r.Method == http.MethodPost:
 				state.mu.Lock()
 				newInst := *inst
-				newInst.ID = state.nextID
+				newInst.ID = fmt.Sprintf("%d", state.nextID)
 				state.nextID++
 				newInst.Name = inst.Name + "-clone"
 				newInst.Status = "draft"
@@ -239,7 +253,7 @@ func TestStackWorkflow_CreateDeployStatusLogsStopCleanDelete(t *testing.T) {
 	// 1. Create
 	created, err := c.CreateStack(&types.CreateStackRequest{
 		Name:              "lifecycle-stack",
-		StackDefinitionID: 1,
+		StackDefinitionID: "1",
 		Branch:            "main",
 	})
 	require.NoError(t, err)
@@ -374,16 +388,16 @@ func TestStackWorkflow_DestructiveOpsOnMissingInstance(t *testing.T) {
 	c := client.New(server.URL)
 
 	// Delete a non-existent instance
-	err := c.DeleteStack(999)
+	err := c.DeleteStack("999")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "instance not found")
 
 	// Deploy a non-existent instance
-	_, err = c.DeployStack(999)
+	_, err = c.DeployStack("999")
 	require.Error(t, err)
 
 	// Get non-existent
-	_, err = c.GetStack(999)
+	_, err = c.GetStack("999")
 	require.Error(t, err)
 }
 
@@ -414,7 +428,7 @@ func TestStackWorkflow_ErrorStatusCodes(t *testing.T) {
 			defer server.Close()
 
 			c := client.New(server.URL)
-			_, err := c.GetStack(1)
+			_, err := c.GetStack("1")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantMsg)
 

@@ -84,7 +84,7 @@ func TestPrintIDs(t *testing.T) {
 	var buf bytes.Buffer
 	p := &Printer{Writer: &buf}
 
-	p.PrintIDs([]uint{1, 42, 100})
+	p.PrintIDs([]string{"1", "42", "100"})
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	assert.Equal(t, []string{"1", "42", "100"}, lines)
 }
@@ -94,7 +94,7 @@ func TestPrintIDs_Empty(t *testing.T) {
 	var buf bytes.Buffer
 	p := &Printer{Writer: &buf}
 
-	p.PrintIDs([]uint{})
+	p.PrintIDs([]string{})
 	assert.Empty(t, buf.String())
 }
 
@@ -174,7 +174,7 @@ func TestPrint_QuietMode(t *testing.T) {
 	var buf bytes.Buffer
 	p := &Printer{Writer: &buf, Quiet: true, Format: FormatTable}
 
-	err := p.Print(nil, nil, nil, []uint{5, 10, 15})
+	err := p.Print(nil, nil, nil, []string{"5", "10", "15"})
 	require.NoError(t, err)
 	assert.Equal(t, "5\n10\n15\n", buf.String())
 }
@@ -281,16 +281,16 @@ func TestPrintMessage(t *testing.T) {
 func newTestStackInstance() types.StackInstance {
 	now := time.Date(2025, 6, 15, 10, 30, 0, 0, time.UTC)
 	deployedAt := time.Date(2025, 6, 15, 10, 35, 0, 0, time.UTC)
-	clusterID := uint(3)
+	clusterID := "3"
 	return types.StackInstance{
 		Base: types.Base{
-			ID:        42,
+			ID:        "42",
 			CreatedAt: now,
 			UpdatedAt: now,
-			Version:   1,
+			Version:   "1",
 		},
 		Name:              "my-app-feature",
-		StackDefinitionID: 7,
+		StackDefinitionID: "7",
 		DefinitionName:    "my-app",
 		Owner:             "alice",
 		Branch:            "feature/login",
@@ -316,15 +316,15 @@ func TestStackInstance_JSON(t *testing.T) {
 	var result map[string]interface{}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 
-	assert.Equal(t, float64(42), result["id"])
+	assert.Equal(t, "42", result["id"])
 	assert.Equal(t, "my-app-feature", result["name"])
-	assert.Equal(t, float64(7), result["stack_definition_id"])
+	assert.Equal(t, "7", result["stack_definition_id"])
 	assert.Equal(t, "my-app", result["definition_name"])
 	assert.Equal(t, "alice", result["owner"])
 	assert.Equal(t, "feature/login", result["branch"])
 	assert.Equal(t, "my-app-feature-ns", result["namespace"])
 	assert.Equal(t, "running", result["status"])
-	assert.Equal(t, float64(3), result["cluster_id"])
+	assert.Equal(t, "3", result["cluster_id"])
 	assert.Equal(t, "dev-cluster", result["cluster_name"])
 	assert.Equal(t, float64(120), result["ttl_minutes"])
 	assert.NotEmpty(t, result["deployed_at"])
@@ -349,14 +349,14 @@ func TestStackInstance_YAML(t *testing.T) {
 	var result types.StackInstance
 	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &result))
 
-	assert.Equal(t, uint(42), result.ID)
+	assert.Equal(t, "42", result.ID)
 	assert.Equal(t, "my-app-feature", result.Name)
-	assert.Equal(t, uint(7), result.StackDefinitionID)
+	assert.Equal(t, "7", result.StackDefinitionID)
 	assert.Equal(t, "alice", result.Owner)
 	assert.Equal(t, "feature/login", result.Branch)
 	assert.Equal(t, "running", result.Status)
 	require.NotNil(t, result.ClusterID)
-	assert.Equal(t, uint(3), *result.ClusterID)
+	assert.Equal(t, "3", *result.ClusterID)
 	assert.Equal(t, "dev-cluster", result.ClusterName)
 	assert.Nil(t, result.DeletedAt, "deleted_at should be nil")
 }
@@ -371,7 +371,7 @@ func TestStackInstance_TablePrint(t *testing.T) {
 	headers := []string{"ID", "NAME", "BRANCH", "STATUS", "OWNER", "NAMESPACE"}
 	rows := [][]string{
 		{
-			fmt.Sprintf("%d", instance.ID),
+			instance.ID,
 			instance.Name,
 			instance.Branch,
 			p.StatusColor(instance.Status),
@@ -403,7 +403,7 @@ func TestStackInstance_PrintSingle(t *testing.T) {
 
 	instance := newTestStackInstance()
 	fields := []KeyValue{
-		{Key: "ID", Value: fmt.Sprintf("%d", instance.ID)},
+		{Key: "ID", Value: instance.ID},
 		{Key: "Name", Value: instance.Name},
 		{Key: "Branch", Value: instance.Branch},
 		{Key: "Status", Value: p.StatusColor(instance.Status)},
@@ -434,7 +434,7 @@ func TestStackInstance_QuietMode(t *testing.T) {
 	var buf bytes.Buffer
 	p := &Printer{Writer: &buf, Quiet: true, Format: FormatTable}
 
-	err := p.Print(nil, nil, nil, []uint{42, 99})
+	err := p.Print(nil, nil, nil, []string{"42", "99"})
 	require.NoError(t, err)
 	assert.Equal(t, "42\n99\n", buf.String())
 }
@@ -472,7 +472,7 @@ func TestListResponse_StackInstance_JSON(t *testing.T) {
 	item, ok := dataArr[0].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "my-app-feature", item["name"])
-	assert.Equal(t, float64(42), item["id"])
+	assert.Equal(t, "42", item["id"])
 }
 
 func TestListResponse_StackInstance_YAML(t *testing.T) {
@@ -502,7 +502,7 @@ func TestListResponse_StackInstance_YAML(t *testing.T) {
 	assert.Equal(t, 3, result.TotalPages)
 	require.Len(t, result.Data, 1)
 	assert.Equal(t, "my-app-feature", result.Data[0].Name)
-	assert.Equal(t, uint(42), result.Data[0].ID)
+	assert.Equal(t, "42", result.Data[0].ID)
 }
 
 func TestListResponse_EmptyData_JSON(t *testing.T) {
@@ -537,12 +537,12 @@ func TestDeploymentLog_AllFormats(t *testing.T) {
 	now := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
 	log := types.DeploymentLog{
 		Base: types.Base{
-			ID:        101,
+			ID:        "101",
 			CreatedAt: now,
 			UpdatedAt: now,
-			Version:   1,
+			Version:   "1",
 		},
-		InstanceID: 42,
+		InstanceID: "42",
 		Action:     "deploy",
 		Status:     "success",
 		Output:     "Deployed 3 charts successfully",
@@ -559,8 +559,8 @@ func TestDeploymentLog_AllFormats(t *testing.T) {
 			verify: func(t *testing.T, output string) {
 				var result map[string]interface{}
 				require.NoError(t, json.Unmarshal([]byte(output), &result))
-				assert.Equal(t, float64(101), result["id"])
-				assert.Equal(t, float64(42), result["instance_id"])
+				assert.Equal(t, "101", result["id"])
+				assert.Equal(t, "42", result["instance_id"])
 				assert.Equal(t, "deploy", result["action"])
 				assert.Equal(t, "success", result["status"])
 				assert.Equal(t, "Deployed 3 charts successfully", result["output"])
@@ -572,8 +572,8 @@ func TestDeploymentLog_AllFormats(t *testing.T) {
 			verify: func(t *testing.T, output string) {
 				var result types.DeploymentLog
 				require.NoError(t, yaml.Unmarshal([]byte(output), &result))
-				assert.Equal(t, uint(101), result.ID)
-				assert.Equal(t, uint(42), result.InstanceID)
+				assert.Equal(t, "101", result.ID)
+				assert.Equal(t, "42", result.InstanceID)
 				assert.Equal(t, "deploy", result.Action)
 				assert.Equal(t, "success", result.Status)
 				assert.Equal(t, "Deployed 3 charts successfully", result.Output)
@@ -601,7 +601,7 @@ func TestDeploymentLog_AllFormats(t *testing.T) {
 				headers := []string{"ID", "ACTION", "STATUS", "OUTPUT"}
 				rows := [][]string{
 					{
-						fmt.Sprintf("%d", log.ID),
+						log.ID,
 						log.Action,
 						log.Status,
 						log.Output,
@@ -627,10 +627,10 @@ func TestDeploymentLog_EmptyOutput(t *testing.T) {
 
 	log := types.DeploymentLog{
 		Base: types.Base{
-			ID:      102,
-			Version: 1,
+			ID:      "102",
+			Version: "1",
 		},
-		InstanceID: 42,
+		InstanceID: "42",
 		Action:     "stop",
 		Status:     "pending",
 		Output:     "",
@@ -788,8 +788,8 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 			name: "stack_instance_nil_optional_pointers",
 			data: types.StackInstance{
 				Base: types.Base{
-					ID:      1,
-					Version: 1,
+					ID:      "1",
+					Version: "1",
 				},
 				Name:   "minimal",
 				Status: "draft",
@@ -797,7 +797,7 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 			json: func(t *testing.T, output string) {
 				var result map[string]interface{}
 				require.NoError(t, json.Unmarshal([]byte(output), &result))
-				assert.Equal(t, float64(1), result["id"])
+				assert.Equal(t, "1", result["id"])
 				assert.Equal(t, "minimal", result["name"])
 				assert.Equal(t, "draft", result["status"])
 				// nil pointer fields should be omitted
@@ -818,7 +818,7 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 			yaml: func(t *testing.T, output string) {
 				var result types.StackInstance
 				require.NoError(t, yaml.Unmarshal([]byte(output), &result))
-				assert.Equal(t, uint(1), result.ID)
+				assert.Equal(t, "1", result.ID)
 				assert.Equal(t, "minimal", result.Name)
 				assert.Equal(t, "draft", result.Status)
 				// nil pointer fields should remain nil after round-trip
@@ -832,11 +832,11 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 			name: "stack_instance_zero_ttl_and_empty_strings",
 			data: types.StackInstance{
 				Base: types.Base{
-					ID:      2,
-					Version: 1,
+					ID:      "2",
+					Version: "1",
 				},
 				Name:              "zero-ttl",
-				StackDefinitionID: 5,
+				StackDefinitionID: "5",
 				Owner:             "bob",
 				Branch:            "",
 				Namespace:         "default",
@@ -857,7 +857,7 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 				var result types.StackInstance
 				require.NoError(t, yaml.Unmarshal([]byte(output), &result))
 				assert.Equal(t, "zero-ttl", result.Name)
-				assert.Equal(t, uint(5), result.StackDefinitionID)
+				assert.Equal(t, "5", result.StackDefinitionID)
 				assert.Equal(t, 0, result.TTLMinutes)
 			},
 		},
@@ -865,10 +865,10 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 			name: "deployment_log_empty_output_field",
 			data: types.DeploymentLog{
 				Base: types.Base{
-					ID:      200,
-					Version: 1,
+					ID:      "200",
+					Version: "1",
 				},
-				InstanceID: 50,
+				InstanceID: "50",
 				Action:     "clean",
 				Status:     "success",
 				Output:     "",
@@ -876,7 +876,7 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 			json: func(t *testing.T, output string) {
 				var result map[string]interface{}
 				require.NoError(t, json.Unmarshal([]byte(output), &result))
-				assert.Equal(t, float64(200), result["id"])
+				assert.Equal(t, "200", result["id"])
 				assert.Equal(t, "clean", result["action"])
 				// Output="" with omitempty should be omitted
 				_, hasOutput := result["output"]
@@ -885,7 +885,7 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 			yaml: func(t *testing.T, output string) {
 				var result types.DeploymentLog
 				require.NoError(t, yaml.Unmarshal([]byte(output), &result))
-				assert.Equal(t, uint(200), result.ID)
+				assert.Equal(t, "200", result.ID)
 				assert.Equal(t, "clean", result.Action)
 				assert.Equal(t, "success", result.Status)
 				assert.Empty(t, result.Output, "output should be empty after round-trip")
@@ -949,16 +949,16 @@ func TestMultipleStackInstances_TableRows(t *testing.T) {
 	p := &Printer{Writer: &buf, Format: FormatTable, NoColor: true}
 
 	instances := []types.StackInstance{
-		{Base: types.Base{ID: 1}, Name: "app-one", Branch: "main", Status: "running", Owner: "alice"},
-		{Base: types.Base{ID: 2}, Name: "app-two", Branch: "develop", Status: "stopped", Owner: "bob"},
-		{Base: types.Base{ID: 3}, Name: "app-three", Branch: "feature/x", Status: "error", Owner: "charlie"},
+		{Base: types.Base{ID: "1"}, Name: "app-one", Branch: "main", Status: "running", Owner: "alice"},
+		{Base: types.Base{ID: "2"}, Name: "app-two", Branch: "develop", Status: "stopped", Owner: "bob"},
+		{Base: types.Base{ID: "3"}, Name: "app-three", Branch: "feature/x", Status: "error", Owner: "charlie"},
 	}
 
 	headers := []string{"ID", "NAME", "BRANCH", "STATUS", "OWNER"}
 	rows := make([][]string, len(instances))
 	for i, inst := range instances {
 		rows[i] = []string{
-			fmt.Sprintf("%d", inst.ID),
+			inst.ID,
 			inst.Name,
 			inst.Branch,
 			p.StatusColor(inst.Status),
@@ -986,8 +986,8 @@ func TestListResponse_MultiplePages_JSON(t *testing.T) {
 
 	listResp := types.ListResponse[types.DeploymentLog]{
 		Data: []types.DeploymentLog{
-			{Base: types.Base{ID: 1}, InstanceID: 10, Action: "deploy", Status: "success", Output: "ok"},
-			{Base: types.Base{ID: 2}, InstanceID: 10, Action: "stop", Status: "success", Output: "stopped"},
+			{Base: types.Base{ID: "1"}, InstanceID: "10", Action: "deploy", Status: "success", Output: "ok"},
+			{Base: types.Base{ID: "2"}, InstanceID: "10", Action: "stop", Status: "success", Output: "stopped"},
 		},
 		Total:      50,
 		Page:       3,
