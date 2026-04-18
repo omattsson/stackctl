@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -335,12 +336,12 @@ func startE2EMockAuthServer(t *testing.T) *httptest.Server {
 					"token":      "e2e-jwt-token",
 					"expires_at": "2099-01-01T00:00:00Z",
 					"user": map[string]interface{}{
-						"id":         1,
+						"id":         "1",
 						"username":   "e2euser",
 						"role":       "admin",
 						"created_at": "2025-01-01T00:00:00Z",
 						"updated_at": "2025-01-01T00:00:00Z",
-						"version":    1,
+						"version":    "1",
 					},
 				}
 				json.NewEncoder(w).Encode(resp)
@@ -353,12 +354,12 @@ func startE2EMockAuthServer(t *testing.T) *httptest.Server {
 			auth := r.Header.Get("Authorization")
 			if auth == "Bearer e2e-jwt-token" {
 				resp := map[string]interface{}{
-					"id":         1,
+					"id":         "1",
 					"username":   "e2euser",
 					"role":       "admin",
 					"created_at": "2025-01-01T00:00:00Z",
 					"updated_at": "2025-01-01T00:00:00Z",
-					"version":    1,
+					"version":    "1",
 				}
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(resp)
@@ -529,16 +530,16 @@ func startE2EStackMockServer(t *testing.T) *httptest.Server {
 			resp := map[string]interface{}{
 				"data": []map[string]interface{}{
 					{
-						"id": 1, "name": "e2e-stack-1", "status": "running",
+						"id": "1", "name": "e2e-stack-1", "status": "running",
 						"owner": "admin", "branch": "main", "namespace": "ns-1",
-						"stack_definition_id": 1, "cluster_name": "dev",
-						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+						"stack_definition_id": "1", "cluster_name": "dev",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 					},
 					{
-						"id": 2, "name": "e2e-stack-2", "status": "stopped",
+						"id": "2", "name": "e2e-stack-2", "status": "stopped",
 						"owner": "dev", "branch": "feature/x", "namespace": "ns-2",
-						"stack_definition_id": 2, "cluster_name": "staging",
-						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+						"stack_definition_id": "2", "cluster_name": "staging",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 					},
 				},
 				"total": 2, "page": 1, "page_size": 20, "total_pages": 1,
@@ -551,14 +552,14 @@ func startE2EStackMockServer(t *testing.T) *httptest.Server {
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
 			resp := map[string]interface{}{
-				"id": 10, "name": body["name"], "status": "draft",
+				"id": "10", "name": body["name"], "status": "draft",
 				"stack_definition_id": body["stack_definition_id"],
 				"branch":              body["branch"],
 				"owner":               "admin",
 				"namespace":           "ns-new",
 				"created_at":          "2025-06-01T00:00:00Z",
 				"updated_at":          "2025-06-01T00:00:00Z",
-				"version":             1,
+				"version":             "1",
 			}
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(resp)
@@ -566,10 +567,10 @@ func startE2EStackMockServer(t *testing.T) *httptest.Server {
 		// Get stack
 		case r.URL.Path == "/api/v1/stack-instances/10" && r.Method == http.MethodGet:
 			resp := map[string]interface{}{
-				"id": 10, "name": "e2e-new-stack", "status": "draft",
-				"stack_definition_id": 1, "owner": "admin", "branch": "main",
+				"id": "10", "name": "e2e-new-stack", "status": "draft",
+				"stack_definition_id": "1", "owner": "admin", "branch": "main",
 				"namespace":  "ns-new",
-				"created_at": "2025-06-01T00:00:00Z", "updated_at": "2025-06-01T00:00:00Z", "version": 1,
+				"created_at": "2025-06-01T00:00:00Z", "updated_at": "2025-06-01T00:00:00Z", "version": "1",
 			}
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(resp)
@@ -578,8 +579,8 @@ func startE2EStackMockServer(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/api/v1/stack-instances/10/deploy" && r.Method == http.MethodPost:
 			nextLogID++
 			resp := map[string]interface{}{
-				"id": nextLogID, "instance_id": 10, "action": "deploy", "status": "started",
-				"created_at": "2025-06-01T00:00:00Z", "updated_at": "2025-06-01T00:00:00Z", "version": 1,
+				"id": strconv.Itoa(nextLogID), "instance_id": "10", "action": "deploy", "status": "started",
+				"created_at": "2025-06-01T00:00:00Z", "updated_at": "2025-06-01T00:00:00Z", "version": "1",
 			}
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(resp)
@@ -717,16 +718,16 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 			resp := map[string]interface{}{
 				"data": []map[string]interface{}{
 					{
-						"id": 1, "name": "web-template", "description": "Web app stack",
+						"id": "1", "name": "web-template", "description": "Web app stack",
 						"published": true, "owner": "admin", "charts": []map[string]interface{}{
-							{"id": 1, "name": "frontend", "repo_url": "https://charts.example.com", "chart_version": "1.0.0"},
+							{"id": "1", "name": "frontend", "repo_url": "https://charts.example.com", "chart_version": "1.0.0"},
 						},
-						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 					},
 					{
-						"id": 2, "name": "api-template", "description": "API stack",
+						"id": "2", "name": "api-template", "description": "API stack",
 						"published": false, "owner": "admin", "charts": []map[string]interface{}{},
-						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 					},
 				},
 				"total": 2, "page": 1, "page_size": 20, "total_pages": 1,
@@ -739,10 +740,10 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 			resp := map[string]interface{}{
 				"data": []map[string]interface{}{
 					{
-						"id": 1, "name": "my-definition", "description": "Test definition",
+						"id": "1", "name": "my-definition", "description": "Test definition",
 						"owner": "admin", "default_branch": "main",
 						"charts":     []map[string]interface{}{},
-						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 					},
 				},
 				"total": 1, "page": 1, "page_size": 20, "total_pages": 1,
@@ -873,7 +874,7 @@ func startE2EOverrideMockServer(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/api/v1/stack-instances/1/overrides" && r.Method == http.MethodGet:
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode([]map[string]interface{}{
-				{"id": 10, "instance_id": 1, "chart_id": 5, "values": `{"replicas":3}`, "version": 1,
+				{"id": "10", "instance_id": "1", "chart_id": "5", "values": `{"replicas":3}`, "version": "1",
 					"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z"},
 			})
 
@@ -881,7 +882,7 @@ func startE2EOverrideMockServer(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/api/v1/stack-instances/1/quota-overrides" && r.Method == http.MethodGet:
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"instance_id": 1, "cpu_request": "100m", "cpu_limit": "500m",
+				"instance_id": "1", "cpu_request": "100m", "cpu_limit": "500m",
 				"memory_request": "128Mi", "memory_limit": "512Mi", "updated_at": "2025-01-01T00:00:00Z",
 			})
 
@@ -889,7 +890,7 @@ func startE2EOverrideMockServer(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/api/v1/stack-instances/1/branches" && r.Method == http.MethodGet:
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode([]map[string]interface{}{
-				{"id": 20, "instance_id": 1, "chart_id": 5, "branch": "feature/test", "version": 1,
+				{"id": "20", "instance_id": "1", "chart_id": "5", "branch": "feature/test", "version": "1",
 					"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z"},
 			})
 
@@ -1001,22 +1002,22 @@ func startE2EQuietPipingMockServer(t *testing.T) *httptest.Server {
 			resp := map[string]interface{}{
 				"data": []map[string]interface{}{
 					{
-						"id": 1, "name": "pipe-stack-1", "status": "running",
+						"id": "1", "name": "pipe-stack-1", "status": "running",
 						"owner": "admin", "branch": "main", "namespace": "ns-1",
-						"stack_definition_id": 1, "cluster_name": "dev",
-						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+						"stack_definition_id": "1", "cluster_name": "dev",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 					},
 					{
-						"id": 2, "name": "pipe-stack-2", "status": "running",
+						"id": "2", "name": "pipe-stack-2", "status": "running",
 						"owner": "admin", "branch": "main", "namespace": "ns-2",
-						"stack_definition_id": 1, "cluster_name": "dev",
-						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+						"stack_definition_id": "1", "cluster_name": "dev",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 					},
 					{
-						"id": 3, "name": "pipe-stack-3", "status": "stopped",
+						"id": "3", "name": "pipe-stack-3", "status": "stopped",
 						"owner": "admin", "branch": "feature/x", "namespace": "ns-3",
-						"stack_definition_id": 2, "cluster_name": "staging",
-						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": 1,
+						"stack_definition_id": "2", "cluster_name": "staging",
+						"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 					},
 				},
 				"total": 3, "page": 1, "page_size": 20, "total_pages": 1,
@@ -1027,7 +1028,7 @@ func startE2EQuietPipingMockServer(t *testing.T) *httptest.Server {
 		// Bulk deploy
 		case r.URL.Path == "/api/v1/stack-instances/bulk/deploy" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []uint `json:"ids"`
+				IDs []string `json:"ids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
 				w.WriteHeader(http.StatusBadRequest)
@@ -1044,7 +1045,7 @@ func startE2EQuietPipingMockServer(t *testing.T) *httptest.Server {
 		// Bulk stop
 		case r.URL.Path == "/api/v1/stack-instances/bulk/stop" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []uint `json:"ids"`
+				IDs []string `json:"ids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
 				w.WriteHeader(http.StatusBadRequest)
@@ -1061,7 +1062,7 @@ func startE2EQuietPipingMockServer(t *testing.T) *httptest.Server {
 		// Bulk delete
 		case r.URL.Path == "/api/v1/stack-instances/bulk/delete" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []uint `json:"ids"`
+				IDs []string `json:"ids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
 				w.WriteHeader(http.StatusBadRequest)
