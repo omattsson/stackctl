@@ -86,6 +86,11 @@ func init() {
 
 // Execute runs the root command.
 func Execute() error {
+	// Discover external plugins from $PATH and register any that do not
+	// collide with built-in commands. Ignoring collisions rather than
+	// erroring keeps the CLI usable if a user happens to have a
+	// `stackctl-<builtin>` binary lying around.
+	registerPlugins(rootCmd, os.Getenv("PATH"))
 	return rootCmd.Execute()
 }
 
