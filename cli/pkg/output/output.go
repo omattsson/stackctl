@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,61 @@ const (
 	FormatYAML  Format = "yaml"
 )
 
+// FormatterFunc renders data in a custom format to w. The headers/rows
+// pair is populated for list-style output; data is the same payload for
+// a structured format like JSON. Implementations may use either or both.
+type FormatterFunc func(w io.Writer, data interface{}, headers []string, rows [][]string) error
+
+// SingleFormatterFunc renders a single item's key/value fields. Optional;
+// when a custom format does not register a single formatter, PrintSingle
+// falls back to the list formatter with headers=["field", "value"].
+type SingleFormatterFunc func(w io.Writer, data interface{}, fields []KeyValue) error
+
+var (
+	formatRegistryMu sync.RWMutex
+	formatRegistry   = map[string]FormatterFunc{}
+	singleRegistry   = map[string]SingleFormatterFunc{}
+)
+
+// RegisterFormat attaches a named custom format. Call at init time, before
+// any Printer is used concurrently — the registry is read-locked on every
+// render so adds during rendering are racy.
+//
+// Name must not collide with the built-in formats (table, json, yaml).
+// Passing a built-in name panics to surface the mistake early.
+func RegisterFormat(name string, fn FormatterFunc) {
+	if name == string(FormatTable) || name == string(FormatJSON) || name == string(FormatYAML) {
+		panic(fmt.Sprintf("output: cannot override built-in format %q", name))
+	}
+	formatRegistryMu.Lock()
+	defer formatRegistryMu.Unlock()
+	formatRegistry[name] = fn
+}
+
+// RegisterSingleFormat attaches a custom single-item formatter for an
+// already-registered format. Optional — only needed when the list and
+// single shapes genuinely differ.
+func RegisterSingleFormat(name string, fn SingleFormatterFunc) {
+	formatRegistryMu.Lock()
+	defer formatRegistryMu.Unlock()
+	singleRegistry[name] = fn
+}
+
+// lookupFormat returns the registered list formatter for name.
+func lookupFormat(name string) (FormatterFunc, bool) {
+	formatRegistryMu.RLock()
+	defer formatRegistryMu.RUnlock()
+	fn, ok := formatRegistry[name]
+	return fn, ok
+}
+
+func lookupSingleFormat(name string) (SingleFormatterFunc, bool) {
+	formatRegistryMu.RLock()
+	defer formatRegistryMu.RUnlock()
+	fn, ok := singleRegistry[name]
+	return fn, ok
+}
+
 // Printer handles formatted output.
 type Printer struct {
 	Format  Format
@@ -29,13 +85,24 @@ type Printer struct {
 }
 
 // NewPrinter creates a new Printer with the given format.
+// Falls back to FormatTable if the name is empty, unknown, or a misspelt
+// built-in. Custom formats registered via RegisterFormat are recognised.
 func NewPrinter(format string, quiet, noColor bool) *Printer {
-	f := FormatTable
-	switch strings.ToLower(format) {
+	name := strings.ToLower(format)
+	var f Format
+	switch name {
+	case "", "table":
+		f = FormatTable
 	case "json":
 		f = FormatJSON
 	case "yaml":
 		f = FormatYAML
+	default:
+		if _, ok := lookupFormat(name); ok {
+			f = Format(name)
+		} else {
+			f = FormatTable
+		}
 	}
 	return &Printer{
 		Format:  f,
@@ -125,7 +192,12 @@ func (p *Printer) Print(data interface{}, headers []string, rows [][]string, ids
 		return p.PrintJSON(data)
 	case FormatYAML:
 		return p.PrintYAML(data)
+	case FormatTable:
+		return p.PrintTable(headers, rows)
 	default:
+		if fn, ok := lookupFormat(string(p.Format)); ok {
+			return fn(p.Writer, data, headers, rows)
+		}
 		return p.PrintTable(headers, rows)
 	}
 }
@@ -138,7 +210,25 @@ func (p *Printer) PrintSingle(data interface{}, fields []KeyValue) error {
 		return p.PrintJSON(data)
 	case FormatYAML:
 		return p.PrintYAML(data)
+	case FormatTable:
+		w := p.TableWriter()
+		for _, f := range fields {
+			fmt.Fprintf(w, "%s:\t%s\n", f.Key, f.Value)
+		}
+		return w.Flush()
 	default:
+		// Custom single formatter wins; otherwise adapt the list formatter by
+		// synthesising a two-column (field, value) table.
+		if fn, ok := lookupSingleFormat(string(p.Format)); ok {
+			return fn(p.Writer, data, fields)
+		}
+		if fn, ok := lookupFormat(string(p.Format)); ok {
+			rows := make([][]string, len(fields))
+			for i, f := range fields {
+				rows[i] = []string{f.Key, f.Value}
+			}
+			return fn(p.Writer, data, []string{"field", "value"}, rows)
+		}
 		w := p.TableWriter()
 		for _, f := range fields {
 			fmt.Fprintf(w, "%s:\t%s\n", f.Key, f.Value)
