@@ -52,6 +52,30 @@ stackctl template quick-deploy 1
 stackctl stack list --mine
 ```
 
+## Extending — add your own subcommands
+
+Drop an executable named `stackctl-<name>` anywhere on your `$PATH` and it becomes `stackctl <name>` automatically. No plugin SDK, no recompile, no changes to stackctl itself. Same pattern as `git`, `kubectl`, and `gh`.
+
+Because the contract is "any executable with the right name", plugins can be written in any language (shell, Python, Go, Node, Rust, …) and shipped however your team already distributes binaries.
+
+Quick example:
+
+```bash
+cat > ~/.local/bin/stackctl-hello <<'EOF'
+#!/usr/bin/env bash
+echo "Hello! API=${STACKCTL_API_URL} args=$*"
+EOF
+chmod +x ~/.local/bin/stackctl-hello
+
+stackctl hello world     # → Hello! API=http://... args=world
+stackctl --help | grep hello
+# hello    Plugin: hello (/Users/you/.local/bin/stackctl-hello)
+```
+
+The plugin inherits `STACKCTL_API_URL`, `STACKCTL_API_KEY`, and the rest of the user's environment. Built-in subcommands always win on name collisions (a safety feature — a malicious `stackctl-config` on PATH can't intercept credentials).
+
+👉 **[Full guide: EXTENDING.md](EXTENDING.md)** — tutorial, recipes in bash/Python/Go, best practices, and how plugins pair with [server-side action webhooks](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md) for end-to-end custom operations.
+
 ## Configuration
 
 stackctl uses named contexts to manage multiple environments. Configuration is stored in `~/.stackmanager/config.yaml`.
