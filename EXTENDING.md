@@ -41,8 +41,10 @@ stackctl hello world
 
 ```bash
 stackctl --help | grep hello
-# → hello    Plugin: hello (/Users/you/.local/bin/stackctl-hello)
+# → hello    Plugin: hello
 ```
+
+The plugin's absolute path is kept out of `--help` (it was leaking `$HOME` in screenshots). Use `stackctl help hello` to see the full resolved path.
 
 That's the whole mechanism. Your binary gets exec'd with:
 
@@ -86,21 +88,27 @@ Discovery is **first-PATH-wins** (standard PATH semantics). If `stackctl-hello` 
 
 ## What plugins receive
 
-### Environment variables (inherited + resolved)
+### Environment variables (inherited + flag-derived)
 
 The plugin inherits **stackctl's entire environment** (same pattern as `git`,
-`kubectl`, `gh`). On top of that, stackctl resolves its persistent flags into
-env vars before exec so a plugin sees the same effective configuration it
-would if stackctl invoked a built-in command:
+`kubectl`, `gh`). On top of that, stackctl exports a small set of values
+**derived from flags** (not from `~/.stackmanager/config.yaml`) before exec,
+so plugins can observe the user's requested TLS / output behaviour:
 
 | Variable | Source | Purpose |
 |---|---|---|
-| `STACKCTL_API_URL` | user env / stackctl config | Base URL of the k8s-stack-manager API |
-| `STACKCTL_API_KEY` | user env / stackctl config | API key (header `X-API-Key`) |
-| `STACKCTL_INSECURE` | `--insecure` flag OR user env | `1` to skip TLS verification |
+| `STACKCTL_API_URL` | parent shell only | Base URL of the k8s-stack-manager API, **if already exported** by the user |
+| `STACKCTL_API_KEY` | parent shell only | API key (header `X-API-Key`), **if already exported** by the user |
+| `STACKCTL_INSECURE` | `--insecure` flag OR parent shell | `1` to skip TLS verification |
 | `STACKCTL_QUIET` | `--quiet` flag | `1` when the user requested quiet output |
 | `STACKCTL_OUTPUT` | `--output` flag | `table` / `json` / `yaml` / a registered custom format |
 | `HOME`, `PATH`, `LANG`, `AWS_*`, `KUBECONFIG`, … | parent shell | the rest of the user's environment |
+
+> **stackctl does NOT inject values resolved from the stackctl config file.**
+> If your plugin needs `STACKCTL_API_URL` / `STACKCTL_API_KEY`, they must
+> already be present in the environment when stackctl is launched — they
+> will not be filled in from `~/.stackmanager/config.yaml` automatically.
+> See the Troubleshooting section below for recommended workflows.
 
 > **Security note:** because the full parent environment is forwarded,
 > plugins have access to credentials stackctl doesn't know about
@@ -110,7 +118,7 @@ would if stackctl invoked a built-in command:
 
 ### Arguments
 
-Whatever the user typed after `stackctl <name>`. `stackctl --help <name>` shows the plugin in the command list; `stackctl <name> --help` is delegated to the plugin's own help.
+Whatever the user typed after `stackctl <name>`. Use `stackctl help <name>` for stackctl's built-in help entry (which shows the plugin's resolved absolute path); `stackctl <name> --help` is delegated to the plugin's own help handling.
 
 ### Stdin/stdout/stderr
 
@@ -364,6 +372,14 @@ On `Execute()`, stackctl scans every directory in `$PATH`. For each regular exec
     - `DisableFlagParsing: true` (plugin handles its own flags)
     - `RunE`: exec the binary with the remaining args, piping I/O, propagating exit code
 
+Cobra subcommand registration is:
+
+- `Use: <name>`
+- `Short: "Plugin: <name>"` (path kept out of the summary listing)
+- `Long`: includes the plugin's absolute path for `stackctl help <name>`
+- `DisableFlagParsing: true` — plugin handles its own flags
+- `RunE`: exec the binary with the remaining args, piping I/O, propagating exit code
+
 If the user runs `stackctl <name> …`, Cobra routes to the registered subcommand's `RunE`, which exec's the plugin.
 
 Source: [cli/cmd/plugins.go](cli/cmd/plugins.go) (≈110 lines). No plugin framework, no SDK — just `os/exec` + `$PATH`.
@@ -381,11 +397,24 @@ Source: [cli/cmd/plugins.go](cli/cmd/plugins.go) (≈110 lines). No plugin frame
 
 ### Plugin runs but `$STACKCTL_API_URL` is empty
 
-The user hasn't configured it. Either:
-- They should `stackctl config set api-url <url>` and re-export the env var
-- Your plugin should fall back to reading `~/.stackmanager/config.yaml` and then the active context's `api-url`
+The plugin process only sees environment variables that were **already exported** in the user's shell. `stackctl config set api-url <url>` writes to `~/.stackmanager/config.yaml`; it does **not** export `STACKCTL_API_URL` into the environment for subsequent plugin execs.
 
-Core stackctl commands do config resolution automatically; plugins are plain exec'd subprocesses, so env is all they get unless you parse the config yourself.
+Pick one workflow and document it for your plugin's users:
+
+- **Have the user export env vars explicitly:**
+
+  ```bash
+  export STACKCTL_API_URL="$(stackctl config get api-url)"
+  export STACKCTL_API_KEY="$(stackctl config get api-key)"
+  stackctl my-plugin …
+  ```
+
+- **Have the plugin fall back to reading the config file itself:**
+  parse `~/.stackmanager/config.yaml` and resolve the active context's
+  `api-url` + `api-key` if the env vars are empty. A ~30-line helper in
+  any language.
+
+Core stackctl commands do config resolution automatically; plugins are plain exec'd subprocesses, so env is all they get unless you parse the config yourself. stackctl does **not** inject resolved config values when execing plugins.
 
 ### Plugin exits non-zero but stackctl exits 0
 

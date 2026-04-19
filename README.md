@@ -69,7 +69,7 @@ chmod +x ~/.local/bin/stackctl-hello
 
 stackctl hello world     # → Hello! API=http://... args=world
 stackctl --help | grep hello
-# hello    Plugin: hello (/Users/you/.local/bin/stackctl-hello)
+# hello    Plugin: hello
 ```
 
 The plugin inherits `STACKCTL_API_URL`, `STACKCTL_API_KEY`, and the rest of the user's environment. Built-in subcommands always win on name collisions (a safety feature — a malicious `stackctl-config` on PATH can't intercept credentials).

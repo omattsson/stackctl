@@ -38,49 +38,61 @@ var (
 )
 
 // RegisterFormat attaches a named custom format. Call at init time, before
-// any Printer is used concurrently — the registry is read-locked on every
-// render so adds during rendering are racy.
+// any Printer is used. The registry is synchronised so registration during
+// rendering is not a Go data race, but doing so is unsupported and may lead
+// to inconsistent behaviour across concurrent renders.
 //
-// Name must not collide with the built-in formats (table, json, yaml).
-// Passing a built-in name panics to surface the mistake early. A nil fn
+// Name is normalised with strings.ToLower + TrimSpace before storage, so
+// lookups match NewPrinter's case-insensitive resolution. Passing a built-in
+// name (table, json, yaml) panics to surface the mistake early. A nil fn
 // also panics at registration time, so the "which handler?" error surfaces
 // at startup rather than inside a render call that could be minutes later.
 func RegisterFormat(name string, fn FormatterFunc) {
-	if name == string(FormatTable) || name == string(FormatJSON) || name == string(FormatYAML) {
-		panic(fmt.Sprintf("output: cannot override built-in format %q", name))
+	norm := normalizeFormatName(name)
+	if norm == string(FormatTable) || norm == string(FormatJSON) || norm == string(FormatYAML) {
+		panic(fmt.Sprintf("output: cannot override built-in format %q", norm))
 	}
 	if fn == nil {
-		panic(fmt.Sprintf("output: nil FormatterFunc for format %q", name))
+		panic(fmt.Sprintf("output: nil FormatterFunc for format %q", norm))
 	}
 	formatRegistryMu.Lock()
 	defer formatRegistryMu.Unlock()
-	formatRegistry[name] = fn
+	formatRegistry[norm] = fn
 }
 
 // RegisterSingleFormat attaches a custom single-item formatter for an
 // already-registered format. Optional — only needed when the list and
 // single shapes genuinely differ. A nil fn panics at registration time.
+// Names are normalised identically to RegisterFormat.
 func RegisterSingleFormat(name string, fn SingleFormatterFunc) {
+	norm := normalizeFormatName(name)
 	if fn == nil {
-		panic(fmt.Sprintf("output: nil SingleFormatterFunc for format %q", name))
+		panic(fmt.Sprintf("output: nil SingleFormatterFunc for format %q", norm))
 	}
 	formatRegistryMu.Lock()
 	defer formatRegistryMu.Unlock()
-	singleRegistry[name] = fn
+	singleRegistry[norm] = fn
+}
+
+// normalizeFormatName is the single source of truth for turning a user-
+// supplied format name into its registry key. Case-insensitive + whitespace
+// tolerant.
+func normalizeFormatName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // lookupFormat returns the registered list formatter for name.
 func lookupFormat(name string) (FormatterFunc, bool) {
 	formatRegistryMu.RLock()
 	defer formatRegistryMu.RUnlock()
-	fn, ok := formatRegistry[name]
+	fn, ok := formatRegistry[normalizeFormatName(name)]
 	return fn, ok
 }
 
 func lookupSingleFormat(name string) (SingleFormatterFunc, bool) {
 	formatRegistryMu.RLock()
 	defer formatRegistryMu.RUnlock()
-	fn, ok := singleRegistry[name]
+	fn, ok := singleRegistry[normalizeFormatName(name)]
 	return fn, ok
 }
 

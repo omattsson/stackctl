@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,6 +15,12 @@ import (
 // pluginPrefix is the filename prefix that marks an executable as a stackctl
 // plugin. A binary at PATH/stackctl-foo becomes the subcommand `stackctl foo`.
 const pluginPrefix = "stackctl-"
+
+// pluginNamePattern restricts plugin names to ASCII letters, digits, and
+// dashes so they form valid Cobra command names. A name like
+// "stackctl- bad" (with whitespace) or "stackctl--help" breaks help
+// routing and is skipped at discovery time.
+var pluginNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // registerPlugins scans $PATH for executables named stackctl-<name> and adds
 // each as a top-level subcommand that proxies to the external binary.
@@ -38,9 +46,18 @@ func registerPlugins(root *cobra.Command, pathEnv string) {
 	}
 }
 
-// discoverPlugins walks pathEnv (a colon-separated PATH) and returns a map
-// of plugin name to absolute path. First-win semantics: earlier PATH entries
+// discoverPlugins walks pathEnv (the process $PATH) and returns a map of
+// plugin name to absolute path. First-win semantics: earlier PATH entries
 // take precedence over later ones when multiple binaries share a name.
+//
+// Paths are resolved to absolute via filepath.Abs so execution is safe
+// regardless of relative entries in $PATH — the captured path is what we
+// later exec, which means rebinding $PATH after this function runs cannot
+// change which binary a plugin routes to.
+//
+// Windows: .exe suffix handling via PATHEXT is honoured; the POSIX
+// executable-bit check is skipped because Windows represents executability
+// via extension, not permission bits.
 func discoverPlugins(pathEnv string) map[string]string {
 	found := make(map[string]string)
 	for _, dir := range filepath.SplitList(pathEnv) {
@@ -57,15 +74,24 @@ func discoverPlugins(pathEnv string) map[string]string {
 				continue
 			}
 			pluginName := strings.TrimPrefix(name, pluginPrefix)
+			if runtime.GOOS == "windows" {
+				pluginName = strings.TrimSuffix(pluginName, ".exe")
+			}
+			if !pluginNamePattern.MatchString(pluginName) {
+				continue
+			}
 			if _, seen := found[pluginName]; seen {
 				continue
 			}
-			full := filepath.Join(dir, name)
+			full, err := filepath.Abs(filepath.Join(dir, name))
+			if err != nil {
+				continue
+			}
 			info, err := os.Stat(full)
 			if err != nil || !info.Mode().IsRegular() {
 				continue
 			}
-			if info.Mode().Perm()&0o111 == 0 {
+			if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 				continue
 			}
 			found[pluginName] = full

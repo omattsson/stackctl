@@ -52,6 +52,43 @@ func TestRegisterFormat_PanicOnNilFunc(t *testing.T) {
 		func() { RegisterSingleFormat("customnil", nil) })
 }
 
+// TestRegisterFormat_CaseInsensitiveAndTrimmed locks in the contract that
+// RegisterFormat normalises the name the same way NewPrinter does when
+// resolving --output. Without this, `RegisterFormat("CSV", ...)` would
+// never match a user running `stackctl … -o csv`.
+func TestRegisterFormat_CaseInsensitiveAndTrimmed(t *testing.T) {
+	t.Parallel()
+	called := 0
+	fn := func(io.Writer, interface{}, []string, [][]string) error {
+		called++
+		return nil
+	}
+	RegisterFormat("  CSV  ", fn)
+	unregisterForTest(t, "csv")
+
+	p := NewPrinter("csv", false, true)
+	p.Writer = io.Discard
+	assert.Equal(t, Format("csv"), p.Format, "NewPrinter should match case-insensitively")
+	require.NoError(t, p.Print(nil, nil, nil, nil))
+	assert.Equal(t, 1, called, "formatter registered under 'CSV' should be reached via 'csv'")
+}
+
+// TestRegisterFormat_BuiltinCollisionIsCaseInsensitive ensures the
+// built-in check runs after normalisation, so `RegisterFormat("JSON", ...)`
+// panics the same way as the lowercase form.
+func TestRegisterFormat_BuiltinCollisionIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	noop := func(io.Writer, interface{}, []string, [][]string) error { return nil }
+	for _, name := range []string{"JSON", "  yaml", "Table "} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.Panics(t, func() { RegisterFormat(name, noop) },
+				"expected panic for built-in collision on %q", name)
+		})
+	}
+}
+
 func TestNewPrinter_UsesCustomFormat(t *testing.T) {
 	t.Parallel()
 	RegisterFormat("csv", func(w io.Writer, _ interface{}, headers []string, rows [][]string) error {

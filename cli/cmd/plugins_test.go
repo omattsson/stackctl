@@ -28,7 +28,6 @@ func writeScript(t *testing.T, dir, name, body string) string {
 }
 
 func TestDiscoverPlugins_FindsExecutableStackctlBinaries(t *testing.T) {
-	t.Parallel()
 
 	dir := t.TempDir()
 	_ = writeScript(t, dir, "stackctl-hello", "#!/bin/sh\necho hi\n")
@@ -44,7 +43,6 @@ func TestDiscoverPlugins_FindsExecutableStackctlBinaries(t *testing.T) {
 }
 
 func TestDiscoverPlugins_SkipsNonExecutable(t *testing.T) {
-	t.Parallel()
 
 	dir := t.TempDir()
 	nonExec := filepath.Join(dir, "stackctl-readonly")
@@ -55,7 +53,6 @@ func TestDiscoverPlugins_SkipsNonExecutable(t *testing.T) {
 }
 
 func TestDiscoverPlugins_FirstPathEntryWins(t *testing.T) {
-	t.Parallel()
 
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()
@@ -68,7 +65,6 @@ func TestDiscoverPlugins_FirstPathEntryWins(t *testing.T) {
 }
 
 func TestDiscoverPlugins_IgnoresMissingAndEmptyPATHEntries(t *testing.T) {
-	t.Parallel()
 
 	dir := t.TempDir()
 	_ = writeScript(t, dir, "stackctl-ok", "#!/bin/sh\necho ok\n")
@@ -78,7 +74,6 @@ func TestDiscoverPlugins_IgnoresMissingAndEmptyPATHEntries(t *testing.T) {
 }
 
 func TestRegisterPlugins_AddsPluginAsSubcommand(t *testing.T) {
-	t.Parallel()
 
 	dir := t.TempDir()
 	_ = writeScript(t, dir, "stackctl-greet", "#!/bin/sh\necho hello-from-plugin\n")
@@ -101,7 +96,6 @@ func TestRegisterPlugins_AddsPluginAsSubcommand(t *testing.T) {
 }
 
 func TestRegisterPlugins_BuiltinWinsOnCollision(t *testing.T) {
-	t.Parallel()
 
 	dir := t.TempDir()
 	_ = writeScript(t, dir, "stackctl-config", "#!/bin/sh\necho shadow\n")
@@ -128,7 +122,6 @@ func TestRegisterPlugins_BuiltinWinsOnCollision(t *testing.T) {
 }
 
 func TestRegisterPlugins_PluginInvocationPassesThroughArgsAndStdout(t *testing.T) {
-	t.Parallel()
 
 	dir := t.TempDir()
 	_ = writeScript(t, dir, "stackctl-echo",
@@ -156,7 +149,6 @@ func TestRegisterPlugins_PluginInvocationPassesThroughArgsAndStdout(t *testing.T
 }
 
 func TestRegisterPlugins_NoOpOnEmptyPath(t *testing.T) {
-	t.Parallel()
 
 	root := &cobra.Command{Use: "stackctl"}
 	before := len(root.Commands())
@@ -169,7 +161,6 @@ func TestRegisterPlugins_NoOpOnEmptyPath(t *testing.T) {
 // subcommand reads stdin via cmd.InOrStdin() which Cobra resolves to the
 // buffer we set via root.SetIn.
 func TestRegisterPlugins_StdinPassthrough(t *testing.T) {
-	t.Parallel()
 
 	dir := t.TempDir()
 	_ = writeScript(t, dir, "stackctl-cat", "#!/bin/sh\ncat\n")
@@ -201,7 +192,6 @@ func TestRegisterPlugins_StdinPassthrough(t *testing.T) {
 // exits 0, so the parent survives; args are captured via a sentinel file
 // the plugin writes.
 func TestRegisterPlugins_RunViaCobraRouting(t *testing.T) {
-	t.Parallel()
 
 	dir := t.TempDir()
 	sentinel := filepath.Join(t.TempDir(), "args.txt")
