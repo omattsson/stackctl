@@ -72,6 +72,9 @@ func RegisterFormat(name string, fn FormatterFunc) {
 // Names are normalised identically to RegisterFormat.
 func RegisterSingleFormat(name string, fn SingleFormatterFunc) {
 	norm := normalizeFormatName(name)
+	if norm == "" {
+		panic("output: RegisterSingleFormat called with empty/whitespace-only name")
+	}
 	if fn == nil {
 		panic(fmt.Sprintf("output: nil SingleFormatterFunc for format %q", norm))
 	}

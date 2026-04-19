@@ -63,14 +63,14 @@ func TestRegisterFormat_CaseInsensitiveAndTrimmed(t *testing.T) {
 		called++
 		return nil
 	}
-	RegisterFormat("  CSV  ", fn)
-	unregisterForTest(t, "csv")
+	RegisterFormat("  TRIMTEST  ", fn)
+	unregisterForTest(t, "trimtest")
 
-	p := NewPrinter("csv", false, true)
+	p := NewPrinter("trimtest", false, true)
 	p.Writer = io.Discard
-	assert.Equal(t, Format("csv"), p.Format, "NewPrinter should match case-insensitively")
+	assert.Equal(t, Format("trimtest"), p.Format, "NewPrinter should match case-insensitively")
 	require.NoError(t, p.Print(nil, nil, nil, nil))
-	assert.Equal(t, 1, called, "formatter registered under 'CSV' should be reached via 'csv'")
+	assert.Equal(t, 1, called, "formatter registered under 'TRIMTEST' should be reached via 'trimtest'")
 }
 
 // TestRegisterFormat_BuiltinCollisionIsCaseInsensitive ensures the

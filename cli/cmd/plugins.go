@@ -133,7 +133,7 @@ func pluginEnv(cmd *cobra.Command) []string {
 	}
 	if flags.Changed("output") {
 		if output, err := flags.GetString("output"); err == nil {
-			env = setEnv(env, "STACKCTL_OUTPUT", output)
+			env = setEnv(env, "STACKCTL_OUTPUT", strings.ToLower(strings.TrimSpace(output)))
 		}
 	}
 	return env
