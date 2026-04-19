@@ -39,6 +39,10 @@ var pluginNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 //	https://kubernetes.io/docs/tasks/extend-kubectl/kubectl-plugins/
 func registerPlugins(root *cobra.Command, pathEnv string) {
 	builtins := existingCommandNames(root)
+	// Cobra registers "help" and "completion" implicitly — make sure a
+	// stackctl-help or stackctl-completion on PATH can't shadow them.
+	builtins["help"] = struct{}{}
+	builtins["completion"] = struct{}{}
 	for name, path := range discoverPlugins(pathEnv) {
 		if _, collides := builtins[name]; collides {
 			continue
@@ -78,7 +82,9 @@ func discoverPlugins(pathEnv string) map[string]string {
 			}
 			pluginName := strings.TrimPrefix(name, pluginPrefix)
 			if runtime.GOOS == "windows" {
-				pluginName = strings.TrimSuffix(pluginName, ".exe")
+				if low := strings.ToLower(pluginName); strings.HasSuffix(low, ".exe") {
+					pluginName = pluginName[:len(pluginName)-4]
+				}
 			}
 			if !pluginNamePattern.MatchString(pluginName) {
 				continue
