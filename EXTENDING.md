@@ -150,7 +150,7 @@ set -euo pipefail
 
 INSTANCE_ID=${1:?usage: stackctl snapshot-pvc <instance-id>}
 
-: "${STACKCTL_API_URL:?STACKCTL_API_URL not set — run 'stackctl config set api-url ...' first}"
+: "${STACKCTL_API_URL:?STACKCTL_API_URL not set — export it first, e.g. export STACKCTL_API_URL=\$(stackctl config get api-url)}"
 
 # Optional: allow insecure TLS per env
 CURL_OPTS=()
@@ -313,7 +313,7 @@ Read `STACKCTL_API_URL` + `STACKCTL_API_KEY` from the environment. stackctl does
 Two workable strategies:
 
 1. **Require the env vars**, and fail fast with a pointer (`export STACKCTL_API_URL=... STACKCTL_API_KEY=...` — or wrap your plugin in a shell function that exports them).
-2. **Shell out to `stackctl config show -o json`** and parse the result. Works without any env wiring, at the cost of one extra exec.
+2. **Shell out to `stackctl config get api-url`** and `stackctl config get api-key`. Works without any env wiring, at the cost of one extra exec per value.
 
 Either way, don't parse `~/.stackmanager/config.yaml` directly — the schema is internal and may change.
 
@@ -382,17 +382,10 @@ On `Execute()`, stackctl scans every directory in `$PATH`. For each regular exec
 2. Skip if a built-in subcommand with the same name is already registered.
 3. Register a new Cobra subcommand:
     - `Use: <name>`
-    - `Short: "Plugin: <name> (<absolute-path>)"`
-    - `DisableFlagParsing: true` (plugin handles its own flags)
+    - `Short: "Plugin: <name>"` (path kept out of the summary listing)
+    - `Long`: includes the plugin's absolute path for `stackctl help <name>`
+    - `DisableFlagParsing: true` — plugin handles its own flags
     - `RunE`: exec the binary with the remaining args, piping I/O, propagating exit code
-
-Cobra subcommand registration is:
-
-- `Use: <name>`
-- `Short: "Plugin: <name>"` (path kept out of the summary listing)
-- `Long`: includes the plugin's absolute path for `stackctl help <name>`
-- `DisableFlagParsing: true` — plugin handles its own flags
-- `RunE`: exec the binary with the remaining args, piping I/O, propagating exit code
 
 If the user runs `stackctl <name> …`, Cobra routes to the registered subcommand's `RunE`, which exec's the plugin.
 
@@ -423,12 +416,12 @@ Pick one workflow and document it for your plugin's users:
   stackctl my-plugin …
   ```
 
-- **Have the plugin fall back to reading the config file itself:**
-  parse `~/.stackmanager/config.yaml` and resolve the active context's
-  `api-url` + `api-key` if the env vars are empty. A ~30-line helper in
-  any language.
+- **Have the plugin resolve config via `stackctl config get`:**
+  shell out to `stackctl config get api-url` and `stackctl config get api-key`
+  if the env vars are empty. One extra exec per value, but avoids parsing
+  internal config formats.
 
-Core stackctl commands do config resolution automatically; plugins are plain exec'd subprocesses, so env is all they get unless you parse the config yourself. stackctl does **not** inject resolved config values when execing plugins.
+Core stackctl commands do config resolution automatically; plugins are plain exec'd subprocesses, so env is all they get unless you resolve config via the commands above.
 
 ### Plugin exits non-zero but stackctl exits 0
 

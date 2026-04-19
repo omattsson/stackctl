@@ -49,6 +49,9 @@ var (
 // at startup rather than inside a render call that could be minutes later.
 func RegisterFormat(name string, fn FormatterFunc) {
 	norm := normalizeFormatName(name)
+	if norm == "" {
+		panic("output: RegisterFormat called with empty/whitespace-only name")
+	}
 	if norm == string(FormatTable) || norm == string(FormatJSON) || norm == string(FormatYAML) {
 		panic(fmt.Sprintf("output: cannot override built-in format %q", norm))
 	}
