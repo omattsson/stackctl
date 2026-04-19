@@ -16,10 +16,12 @@ import (
 // plugin. A binary at PATH/stackctl-foo becomes the subcommand `stackctl foo`.
 const pluginPrefix = "stackctl-"
 
-// pluginNamePattern restricts plugin names to ASCII letters, digits, and
-// dashes so they form valid Cobra command names. A name like
-// "stackctl- bad" (with whitespace) or "stackctl--help" breaks help
-// routing and is skipped at discovery time.
+// pluginNamePattern restricts plugin names to lowercase ASCII letters, digits,
+// and dashes, and requires the first character to be a letter or digit so names
+// form valid Cobra command names. A name like "stackctl- bad" (with whitespace)
+// or "stackctl--help" breaks help routing and is skipped at discovery time.
+// Uppercase filenames (stackctl-Foo) are skipped — Cobra is case-sensitive and
+// mixed-case subcommands are a footgun more than a feature.
 var pluginNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // registerPlugins scans $PATH for executables named stackctl-<name> and adds
@@ -55,9 +57,10 @@ func registerPlugins(root *cobra.Command, pathEnv string) {
 // later exec, which means rebinding $PATH after this function runs cannot
 // change which binary a plugin routes to.
 //
-// Windows: .exe suffix handling via PATHEXT is honoured; the POSIX
-// executable-bit check is skipped because Windows represents executability
-// via extension, not permission bits.
+// Windows: discovery strips a trailing .exe so stackctl-foo.exe surfaces as
+// the subcommand `foo`. Other PATHEXT extensions (.bat, .cmd, .ps1) are not
+// currently recognised — if you need them, name the plugin binary .exe or
+// front it with a .exe shim.
 func discoverPlugins(pathEnv string) map[string]string {
 	found := make(map[string]string)
 	for _, dir := range filepath.SplitList(pathEnv) {
@@ -106,24 +109,53 @@ func discoverPlugins(pathEnv string) map[string]string {
 // STACKCTL_* values resolved from flags so a plugin sees the same effective
 // config stackctl itself would use for a built-in command.
 //
+// Precedence: an explicitly-passed flag wins over a pre-existing env var.
+// Flags that weren't set on the command line leave the inherited env
+// untouched, so STACKCTL_INSECURE=1 in the parent shell keeps working for
+// plugin invocations when no --insecure flag is passed.
+//
 // Flag-to-env wiring documented in EXTENDING.md as a plugin-author contract.
 func pluginEnv(cmd *cobra.Command) []string {
 	env := os.Environ()
-	// Resolve --insecure (flag > env > config). The config layer may not be
-	// loaded yet for plugin commands because persistent pre-run depends on
-	// the command name, so favor the flag value here.
-	if cmd != nil {
-		if insecure, err := cmd.Root().PersistentFlags().GetBool("insecure"); err == nil && insecure {
-			env = append(env, "STACKCTL_INSECURE=1")
+	if cmd == nil {
+		return env
+	}
+	flags := cmd.Root().PersistentFlags()
+	if flags.Changed("insecure") {
+		if insecure, err := flags.GetBool("insecure"); err == nil {
+			env = setEnv(env, "STACKCTL_INSECURE", boolEnvValue(insecure))
 		}
-		if quiet, err := cmd.Root().PersistentFlags().GetBool("quiet"); err == nil && quiet {
-			env = append(env, "STACKCTL_QUIET=1")
+	}
+	if flags.Changed("quiet") {
+		if quiet, err := flags.GetBool("quiet"); err == nil {
+			env = setEnv(env, "STACKCTL_QUIET", boolEnvValue(quiet))
 		}
-		if output, err := cmd.Root().PersistentFlags().GetString("output"); err == nil && output != "" {
-			env = append(env, "STACKCTL_OUTPUT="+output)
+	}
+	if flags.Changed("output") {
+		if output, err := flags.GetString("output"); err == nil {
+			env = setEnv(env, "STACKCTL_OUTPUT", output)
 		}
 	}
 	return env
+}
+
+// setEnv replaces (or appends) KEY=value in env, preserving order.
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
+func boolEnvValue(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
 }
 
 // existingCommandNames returns the set of top-level subcommand names already

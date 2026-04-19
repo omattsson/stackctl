@@ -62,7 +62,10 @@ func RegisterFormat(name string, fn FormatterFunc) {
 
 // RegisterSingleFormat attaches a custom single-item formatter for an
 // already-registered format. Optional — only needed when the list and
-// single shapes genuinely differ. A nil fn panics at registration time.
+// single shapes genuinely differ. A nil fn panics at registration time,
+// as does registering a single formatter for a format that has no list
+// formatter — that combination would silently fall back to a tabwriter
+// and is almost always a wiring mistake.
 // Names are normalised identically to RegisterFormat.
 func RegisterSingleFormat(name string, fn SingleFormatterFunc) {
 	norm := normalizeFormatName(name)
@@ -71,6 +74,9 @@ func RegisterSingleFormat(name string, fn SingleFormatterFunc) {
 	}
 	formatRegistryMu.Lock()
 	defer formatRegistryMu.Unlock()
+	if _, ok := formatRegistry[norm]; !ok {
+		panic(fmt.Sprintf("output: RegisterSingleFormat %q called before RegisterFormat — register the list formatter first", norm))
+	}
 	singleRegistry[norm] = fn
 }
 
@@ -108,7 +114,7 @@ type Printer struct {
 // Falls back to FormatTable if the name is empty, unknown, or a misspelt
 // built-in. Custom formats registered via RegisterFormat are recognised.
 func NewPrinter(format string, quiet, noColor bool) *Printer {
-	name := strings.ToLower(format)
+	name := normalizeFormatName(format)
 	var f Format
 	switch name {
 	case "", "table":

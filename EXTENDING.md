@@ -15,10 +15,17 @@ Because the mechanism is "any executable with the right name", plugins can be wr
 # stackctl-hello — minimal stackctl plugin
 set -euo pipefail
 
+# Report a redacted marker for the API key; NEVER echo its value.
+if [ -n "${STACKCTL_API_KEY:-}" ]; then
+  key_status='***configured***'
+else
+  key_status='<not set>'
+fi
+
 cat <<MSG
 Hello from a stackctl plugin!
   API URL: ${STACKCTL_API_URL:-<not set>}
-  API key: ${STACKCTL_API_KEY:+***configured***}${STACKCTL_API_KEY:-<not set>}
+  API key: ${key_status}
   args:    $*
 MSG
 ```
@@ -61,7 +68,7 @@ Any team-specific or company-specific workflow that doesn't belong in core stack
 
 **Good plugin candidates:**
 
-- **Thin wrappers around actions.** `stackctl refresh-db <id>` POSTs to `/api/v1/stack-instances/:id/actions/refresh-db` and pretty-prints the result. Pairs with a webhook handler registered on the server side.
+- **Thin wrappers around [k8s-stack-manager action webhooks](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md#action-webhooks).** The action endpoint (`POST /api/v1/stack-instances/:id/actions/:name`) is a k8s-stack-manager feature; stackctl itself has no action logic. A plugin like `stackctl refresh-db <id>` simply POSTs to that server endpoint and pretty-prints the response. Pair your plugin with the webhook handler you registered server-side.
 - **Operations that combine multiple stackctl calls** into a single higher-level command (e.g. "create + deploy + wait for healthy + run smoke test").
 - **Company-specific reporting.** `stackctl stacks-costing-money` that lists instances + pulls cost data from your FinOps API.
 - **Developer conveniences.** `stackctl port-forward <id>` that resolves the stack namespace and wires up a `kubectl port-forward` for common services.
@@ -301,7 +308,14 @@ When it makes sense, accept `-o json` and emit structured output. Downstream scr
 
 ### Don't re-implement auth
 
-Read `STACKCTL_API_URL` + `STACKCTL_API_KEY` directly. If the user has a stackctl context configured, those env vars pass through. If they haven't, fail fast with a helpful message (`Configure via stackctl config set api-url <url>`) — don't try to parse `~/.stackmanager/config.yaml` yourself.
+Read `STACKCTL_API_URL` + `STACKCTL_API_KEY` from the environment. stackctl does **not** currently pass its config-file values into the plugin environment — only the flag-derived `STACKCTL_INSECURE`, `STACKCTL_QUIET`, and `STACKCTL_OUTPUT` flow through. So if the user configured their API URL via `stackctl config set api-url <url>` (writing `~/.stackmanager/config.yaml`) and never exported `STACKCTL_API_URL`, a plugin subprocess will not see it.
+
+Two workable strategies:
+
+1. **Require the env vars**, and fail fast with a pointer (`export STACKCTL_API_URL=... STACKCTL_API_KEY=...` — or wrap your plugin in a shell function that exports them).
+2. **Shell out to `stackctl config show -o json`** and parse the result. Works without any env wiring, at the cost of one extra exec.
+
+Either way, don't parse `~/.stackmanager/config.yaml` directly — the schema is internal and may change.
 
 ### Use a deny list for dangerous defaults
 
