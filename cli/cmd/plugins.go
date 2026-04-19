@@ -74,6 +74,32 @@ func discoverPlugins(pathEnv string) map[string]string {
 	return found
 }
 
+// pluginEnv returns the environment to pass to a plugin subprocess. It
+// preserves the full parent environment — plugins might legitimately need
+// unrelated variables (AWS_PROFILE, KUBECONFIG, etc.) — and injects
+// STACKCTL_* values resolved from flags so a plugin sees the same effective
+// config stackctl itself would use for a built-in command.
+//
+// Flag-to-env wiring documented in EXTENDING.md as a plugin-author contract.
+func pluginEnv(cmd *cobra.Command) []string {
+	env := os.Environ()
+	// Resolve --insecure (flag > env > config). The config layer may not be
+	// loaded yet for plugin commands because persistent pre-run depends on
+	// the command name, so favor the flag value here.
+	if cmd != nil {
+		if insecure, err := cmd.Root().PersistentFlags().GetBool("insecure"); err == nil && insecure {
+			env = append(env, "STACKCTL_INSECURE=1")
+		}
+		if quiet, err := cmd.Root().PersistentFlags().GetBool("quiet"); err == nil && quiet {
+			env = append(env, "STACKCTL_QUIET=1")
+		}
+		if output, err := cmd.Root().PersistentFlags().GetString("output"); err == nil && output != "" {
+			env = append(env, "STACKCTL_OUTPUT="+output)
+		}
+	}
+	return env
+}
+
 // existingCommandNames returns the set of top-level subcommand names already
 // registered on root, so discovery can avoid clobbering built-ins.
 func existingCommandNames(root *cobra.Command) map[string]struct{} {
@@ -90,19 +116,26 @@ func existingCommandNames(root *cobra.Command) map[string]struct{} {
 // newPluginCommand wraps an external binary as a Cobra subcommand. The binary
 // receives all arguments after the plugin name; stdin/stdout/stderr pass
 // through directly, and the exit code propagates to the caller.
+//
+// binaryPath is captured at discovery time so later PATH modifications can't
+// rebind which binary we exec — the absolute path we resolved in
+// discoverPlugins is the exact path we run.
 func newPluginCommand(name, binaryPath string) *cobra.Command {
 	return &cobra.Command{
+		// Hide the absolute path from --help listings (leaks home dir in screenshots).
+		// The full path is in Long so `stackctl help <plugin>` still reveals it for debugging.
 		Use:                name,
-		Short:              "Plugin: " + name + " (" + binaryPath + ")",
+		Short:              "Plugin: " + name,
+		Long:               "External plugin resolved to " + binaryPath,
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		SilenceErrors:      true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			proc := exec.Command(binaryPath, args...) //nolint:gosec // binary path discovered from PATH, not user input
+			proc := exec.Command(binaryPath, args...) //nolint:gosec // absolute path captured at discovery time; rebinding via PATH is impossible after that point
 			proc.Stdin = cmd.InOrStdin()
 			proc.Stdout = cmd.OutOrStdout()
 			proc.Stderr = cmd.ErrOrStderr()
-			proc.Env = os.Environ()
+			proc.Env = pluginEnv(cmd)
 			if err := proc.Run(); err != nil {
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					// Propagate the plugin's exit code. Cobra will surface

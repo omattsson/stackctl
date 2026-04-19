@@ -86,16 +86,27 @@ Discovery is **first-PATH-wins** (standard PATH semantics). If `stackctl-hello` 
 
 ## What plugins receive
 
-### Environment variables (inherited)
+### Environment variables (inherited + resolved)
 
-The plugin inherits stackctl's entire environment. In particular:
+The plugin inherits **stackctl's entire environment** (same pattern as `git`,
+`kubectl`, `gh`). On top of that, stackctl resolves its persistent flags into
+env vars before exec so a plugin sees the same effective configuration it
+would if stackctl invoked a built-in command:
 
-| Variable | Purpose |
-|---|---|
-| `STACKCTL_API_URL` | Base URL of the k8s-stack-manager API |
-| `STACKCTL_API_KEY` | API key (header `X-API-Key`) |
-| `STACKCTL_INSECURE` | `1` to skip TLS verification |
-| `HOME`, `PATH`, `LANG`, … | The rest of the user's shell environment |
+| Variable | Source | Purpose |
+|---|---|---|
+| `STACKCTL_API_URL` | user env / stackctl config | Base URL of the k8s-stack-manager API |
+| `STACKCTL_API_KEY` | user env / stackctl config | API key (header `X-API-Key`) |
+| `STACKCTL_INSECURE` | `--insecure` flag OR user env | `1` to skip TLS verification |
+| `STACKCTL_QUIET` | `--quiet` flag | `1` when the user requested quiet output |
+| `STACKCTL_OUTPUT` | `--output` flag | `table` / `json` / `yaml` / a registered custom format |
+| `HOME`, `PATH`, `LANG`, `AWS_*`, `KUBECONFIG`, … | parent shell | the rest of the user's environment |
+
+> **Security note:** because the full parent environment is forwarded,
+> plugins have access to credentials stackctl doesn't know about
+> (AWS_ACCESS_KEY_ID, GITHUB_TOKEN, KUBECONFIG contents, …). Install
+> plugins from sources you trust. This matches the `git`/`kubectl`
+> security model.
 
 ### Arguments
 
@@ -145,6 +156,7 @@ echo
 # stackctl-snapshot-pvc — invokes the snapshot-pvc action
 import json, os, ssl, sys
 from urllib import request
+from urllib.error import HTTPError, URLError
 
 if len(sys.argv) < 2:
     sys.exit("usage: stackctl snapshot-pvc <instance-id>")
@@ -153,6 +165,14 @@ instance_id = sys.argv[1]
 api = os.environ.get("STACKCTL_API_URL", "").rstrip("/")
 if not api:
     sys.exit("STACKCTL_API_URL not set")
+
+if os.environ.get("STACKCTL_INSECURE") == "1":
+    print("WARNING: TLS verification disabled (STACKCTL_INSECURE=1)", file=sys.stderr)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+else:
+    ctx = None
 
 req = request.Request(
     f"{api}/api/v1/stack-instances/{instance_id}/actions/snapshot-pvc",
@@ -163,15 +183,19 @@ req = request.Request(
         "X-API-Key": os.environ.get("STACKCTL_API_KEY", ""),
     },
 )
-ctx = None
-if os.environ.get("STACKCTL_INSECURE") == "1":
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
 
-with request.urlopen(req, timeout=30, context=ctx) as resp:
-    body = json.loads(resp.read())
-    print(json.dumps(body, indent=2))
+try:
+    with request.urlopen(req, timeout=30, context=ctx) as resp:
+        body = json.loads(resp.read())
+except HTTPError as e:                            # 4xx/5xx — read body for details
+    body = {"error": e.reason, "status": e.code, "body": e.read().decode(errors="replace")}
+    print(json.dumps(body, indent=2)); sys.exit(1)
+except URLError as e:
+    sys.exit(f"request failed: {e.reason}")
+
+# Echo server response. If the user set STACKCTL_OUTPUT=json we keep the
+# raw shape; for other values we could reshape into a friendlier table.
+print(json.dumps(body, indent=2))
 ```
 
 ### Go (compiled, single binary)

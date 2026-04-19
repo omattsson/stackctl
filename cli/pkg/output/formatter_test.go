@@ -28,15 +28,28 @@ func unregisterForTest(t *testing.T, names ...string) {
 
 func TestRegisterFormat_PanicOnBuiltinOverride(t *testing.T) {
 	t.Parallel()
+	// Pass a non-nil fn so the built-in-name check fires first — otherwise
+	// the nil-fn guard would shadow the error we're asserting.
+	noop := func(io.Writer, interface{}, []string, [][]string) error { return nil }
 	for _, name := range []string{"table", "json", "yaml"} {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			assert.PanicsWithValue(t,
 				fmt.Sprintf("output: cannot override built-in format %q", name),
-				func() { RegisterFormat(name, nil) })
+				func() { RegisterFormat(name, noop) })
 		})
 	}
+}
+
+func TestRegisterFormat_PanicOnNilFunc(t *testing.T) {
+	t.Parallel()
+	assert.PanicsWithValue(t,
+		`output: nil FormatterFunc for format "customnil"`,
+		func() { RegisterFormat("customnil", nil) })
+	assert.PanicsWithValue(t,
+		`output: nil SingleFormatterFunc for format "customnil"`,
+		func() { RegisterSingleFormat("customnil", nil) })
 }
 
 func TestNewPrinter_UsesCustomFormat(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -111,13 +112,17 @@ func TestRegisterPlugins_BuiltinWinsOnCollision(t *testing.T) {
 
 	registerPlugins(root, dir)
 
+	// Verify exactly one command named "config" exists (not two, with Cobra
+	// silently accepting the duplicate) and that it's the built-in.
+	named := 0
 	var found *cobra.Command
 	for _, c := range root.Commands() {
 		if c.Name() == "config" {
+			named++
 			found = c
-			break
 		}
 	}
+	assert.Equal(t, 1, named, "exactly one command should be named 'config'")
 	require.NotNil(t, found)
 	assert.Equal(t, "builtin", found.Short, "built-in must not be replaced by a colliding plugin")
 }
@@ -157,6 +162,38 @@ func TestRegisterPlugins_NoOpOnEmptyPath(t *testing.T) {
 	before := len(root.Commands())
 	registerPlugins(root, "")
 	assert.Equal(t, before, len(root.Commands()))
+}
+
+// TestRegisterPlugins_StdinPassthrough proves stdin is routed to the plugin.
+// Uses a `cat` style shell script that copies stdin to stdout; the plugin
+// subcommand reads stdin via cmd.InOrStdin() which Cobra resolves to the
+// buffer we set via root.SetIn.
+func TestRegisterPlugins_StdinPassthrough(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	_ = writeScript(t, dir, "stackctl-cat", "#!/bin/sh\ncat\n")
+
+	root := &cobra.Command{Use: "stackctl", SilenceUsage: true, SilenceErrors: true}
+	registerPlugins(root, dir)
+
+	var catCmd *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Name() == "cat" {
+			catCmd = c
+			break
+		}
+	}
+	require.NotNil(t, catCmd)
+
+	var outBuf bytes.Buffer
+	root.SetIn(strings.NewReader("payload-from-stdin"))
+	root.SetOut(&outBuf)
+	root.SetErr(&outBuf)
+
+	require.NoError(t, catCmd.RunE(catCmd, nil))
+	assert.Equal(t, "payload-from-stdin", outBuf.String(),
+		"plugin must receive stdin and its stdout must reach root's writer")
 }
 
 // TestRegisterPlugins_RunViaCobraRouting wires a plugin through Cobra's

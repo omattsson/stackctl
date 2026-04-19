@@ -42,10 +42,15 @@ var (
 // render so adds during rendering are racy.
 //
 // Name must not collide with the built-in formats (table, json, yaml).
-// Passing a built-in name panics to surface the mistake early.
+// Passing a built-in name panics to surface the mistake early. A nil fn
+// also panics at registration time, so the "which handler?" error surfaces
+// at startup rather than inside a render call that could be minutes later.
 func RegisterFormat(name string, fn FormatterFunc) {
 	if name == string(FormatTable) || name == string(FormatJSON) || name == string(FormatYAML) {
 		panic(fmt.Sprintf("output: cannot override built-in format %q", name))
+	}
+	if fn == nil {
+		panic(fmt.Sprintf("output: nil FormatterFunc for format %q", name))
 	}
 	formatRegistryMu.Lock()
 	defer formatRegistryMu.Unlock()
@@ -54,8 +59,11 @@ func RegisterFormat(name string, fn FormatterFunc) {
 
 // RegisterSingleFormat attaches a custom single-item formatter for an
 // already-registered format. Optional — only needed when the list and
-// single shapes genuinely differ.
+// single shapes genuinely differ. A nil fn panics at registration time.
 func RegisterSingleFormat(name string, fn SingleFormatterFunc) {
+	if fn == nil {
+		panic(fmt.Sprintf("output: nil SingleFormatterFunc for format %q", name))
+	}
 	formatRegistryMu.Lock()
 	defer formatRegistryMu.Unlock()
 	singleRegistry[name] = fn
