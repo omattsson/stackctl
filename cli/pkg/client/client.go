@@ -342,12 +342,15 @@ func (c *Client) GetStackStatus(id string) (*types.InstanceStatus, error) {
 
 // GetStackLogs returns the latest deployment log for a stack instance.
 func (c *Client) GetStackLogs(id string) (*types.DeploymentLog, error) {
-	var log types.DeploymentLog
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/deploy-log", id), &log)
+	var result types.DeploymentLogResult
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/deploy-log", id), &result)
 	if err != nil {
 		return nil, err
 	}
-	return &log, nil
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("no deployment logs found for instance %s", id)
+	}
+	return &result.Data[0], nil
 }
 
 // GetDeploymentHistory returns paginated deployment history for a stack instance.
@@ -361,16 +364,13 @@ func (c *Client) GetDeploymentHistory(id string, params map[string]string) (*typ
 }
 
 // RollbackStack triggers a rollback for a stack instance.
-func (c *Client) RollbackStack(id string, req *types.RollbackRequest) (*types.DeploymentLog, error) {
-	var resp struct {
-		LogID   string `json:"log_id"`
-		Message string `json:"message"`
-	}
+func (c *Client) RollbackStack(id string, req *types.RollbackRequest) (*types.RollbackResponse, error) {
+	var resp types.RollbackResponse
 	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/rollback", id), req, &resp)
 	if err != nil {
 		return nil, err
 	}
-	return &types.DeploymentLog{ID: resp.LogID, Action: "rollback", Status: "running"}, nil
+	return &resp, nil
 }
 
 // GetDeployLogValues returns the values snapshot for a specific deployment log entry.

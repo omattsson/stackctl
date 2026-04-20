@@ -735,17 +735,17 @@ Examples:
 		targetLog, _ := cmd.Flags().GetString("target-log")
 		req := &types.RollbackRequest{TargetLogID: targetLog}
 
-		log, err := c.RollbackStack(id, req)
+		resp, err := c.RollbackStack(id, req)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, log.ID)
+			fmt.Fprintln(printer.Writer, resp.LogID)
 			return nil
 		}
 
-		printer.PrintMessage("Rollback started for stack %s (log ID: %s)", id, log.ID)
+		printer.PrintMessage("Rollback started for stack %s (log ID: %s)", id, resp.LogID)
 		return nil
 	},
 }
@@ -778,6 +778,11 @@ Examples:
 		resp, err := c.GetDeployLogValues(instanceID, logID)
 		if err != nil {
 			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, resp.LogID)
+			return nil
 		}
 
 		switch printer.Format {

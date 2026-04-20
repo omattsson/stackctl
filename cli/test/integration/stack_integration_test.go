@@ -194,12 +194,15 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 			// Logs
 			case action == "deploy-log" && r.Method == http.MethodGet:
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(types.DeploymentLog{
-					ID:         "log-" + id,
-					InstanceID: id,
-					Action:     "deploy",
-					Status:     "completed",
-					Output:     "Deployment completed successfully.",
+				json.NewEncoder(w).Encode(types.DeploymentLogResult{
+					Data: []types.DeploymentLog{{
+						ID:         "log-" + id,
+						InstanceID: id,
+						Action:     "deploy",
+						Status:     "completed",
+						Output:     "Deployment completed successfully.",
+					}},
+					Total: 1,
 				})
 
 			// Clone
@@ -230,6 +233,38 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(inst)
+
+			// Rollback
+			case action == "rollback" && r.Method == http.MethodPost:
+				var req types.RollbackRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid body"})
+					return
+				}
+				state.mu.Lock()
+				inst.Status = "rolling-back"
+				state.mu.Unlock()
+
+				logID := "rollback-" + id
+				if req.TargetLogID != "" {
+					logID = "rollback-to-" + req.TargetLogID
+				}
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(types.RollbackResponse{
+					LogID:   logID,
+					Message: "Rollback started",
+				})
+
+			// History (deploy-log with subresource values)
+			case strings.HasPrefix(action, "deploy-log/") && r.Method == http.MethodGet:
+				logID := strings.TrimPrefix(action, "deploy-log/")
+				logID = strings.TrimSuffix(logID, "/values")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(types.DeployLogValuesResponse{
+					LogID:  logID,
+					Values: map[string]interface{}{"chart": map[string]interface{}{"replicas": float64(1)}},
+				})
 
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -467,4 +502,45 @@ func TestStackWorkflow_PaginationParams(t *testing.T) {
 	assert.Equal(t, 25, resp.Total)
 	assert.Equal(t, 2, resp.Page)
 	assert.Equal(t, 3, resp.TotalPages)
+}
+
+func TestStackWorkflow_RollbackFlow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newStackMockState()
+	server := startStackMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	// 1. Create and deploy a stack
+	created, err := c.CreateStack(&types.CreateStackRequest{
+		Name:              "rollback-stack",
+		StackDefinitionID: "1",
+		Branch:            "main",
+	})
+	require.NoError(t, err)
+	id := created.ID
+
+	_, err = c.DeployStack(id)
+	require.NoError(t, err)
+
+	// 2. Rollback without specifying a target log — previous revision
+	rollbackResp, err := c.RollbackStack(id, &types.RollbackRequest{})
+	require.NoError(t, err)
+	assert.NotEmpty(t, rollbackResp.LogID)
+	assert.Equal(t, "Rollback started", rollbackResp.Message)
+	assert.Equal(t, "rollback-"+id, rollbackResp.LogID)
+
+	// 3. Verify the instance status was updated to rolling-back
+	status, err := c.GetStackStatus(id)
+	require.NoError(t, err)
+	assert.Equal(t, "rolling-back", status.Status)
+
+	// 4. Rollback to a specific deployment log
+	rollbackResp, err = c.RollbackStack(id, &types.RollbackRequest{TargetLogID: "deploy-" + id})
+	require.NoError(t, err)
+	assert.Equal(t, "rollback-to-deploy-"+id, rollbackResp.LogID)
 }

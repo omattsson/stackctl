@@ -642,12 +642,15 @@ func TestStackLogsCmd_Success(t *testing.T) {
 		require.Equal(t, http.MethodGet, r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{
-			ID:         "200",
-			InstanceID: "42",
-			Action:     "deploy",
-			Status:     "completed",
-			Output:     "Deployment succeeded.\nAll charts installed.",
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data: []types.DeploymentLog{{
+				ID:         "200",
+				InstanceID: "42",
+				Action:     "deploy",
+				Status:     "completed",
+				Output:     "Deployment succeeded.\nAll charts installed.",
+			}},
+			Total: 1,
 		})
 	}))
 	defer server.Close()
@@ -674,7 +677,10 @@ func TestStackLogsCmd_JSONOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(logEntry)
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data:  []types.DeploymentLog{logEntry},
+			Total: 1,
+		})
 	}))
 	defer server.Close()
 
@@ -822,7 +828,10 @@ func TestStackLogsCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "200"})
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data:  []types.DeploymentLog{{ID: "200"}},
+			Total: 1,
+		})
 	}))
 	defer server.Close()
 
@@ -1001,8 +1010,11 @@ func TestStackLogsCmd_YAMLOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{
-			ID: "200", Action: "deploy", Status: "completed", Output: "OK",
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data: []types.DeploymentLog{{
+				ID: "200", Action: "deploy", Status: "completed", Output: "OK",
+			}},
+			Total: 1,
 		})
 	}))
 	defer server.Close()
@@ -1608,4 +1620,190 @@ func TestStackDeployCmd_Forbidden(t *testing.T) {
 	err := stackDeployCmd.RunE(stackDeployCmd, []string{"42"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Permission denied")
+}
+
+// ========== stack history ==========
+
+func TestStackHistoryCmd_Success(t *testing.T) {
+	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/stack-instances/42/deploy-log", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data: []types.DeploymentLog{
+				{ID: "300", InstanceID: "42", Action: "deploy", Status: "completed", StartedAt: &now, CompletedAt: &now},
+				{ID: "299", InstanceID: "42", Action: "rollback", Status: "completed", StartedAt: &now, CompletedAt: &now},
+			},
+			Total: 2,
+		})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := stackHistoryCmd.RunE(stackHistoryCmd, []string{"42"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "LOG ID")
+	assert.Contains(t, out, "ACTION")
+	assert.Contains(t, out, "STATUS")
+	assert.Contains(t, out, "300")
+	assert.Contains(t, out, "deploy")
+	assert.Contains(t, out, "299")
+	assert.Contains(t, out, "rollback")
+}
+
+func TestStackHistoryCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data:  []types.DeploymentLog{{ID: "300", Action: "deploy", Status: "completed"}},
+			Total: 1,
+		})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := stackHistoryCmd.RunE(stackHistoryCmd, []string{"42"})
+	require.NoError(t, err)
+
+	var result types.DeploymentLogResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, int64(1), result.Total)
+	assert.Len(t, result.Data, 1)
+	assert.Equal(t, "300", result.Data[0].ID)
+}
+
+func TestStackHistoryCmd_EmptyHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{Data: nil, Total: 0})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := stackHistoryCmd.RunE(stackHistoryCmd, []string{"42"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "No deployment history for stack 42")
+}
+
+// ========== stack rollback ==========
+
+func TestStackRollbackCmd_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/stack-instances/42/rollback", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.RollbackResponse{LogID: "400", Message: "Rollback started"})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	stackRollbackCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() {
+		stackRollbackCmd.Flags().Set("yes", "false")
+		stackRollbackCmd.Flags().Set("target-log", "")
+	})
+
+	err := stackRollbackCmd.RunE(stackRollbackCmd, []string{"42"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "Rollback started for stack 42")
+	assert.Contains(t, out, "log ID: 400")
+}
+
+func TestStackRollbackCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.RollbackResponse{LogID: "400", Message: "Rollback started"})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	stackRollbackCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() {
+		stackRollbackCmd.Flags().Set("yes", "false")
+		stackRollbackCmd.Flags().Set("target-log", "")
+	})
+
+	err := stackRollbackCmd.RunE(stackRollbackCmd, []string{"42"})
+	require.NoError(t, err)
+	assert.Equal(t, "400\n", buf.String())
+}
+
+// ========== stack history-values ==========
+
+func TestStackHistoryValuesCmd_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/stack-instances/42/deploy-log/300/values", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeployLogValuesResponse{
+			LogID:  "300",
+			Values: map[string]interface{}{"frontend": map[string]interface{}{"replicas": float64(3)}},
+		})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := stackHistoryValuesCmd.RunE(stackHistoryValuesCmd, []string{"42", "300"})
+	require.NoError(t, err)
+
+	var result types.DeployLogValuesResponse
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "300", result.LogID)
+	assert.Contains(t, result.Values, "frontend")
+}
+
+func TestStackHistoryValuesCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeployLogValuesResponse{
+			LogID:  "300",
+			Values: map[string]interface{}{"api": map[string]interface{}{"tag": "v1.2"}},
+		})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := stackHistoryValuesCmd.RunE(stackHistoryValuesCmd, []string{"42", "300"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "log_id: \"300\"")
+}
+
+func TestStackHistoryValuesCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeployLogValuesResponse{
+			LogID:  "300",
+			Values: map[string]interface{}{},
+		})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := stackHistoryValuesCmd.RunE(stackHistoryValuesCmd, []string{"42", "300"})
+	require.NoError(t, err)
+	assert.Equal(t, "300\n", buf.String())
 }

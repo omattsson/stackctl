@@ -119,6 +119,12 @@ type RollbackRequest struct {
 	TargetLogID string `json:"target_log_id,omitempty" yaml:"target_log_id,omitempty"`
 }
 
+// RollbackResponse is the response from POST /api/v1/stack-instances/:id/rollback.
+type RollbackResponse struct {
+	LogID   string `json:"log_id" yaml:"log_id"`
+	Message string `json:"message" yaml:"message"`
+}
+
 // DeploymentLogResult holds paginated deployment log results from the backend.
 type DeploymentLogResult struct {
 	Data       []DeploymentLog `json:"data"`
@@ -128,8 +134,8 @@ type DeploymentLogResult struct {
 
 // DeployLogValuesResponse holds values snapshot for a deployment log entry.
 type DeployLogValuesResponse struct {
-	LogID  string      `json:"log_id" yaml:"log_id"`
-	Values interface{} `json:"values" yaml:"values"`
+	LogID  string                 `json:"log_id" yaml:"log_id"`
+	Values map[string]interface{} `json:"values" yaml:"values"`
 }
 
 // ListResponse wraps paginated API responses.
