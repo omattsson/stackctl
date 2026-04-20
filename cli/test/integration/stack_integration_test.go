@@ -149,7 +149,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.DeploymentLog{
-					Base:       types.Base{ID: "deploy-" + id},
+					ID:         "deploy-" + id,
 					InstanceID: id,
 					Action:     "deploy",
 					Status:     "started",
@@ -162,7 +162,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.DeploymentLog{
-					Base:       types.Base{ID: "stop-" + id},
+					ID:         "stop-" + id,
 					InstanceID: id,
 					Action:     "stop",
 					Status:     "started",
@@ -175,7 +175,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.DeploymentLog{
-					Base:       types.Base{ID: "clean-" + id},
+					ID:         "clean-" + id,
 					InstanceID: id,
 					Action:     "clean",
 					Status:     "started",
@@ -195,7 +195,7 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 			case action == "deploy-log" && r.Method == http.MethodGet:
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.DeploymentLog{
-					Base:       types.Base{ID: "log-" + id},
+					ID:         "log-" + id,
 					InstanceID: id,
 					Action:     "deploy",
 					Status:     "completed",

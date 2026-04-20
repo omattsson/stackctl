@@ -709,7 +709,7 @@ func TestDeployStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/deploy", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "100"},
+			ID:         "100",
 			InstanceID: "42",
 			Action:     "deploy",
 			Status:     "started",
@@ -732,7 +732,7 @@ func TestStopStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/stop", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "101"},
+			ID:         "101",
 			InstanceID: "42",
 			Action:     "stop",
 			Status:     "started",
@@ -754,7 +754,7 @@ func TestCleanStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/clean", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "102"},
+			ID:         "102",
 			InstanceID: "42",
 			Action:     "clean",
 			Status:     "started",
@@ -802,7 +802,7 @@ func TestGetStackLogs_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/deploy-log", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "200"},
+			ID:         "200",
 			InstanceID: "42",
 			Action:     "deploy",
 			Status:     "completed",

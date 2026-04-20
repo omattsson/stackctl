@@ -365,7 +365,7 @@ func TestStackDeployCmd_Success(t *testing.T) {
 		require.Equal(t, http.MethodPost, r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "100"}, InstanceID: "42", Action: "deploy", Status: "started"})
+		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "100", InstanceID: "42", Action: "deploy", Status: "started"})
 	}))
 	defer server.Close()
 
@@ -382,7 +382,7 @@ func TestStackDeployCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "100"}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "100"})
 	}))
 	defer server.Close()
 
@@ -401,7 +401,7 @@ func TestStackStopCmd_Success(t *testing.T) {
 		require.Equal(t, http.MethodPost, r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "101"}, InstanceID: "42", Action: "stop", Status: "started"})
+		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "101", InstanceID: "42", Action: "stop", Status: "started"})
 	}))
 	defer server.Close()
 
@@ -423,7 +423,7 @@ func TestStackCleanCmd_WithConfirmation(t *testing.T) {
 		require.Equal(t, "/api/v1/stack-instances/42/clean", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "102"}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "102"})
 	}))
 	defer server.Close()
 
@@ -474,7 +474,7 @@ func TestStackCleanCmd_WithYesFlag(t *testing.T) {
 		called = true
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "103"}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "103"})
 	}))
 	defer server.Close()
 
@@ -643,7 +643,7 @@ func TestStackLogsCmd_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "200"},
+			ID:         "200",
 			InstanceID: "42",
 			Action:     "deploy",
 			Status:     "completed",
@@ -665,7 +665,7 @@ func TestStackLogsCmd_Success(t *testing.T) {
 
 func TestStackLogsCmd_JSONOutput(t *testing.T) {
 	logEntry := types.DeploymentLog{
-		Base:       types.Base{ID: "200"},
+		ID:         "200",
 		InstanceID: "42",
 		Action:     "deploy",
 		Status:     "completed",
@@ -822,7 +822,7 @@ func TestStackLogsCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "200"}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "200"})
 	}))
 	defer server.Close()
 
@@ -885,7 +885,7 @@ func TestStackStopCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "101"}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "101"})
 	}))
 	defer server.Close()
 
@@ -919,7 +919,7 @@ func TestStackCleanCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{Base: types.Base{ID: "102"}})
+		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "102"})
 	}))
 	defer server.Close()
 
@@ -1002,7 +1002,7 @@ func TestStackLogsCmd_YAMLOutput(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base: types.Base{ID: "200"}, Action: "deploy", Status: "completed", Output: "OK",
+			ID: "200", Action: "deploy", Status: "completed", Output: "OK",
 		})
 	}))
 	defer server.Close()

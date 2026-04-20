@@ -627,6 +627,170 @@ Examples:
 	},
 }
 
+var stackHistoryCmd = &cobra.Command{
+	Use:   "history <id>",
+	Short: "Show deployment history for a stack instance",
+	Long: `Show the deployment history for a stack instance.
+
+Examples:
+  stackctl stack history 42
+  stackctl stack history 42 --limit 20
+  stackctl stack history 42 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		params := map[string]string{}
+		if limit > 0 {
+			params["limit"] = strconv.Itoa(limit)
+		}
+
+		resp, err := c.GetDeploymentHistory(id, params)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			ids := make([]string, len(resp.Data))
+			for i, d := range resp.Data {
+				ids[i] = d.ID
+			}
+			printer.PrintIDs(ids)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(resp)
+		case output.FormatYAML:
+			return printer.PrintYAML(resp)
+		default:
+			if len(resp.Data) == 0 {
+				printer.PrintMessage("No deployment history for stack %s", id)
+				return nil
+			}
+			headers := []string{"LOG ID", "ACTION", "STATUS", "STARTED", "COMPLETED"}
+			rows := make([][]string, len(resp.Data))
+			for i, d := range resp.Data {
+				rows[i] = []string{
+					d.ID,
+					d.Action,
+					printer.StatusColor(d.Status),
+					formatTime(d.StartedAt),
+					formatTime(d.CompletedAt),
+				}
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
+}
+
+var stackRollbackCmd = &cobra.Command{
+	Use:   "rollback <id>",
+	Short: "Rollback a stack instance to the previous deployment",
+	Long: `Rollback all Helm releases in a stack instance to their previous revision.
+
+This is a potentially disruptive operation. You will be prompted for
+confirmation unless --yes is specified.
+
+Optionally specify --target-log to rollback to a specific past deployment.
+
+Examples:
+  stackctl stack rollback 42
+  stackctl stack rollback 42 --yes
+  stackctl stack rollback 42 --target-log abc-123`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will rollback stack %s. Continue? (y/n): ", id))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage("Aborted.")
+			return nil
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		targetLog, _ := cmd.Flags().GetString("target-log")
+		req := &types.RollbackRequest{TargetLogID: targetLog}
+
+		log, err := c.RollbackStack(id, req)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, log.ID)
+			return nil
+		}
+
+		printer.PrintMessage("Rollback started for stack %s (log ID: %s)", id, log.ID)
+		return nil
+	},
+}
+
+var stackHistoryValuesCmd = &cobra.Command{
+	Use:   "history-values <instance-id> <log-id>",
+	Short: "Show values used in a past deployment",
+	Long: `Show the merged Helm values that were used in a specific deployment.
+
+Examples:
+  stackctl stack history-values 42 abc-123
+  stackctl stack history-values 42 abc-123 -o yaml`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		instanceID, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+		logID, err := parseID(args[1])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.GetDeployLogValues(instanceID, logID)
+		if err != nil {
+			return err
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(resp)
+		case output.FormatYAML:
+			return printer.PrintYAML(resp)
+		default:
+			return printer.PrintJSON(resp)
+		}
+	},
+}
+
 func init() {
 	// stack list flags
 	stackListCmd.Flags().Bool("mine", false, "Show only my stacks")
@@ -660,6 +824,13 @@ func init() {
 	// stack values flags
 	stackValuesCmd.Flags().String("chart", "", "Filter by chart name")
 
+	// stack history flags
+	stackHistoryCmd.Flags().Int("limit", 20, "Maximum number of entries to show")
+
+	// stack rollback flags
+	stackRollbackCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	stackRollbackCmd.Flags().String("target-log", "", "Target deployment log ID to rollback to")
+
 	// Wire up subcommands
 	stackCmd.AddCommand(stackListCmd)
 	stackCmd.AddCommand(stackGetCmd)
@@ -674,6 +845,9 @@ func init() {
 	stackCmd.AddCommand(stackExtendCmd)
 	stackCmd.AddCommand(stackValuesCmd)
 	stackCmd.AddCommand(stackCompareCmd)
+	stackCmd.AddCommand(stackHistoryCmd)
+	stackCmd.AddCommand(stackRollbackCmd)
+	stackCmd.AddCommand(stackHistoryValuesCmd)
 	rootCmd.AddCommand(stackCmd)
 }
 

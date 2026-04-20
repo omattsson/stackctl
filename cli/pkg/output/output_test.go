@@ -534,14 +534,8 @@ func TestListResponse_EmptyData_JSON(t *testing.T) {
 func TestDeploymentLog_AllFormats(t *testing.T) {
 	t.Parallel()
 
-	now := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
 	log := types.DeploymentLog{
-		Base: types.Base{
-			ID:        "101",
-			CreatedAt: now,
-			UpdatedAt: now,
-			Version:   "1",
-		},
+		ID:         "101",
 		InstanceID: "42",
 		Action:     "deploy",
 		Status:     "success",
@@ -560,7 +554,7 @@ func TestDeploymentLog_AllFormats(t *testing.T) {
 				var result map[string]interface{}
 				require.NoError(t, json.Unmarshal([]byte(output), &result))
 				assert.Equal(t, "101", result["id"])
-				assert.Equal(t, "42", result["instance_id"])
+				assert.Equal(t, "42", result["stack_instance_id"])
 				assert.Equal(t, "deploy", result["action"])
 				assert.Equal(t, "success", result["status"])
 				assert.Equal(t, "Deployed 3 charts successfully", result["output"])
@@ -626,10 +620,7 @@ func TestDeploymentLog_EmptyOutput(t *testing.T) {
 	p := &Printer{Writer: &buf, Format: FormatJSON}
 
 	log := types.DeploymentLog{
-		Base: types.Base{
-			ID:      "102",
-			Version: "1",
-		},
+		ID:         "102",
 		InstanceID: "42",
 		Action:     "stop",
 		Status:     "pending",
@@ -864,10 +855,7 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 		{
 			name: "deployment_log_empty_output_field",
 			data: types.DeploymentLog{
-				Base: types.Base{
-					ID:      "200",
-					Version: "1",
-				},
+				ID:         "200",
 				InstanceID: "50",
 				Action:     "clean",
 				Status:     "success",
@@ -986,8 +974,8 @@ func TestListResponse_MultiplePages_JSON(t *testing.T) {
 
 	listResp := types.ListResponse[types.DeploymentLog]{
 		Data: []types.DeploymentLog{
-			{Base: types.Base{ID: "1"}, InstanceID: "10", Action: "deploy", Status: "success", Output: "ok"},
-			{Base: types.Base{ID: "2"}, InstanceID: "10", Action: "stop", Status: "success", Output: "stopped"},
+			{ID: "1", InstanceID: "10", Action: "deploy", Status: "success", Output: "ok"},
+			{ID: "2", InstanceID: "10", Action: "stop", Status: "success", Output: "stopped"},
 		},
 		Total:      50,
 		Page:       3,
