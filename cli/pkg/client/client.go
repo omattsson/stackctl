@@ -330,20 +330,6 @@ func (c *Client) CleanStack(id string) (*types.DeploymentLog, error) {
 	return &log, nil
 }
 
-// RefreshDBStack triggers a database refresh for a stack instance: wipes the
-// MySQL PVC so the init container re-extracts the golden-db snapshot on next
-// boot, flushes Redis, and deletes the storefront sync Job so the next deploy
-// re-fires the Helm hook. Does NOT re-run helm — only orchestrates k8s
-// primitives. Status must be `running`.
-func (c *Client) RefreshDBStack(id string) (*types.DeploymentLog, error) {
-	var log types.DeploymentLog
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/refresh-db", id), nil, &log)
-	if err != nil {
-		return nil, err
-	}
-	return &log, nil
-}
-
 // GetStackStatus returns the current status and pod states for a stack instance.
 func (c *Client) GetStackStatus(id string) (*types.InstanceStatus, error) {
 	var status types.InstanceStatus

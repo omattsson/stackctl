@@ -769,46 +769,6 @@ func TestCleanStack_Success(t *testing.T) {
 	assert.Equal(t, "clean", log.Action)
 }
 
-func TestRefreshDBStack_Success(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/api/v1/stack-instances/42/refresh-db", r.URL.Path)
-		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "log-103"},
-			InstanceID: "42",
-			Action:     "refresh-db",
-			Status:     "started",
-		})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	log, err := c.RefreshDBStack("42")
-	require.NoError(t, err)
-	assert.Equal(t, "log-103", log.ID)
-	assert.Equal(t, "refresh-db", log.Action)
-}
-
-func TestRefreshDBStack_Conflict(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Cannot refresh-db: instance is currently deploying"})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	log, err := c.RefreshDBStack("42")
-	require.Error(t, err)
-	assert.Nil(t, log)
-
-	apiErr, ok := err.(*APIError)
-	require.True(t, ok, "expected APIError, got %T", err)
-	assert.Equal(t, http.StatusConflict, apiErr.StatusCode)
-}
-
 func TestGetStackStatus_Success(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
