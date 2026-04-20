@@ -342,12 +342,45 @@ func (c *Client) GetStackStatus(id string) (*types.InstanceStatus, error) {
 
 // GetStackLogs returns the latest deployment log for a stack instance.
 func (c *Client) GetStackLogs(id string) (*types.DeploymentLog, error) {
-	var log types.DeploymentLog
-	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/deploy-log", id), &log)
+	var result types.DeploymentLogResult
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/deploy-log", id), &result)
 	if err != nil {
 		return nil, err
 	}
-	return &log, nil
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("no deployment logs found for instance %s", id)
+	}
+	return &result.Data[0], nil
+}
+
+// GetDeploymentHistory returns paginated deployment history for a stack instance.
+func (c *Client) GetDeploymentHistory(id string, params map[string]string) (*types.DeploymentLogResult, error) {
+	var result types.DeploymentLogResult
+	err := c.GetWithQuery(fmt.Sprintf("/api/v1/stack-instances/%s/deploy-log", id), params, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RollbackStack triggers a rollback for a stack instance.
+func (c *Client) RollbackStack(id string, req *types.RollbackRequest) (*types.RollbackResponse, error) {
+	var resp types.RollbackResponse
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/rollback", id), req, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetDeployLogValues returns the values snapshot for a specific deployment log entry.
+func (c *Client) GetDeployLogValues(instanceID, logID string) (*types.DeployLogValuesResponse, error) {
+	var resp types.DeployLogValuesResponse
+	err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/deploy-log/%s/values", instanceID, logID), &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // CloneStack clones a stack instance and returns the new instance.

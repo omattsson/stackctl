@@ -102,11 +102,40 @@ type LoginResponse struct {
 
 // DeploymentLog represents a deployment log entry.
 type DeploymentLog struct {
-	Base
-	InstanceID string   `json:"instance_id" yaml:"instance_id"`
-	Action     string `json:"action" yaml:"action"`
-	Status     string `json:"status" yaml:"status"`
-	Output     string `json:"output,omitempty" yaml:"output,omitempty"`
+	StartedAt      *time.Time `json:"started_at,omitempty" yaml:"started_at,omitempty"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty" yaml:"completed_at,omitempty"`
+	ID             string     `json:"id" yaml:"id"`
+	InstanceID     string     `json:"stack_instance_id" yaml:"stack_instance_id"`
+	Action         string     `json:"action" yaml:"action"`
+	Status         string     `json:"status" yaml:"status"`
+	Output         string     `json:"output,omitempty" yaml:"output,omitempty"`
+	ErrorMessage   string     `json:"error_message,omitempty" yaml:"error_message,omitempty"`
+	ValuesSnapshot string     `json:"values_snapshot,omitempty" yaml:"values_snapshot,omitempty"`
+	TargetLogID    string     `json:"target_log_id,omitempty" yaml:"target_log_id,omitempty"`
+}
+
+// RollbackRequest is the request body for POST /api/v1/stack-instances/:id/rollback.
+type RollbackRequest struct {
+	TargetLogID string `json:"target_log_id,omitempty" yaml:"target_log_id,omitempty"`
+}
+
+// RollbackResponse is the response from POST /api/v1/stack-instances/:id/rollback.
+type RollbackResponse struct {
+	LogID   string `json:"log_id" yaml:"log_id"`
+	Message string `json:"message" yaml:"message"`
+}
+
+// DeploymentLogResult holds paginated deployment log results from the backend.
+type DeploymentLogResult struct {
+	Data       []DeploymentLog `json:"data"`
+	Total      int64           `json:"total"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+}
+
+// DeployLogValuesResponse holds values snapshot for a deployment log entry.
+type DeployLogValuesResponse struct {
+	LogID  string                 `json:"log_id" yaml:"log_id"`
+	Values map[string]interface{} `json:"values" yaml:"values"`
 }
 
 // ListResponse wraps paginated API responses.

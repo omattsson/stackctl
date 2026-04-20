@@ -709,7 +709,7 @@ func TestDeployStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/deploy", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "100"},
+			ID:         "100",
 			InstanceID: "42",
 			Action:     "deploy",
 			Status:     "started",
@@ -732,7 +732,7 @@ func TestStopStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/stop", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "101"},
+			ID:         "101",
 			InstanceID: "42",
 			Action:     "stop",
 			Status:     "started",
@@ -754,7 +754,7 @@ func TestCleanStack_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/clean", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "102"},
+			ID:         "102",
 			InstanceID: "42",
 			Action:     "clean",
 			Status:     "started",
@@ -801,12 +801,15 @@ func TestGetStackLogs_Success(t *testing.T) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/v1/stack-instances/42/deploy-log", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{
-			Base:       types.Base{ID: "200"},
-			InstanceID: "42",
-			Action:     "deploy",
-			Status:     "completed",
-			Output:     "All charts installed successfully.",
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data: []types.DeploymentLog{{
+				ID:         "200",
+				InstanceID: "42",
+				Action:     "deploy",
+				Status:     "completed",
+				Output:     "All charts installed successfully.",
+			}},
+			Total: 1,
 		})
 	}))
 	defer server.Close()
@@ -2166,4 +2169,145 @@ func TestClient_EmptyResponseBody(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, stack)
 	assert.Contains(t, err.Error(), "unexpected empty response body")
+}
+
+// ---------- Deployment history, rollback, and history-values client methods ----------
+
+func TestGetDeploymentHistory_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/deploy-log", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data: []types.DeploymentLog{
+				{ID: "300", InstanceID: "42", Action: "deploy", Status: "completed"},
+				{ID: "299", InstanceID: "42", Action: "rollback", Status: "completed"},
+			},
+			Total:      2,
+			NextCursor: "",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	result, err := c.GetDeploymentHistory("42", nil)
+	require.NoError(t, err)
+	assert.Len(t, result.Data, 2)
+	assert.Equal(t, int64(2), result.Total)
+	assert.Equal(t, "300", result.Data[0].ID)
+	assert.Equal(t, "rollback", result.Data[1].Action)
+}
+
+func TestGetDeploymentHistory_WithParams(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/stack-instances/42/deploy-log", r.URL.Path)
+		assert.Equal(t, "10", r.URL.Query().Get("limit"))
+		assert.Equal(t, "cursor-abc", r.URL.Query().Get("cursor"))
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data:       []types.DeploymentLog{{ID: "301", Action: "deploy", Status: "started"}},
+			Total:      1,
+			NextCursor: "cursor-def",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	result, err := c.GetDeploymentHistory("42", map[string]string{
+		"limit":  "10",
+		"cursor": "cursor-abc",
+	})
+	require.NoError(t, err)
+	assert.Len(t, result.Data, 1)
+	assert.Equal(t, "cursor-def", result.NextCursor)
+}
+
+func TestRollbackStack_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/rollback", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.RollbackResponse{
+			LogID:   "400",
+			Message: "Rollback started",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.RollbackStack("42", &types.RollbackRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, "400", resp.LogID)
+	assert.Equal(t, "Rollback started", resp.Message)
+}
+
+func TestRollbackStack_WithTargetLog(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/rollback", r.URL.Path)
+
+		var body types.RollbackRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "prev-log-123", body.TargetLogID)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.RollbackResponse{
+			LogID:   "401",
+			Message: "Rollback to prev-log-123 started",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.RollbackStack("42", &types.RollbackRequest{TargetLogID: "prev-log-123"})
+	require.NoError(t, err)
+	assert.Equal(t, "401", resp.LogID)
+}
+
+func TestGetDeployLogValues_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/deploy-log/300/values", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.DeployLogValuesResponse{
+			LogID: "300",
+			Values: map[string]interface{}{
+				"frontend": map[string]interface{}{"replicas": float64(3)},
+				"backend":  map[string]interface{}{"replicas": float64(1)},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.GetDeployLogValues("42", "300")
+	require.NoError(t, err)
+	assert.Equal(t, "300", resp.LogID)
+	assert.Contains(t, resp.Values, "frontend")
+	assert.Contains(t, resp.Values, "backend")
+}
+
+func TestGetDeployLogValues_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/stack-instances/42/deploy-log/999/values", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "log entry not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.GetDeployLogValues("42", "999")
+	require.Error(t, err)
+	assert.Nil(t, resp)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+	assert.Equal(t, "log entry not found", apiErr.Message)
 }
