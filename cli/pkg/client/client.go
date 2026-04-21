@@ -301,33 +301,33 @@ func (c *Client) DeleteStack(id string) error {
 }
 
 // DeployStack triggers a deployment for a stack instance.
-func (c *Client) DeployStack(id string) (*types.DeploymentLog, error) {
-	var log types.DeploymentLog
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/deploy", id), nil, &log)
+func (c *Client) DeployStack(id string) (*types.DeployResponse, error) {
+	var resp types.DeployResponse
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/deploy", id), nil, &resp)
 	if err != nil {
 		return nil, err
 	}
-	return &log, nil
+	return &resp, nil
 }
 
 // StopStack triggers a stop for a stack instance.
-func (c *Client) StopStack(id string) (*types.DeploymentLog, error) {
-	var log types.DeploymentLog
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/stop", id), nil, &log)
+func (c *Client) StopStack(id string) (*types.DeployResponse, error) {
+	var resp types.DeployResponse
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/stop", id), nil, &resp)
 	if err != nil {
 		return nil, err
 	}
-	return &log, nil
+	return &resp, nil
 }
 
 // CleanStack triggers an undeploy and namespace removal for a stack instance.
-func (c *Client) CleanStack(id string) (*types.DeploymentLog, error) {
-	var log types.DeploymentLog
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/clean", id), nil, &log)
+func (c *Client) CleanStack(id string) (*types.DeployResponse, error) {
+	var resp types.DeployResponse
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/clean", id), nil, &resp)
 	if err != nil {
 		return nil, err
 	}
-	return &log, nil
+	return &resp, nil
 }
 
 // GetStackStatus returns the current status and pod states for a stack instance.
@@ -424,14 +424,14 @@ func (c *Client) GetTemplate(id string) (*types.StackTemplate, error) {
 	return &tmpl, nil
 }
 
-// InstantiateTemplate creates a new stack instance from a template.
-func (c *Client) InstantiateTemplate(id string, req *types.InstantiateTemplateRequest) (*types.StackInstance, error) {
-	var instance types.StackInstance
-	err := c.Post(fmt.Sprintf("/api/v1/templates/%s/instantiate", id), req, &instance)
+// InstantiateTemplate creates a new stack definition from a template.
+func (c *Client) InstantiateTemplate(id string, req *types.InstantiateTemplateRequest) (*types.StackDefinition, error) {
+	var def types.StackDefinition
+	err := c.Post(fmt.Sprintf("/api/v1/templates/%s/instantiate", id), req, &def)
 	if err != nil {
 		return nil, err
 	}
-	return &instance, nil
+	return &def, nil
 }
 
 // QuickDeployTemplate creates and deploys a stack instance from a template in one step.

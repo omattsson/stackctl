@@ -17,7 +17,7 @@ type StackInstance struct {
 	Name              string     `json:"name" yaml:"name"`
 	StackDefinitionID string       `json:"stack_definition_id" yaml:"stack_definition_id"`
 	DefinitionName    string     `json:"definition_name,omitempty" yaml:"definition_name,omitempty"`
-	Owner             string     `json:"owner" yaml:"owner"`
+	Owner             string     `json:"owner_id" yaml:"owner_id"`
 	Branch            string     `json:"branch" yaml:"branch"`
 	Namespace         string     `json:"namespace" yaml:"namespace"`
 	Status            string     `json:"status" yaml:"status"`
@@ -25,7 +25,7 @@ type StackInstance struct {
 	ClusterName       string     `json:"cluster_name,omitempty" yaml:"cluster_name,omitempty"`
 	TTLMinutes        int        `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
-	DeployedAt        *time.Time `json:"deployed_at,omitempty" yaml:"deployed_at,omitempty"`
+	DeployedAt        *time.Time `json:"last_deployed_at,omitempty" yaml:"last_deployed_at,omitempty"`
 }
 
 // StackDefinition represents a stack definition with its chart configurations.
@@ -34,7 +34,7 @@ type StackDefinition struct {
 	Name          string        `json:"name" yaml:"name"`
 	Description   string        `json:"description,omitempty" yaml:"description,omitempty"`
 	DefaultBranch string        `json:"default_branch" yaml:"default_branch"`
-	Owner         string        `json:"owner" yaml:"owner"`
+	Owner         string        `json:"owner_id" yaml:"owner_id"`
 	Charts        []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
 }
 
@@ -43,16 +43,17 @@ type StackTemplate struct {
 	Base
 	Name        string        `json:"name" yaml:"name"`
 	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
-	Published   bool          `json:"published" yaml:"published"`
-	Owner       string        `json:"owner" yaml:"owner"`
-	Charts      []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+	Published   bool          `json:"is_published" yaml:"is_published"`
+	Owner       string        `json:"owner_id" yaml:"owner_id"`
+	Charts          []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+	DefinitionCount int           `json:"definition_count,omitempty" yaml:"definition_count,omitempty"`
 }
 
 // ChartConfig represents a Helm chart configuration within a definition or template.
 type ChartConfig struct {
 	Base
 	Name          string `json:"name" yaml:"name"`
-	RepoURL       string `json:"repo_url" yaml:"repo_url"`
+	RepoURL       string `json:"repository_url" yaml:"repository_url"`
 	ChartName     string `json:"chart_name" yaml:"chart_name"`
 	ChartVersion  string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
 	ReleaseName   string `json:"release_name,omitempty" yaml:"release_name,omitempty"`
@@ -114,6 +115,12 @@ type DeploymentLog struct {
 	TargetLogID    string     `json:"target_log_id,omitempty" yaml:"target_log_id,omitempty"`
 }
 
+// DeployResponse is the response from deploy/stop/clean operations (HTTP 202).
+type DeployResponse struct {
+	LogID   string `json:"log_id" yaml:"log_id"`
+	Message string `json:"message" yaml:"message"`
+}
+
 // RollbackRequest is the request body for POST /api/v1/stack-instances/:id/rollback.
 type RollbackRequest struct {
 	TargetLogID string `json:"target_log_id,omitempty" yaml:"target_log_id,omitempty"`
@@ -143,7 +150,7 @@ type ListResponse[T any] struct {
 	Data       []T `json:"data"`
 	Total      int `json:"total"`
 	Page       int `json:"page"`
-	PageSize   int `json:"page_size"`
+	PageSize   int `json:"pageSize"`
 	TotalPages int `json:"total_pages"`
 }
 

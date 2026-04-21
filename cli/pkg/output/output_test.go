@@ -320,14 +320,14 @@ func TestStackInstance_JSON(t *testing.T) {
 	assert.Equal(t, "my-app-feature", result["name"])
 	assert.Equal(t, "7", result["stack_definition_id"])
 	assert.Equal(t, "my-app", result["definition_name"])
-	assert.Equal(t, "alice", result["owner"])
+	assert.Equal(t, "alice", result["owner_id"])
 	assert.Equal(t, "feature/login", result["branch"])
 	assert.Equal(t, "my-app-feature-ns", result["namespace"])
 	assert.Equal(t, "running", result["status"])
 	assert.Equal(t, "3", result["cluster_id"])
 	assert.Equal(t, "dev-cluster", result["cluster_name"])
 	assert.Equal(t, float64(120), result["ttl_minutes"])
-	assert.NotEmpty(t, result["deployed_at"])
+	assert.NotEmpty(t, result["last_deployed_at"])
 	assert.NotEmpty(t, result["created_at"])
 	assert.NotEmpty(t, result["updated_at"])
 	// deleted_at should be omitted when nil
@@ -462,7 +462,7 @@ func TestListResponse_StackInstance_JSON(t *testing.T) {
 
 	assert.Equal(t, float64(25), result["total"])
 	assert.Equal(t, float64(2), result["page"])
-	assert.Equal(t, float64(10), result["page_size"])
+	assert.Equal(t, float64(10), result["pageSize"])
 	assert.Equal(t, float64(3), result["total_pages"])
 
 	dataArr, ok := result["data"].([]interface{})
@@ -991,7 +991,7 @@ func TestListResponse_MultiplePages_JSON(t *testing.T) {
 
 	assert.Equal(t, float64(50), result["total"])
 	assert.Equal(t, float64(3), result["page"])
-	assert.Equal(t, float64(2), result["page_size"])
+	assert.Equal(t, float64(2), result["pageSize"])
 	assert.Equal(t, float64(25), result["total_pages"])
 
 	dataArr, ok := result["data"].([]interface{})

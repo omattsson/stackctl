@@ -22,11 +22,12 @@ import (
 func sampleTemplate() types.StackTemplate {
 	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	return types.StackTemplate{
-		Base:        types.Base{ID: "10", CreatedAt: now, UpdatedAt: now, Version: "1"},
-		Name:        "web-app-template",
-		Description: "Full web app stack",
-		Published:   true,
-		Owner:       "admin",
+		Base:            types.Base{ID: "10", CreatedAt: now, UpdatedAt: now, Version: "1"},
+		Name:            "web-app-template",
+		Description:     "Full web app stack",
+		Published:       true,
+		Owner:           "admin",
+		DefinitionCount: 2,
 		Charts: []types.ChartConfig{
 			{
 				Base:         types.Base{ID: "1"},
@@ -70,7 +71,7 @@ func TestTemplateListCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "NAME")
 	assert.Contains(t, out, "DESCRIPTION")
 	assert.Contains(t, out, "PUBLISHED")
-	assert.Contains(t, out, "CHARTS")
+	assert.Contains(t, out, "DEFINITIONS")
 	assert.Contains(t, out, "10")
 	assert.Contains(t, out, "web-app-template")
 	assert.Contains(t, out, "Full web app stack")
@@ -217,8 +218,8 @@ func TestTemplateGetCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "Full web app stack")
 	assert.Contains(t, out, "true")
 	assert.Contains(t, out, "admin")
-	assert.Contains(t, out, "frontend")
-	assert.Contains(t, out, "backend")
+	assert.Contains(t, out, "react-app")
+	assert.Contains(t, out, "api-server")
 }
 
 func TestTemplateGetCmd_JSONOutput(t *testing.T) {
@@ -275,7 +276,11 @@ func TestTemplateGetCmd_NotFound(t *testing.T) {
 // ---------- template instantiate ----------
 
 func TestTemplateInstantiateCmd_Success(t *testing.T) {
-	instance := sampleStack()
+	def := types.StackDefinition{
+		Base:  types.Base{ID: "42"},
+		Name:  "my-def",
+		Owner: "uid-1",
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/templates/10/instantiate", r.URL.Path)
 		require.Equal(t, http.MethodPost, r.Method)
@@ -286,7 +291,7 @@ func TestTemplateInstantiateCmd_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(instance)
+		json.NewEncoder(w).Encode(def)
 	}))
 	defer server.Close()
 
@@ -304,7 +309,7 @@ func TestTemplateInstantiateCmd_Success(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "42")
-	assert.Contains(t, out, "my-stack")
+	assert.Contains(t, out, "my-def")
 }
 
 func TestTemplateInstantiateCmd_WithBranchAndCluster(t *testing.T) {
@@ -317,7 +322,7 @@ func TestTemplateInstantiateCmd_WithBranchAndCluster(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "50"}, Name: "my-instance"})
+		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: "50"}, Name: "my-instance"})
 	}))
 	defer server.Close()
 
@@ -371,7 +376,7 @@ func TestTemplateInstantiateCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "50"}})
+		json.NewEncoder(w).Encode(types.StackDefinition{Base: types.Base{ID: "50"}})
 	}))
 	defer server.Close()
 

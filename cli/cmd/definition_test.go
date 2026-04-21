@@ -66,12 +66,10 @@ func TestDefinitionListCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "NAME")
 	assert.Contains(t, out, "DESCRIPTION")
 	assert.Contains(t, out, "OWNER")
-	assert.Contains(t, out, "CHARTS")
 	assert.Contains(t, out, "5")
 	assert.Contains(t, out, "api-service")
 	assert.Contains(t, out, "API microservice stack")
 	assert.Contains(t, out, "admin")
-	assert.Contains(t, out, "1")
 }
 
 func TestDefinitionListCmd_JSONOutput(t *testing.T) {

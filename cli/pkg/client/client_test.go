@@ -707,22 +707,19 @@ func TestDeployStack_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/stack-instances/42/deploy", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{
-			ID:         "100",
-			InstanceID: "42",
-			Action:     "deploy",
-			Status:     "started",
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeployResponse{
+			LogID:   "100",
+			Message: "Deployment started",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	log, err := c.DeployStack("42")
+	resp, err := c.DeployStack("42")
 	require.NoError(t, err)
-	assert.Equal(t, "100", log.ID)
-	assert.Equal(t, "42", log.InstanceID)
-	assert.Equal(t, "deploy", log.Action)
+	assert.Equal(t, "100", resp.LogID)
+	assert.Equal(t, "Deployment started", resp.Message)
 }
 
 func TestStopStack_Success(t *testing.T) {
@@ -730,21 +727,18 @@ func TestStopStack_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/stack-instances/42/stop", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{
-			ID:         "101",
-			InstanceID: "42",
-			Action:     "stop",
-			Status:     "started",
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeployResponse{
+			LogID:   "101",
+			Message: "Stop started",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	log, err := c.StopStack("42")
+	resp, err := c.StopStack("42")
 	require.NoError(t, err)
-	assert.Equal(t, "101", log.ID)
-	assert.Equal(t, "stop", log.Action)
+	assert.Equal(t, "101", resp.LogID)
 }
 
 func TestCleanStack_Success(t *testing.T) {
@@ -752,21 +746,18 @@ func TestCleanStack_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/stack-instances/42/clean", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{
-			ID:         "102",
-			InstanceID: "42",
-			Action:     "clean",
-			Status:     "started",
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeployResponse{
+			LogID:   "102",
+			Message: "Clean started",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	log, err := c.CleanStack("42")
+	resp, err := c.CleanStack("42")
 	require.NoError(t, err)
-	assert.Equal(t, "102", log.ID)
-	assert.Equal(t, "clean", log.Action)
+	assert.Equal(t, "102", resp.LogID)
 }
 
 func TestGetStackStatus_Success(t *testing.T) {
@@ -976,24 +967,23 @@ func TestInstantiateTemplate_Success(t *testing.T) {
 		assert.Equal(t, "2", body.ClusterID)
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.StackInstance{
-			Base:   types.Base{ID: "50"},
-			Name:   "my-instance",
-			Status: "draft",
+		json.NewEncoder(w).Encode(types.StackDefinition{
+			Base:  types.Base{ID: "50"},
+			Name:  "my-instance",
+			Owner: "uid-1",
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	instance, err := c.InstantiateTemplate("10", &types.InstantiateTemplateRequest{
+	def, err := c.InstantiateTemplate("10", &types.InstantiateTemplateRequest{
 		Name:      "my-instance",
 		Branch:    "feature/xyz",
 		ClusterID: "2",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "50", instance.ID)
-	assert.Equal(t, "my-instance", instance.Name)
-	assert.Equal(t, "draft", instance.Status)
+	assert.Equal(t, "50", def.ID)
+	assert.Equal(t, "my-instance", def.Name)
 }
 
 func TestQuickDeployTemplate_Success(t *testing.T) {
