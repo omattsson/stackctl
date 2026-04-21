@@ -364,8 +364,8 @@ func TestStackDeployCmd_Success(t *testing.T) {
 		require.Equal(t, "/api/v1/stack-instances/42/deploy", r.URL.Path)
 		require.Equal(t, http.MethodPost, r.Method)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "100", InstanceID: "42", Action: "deploy", Status: "started"})
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeployResponse{LogID: "100", Message: "Deployment started"})
 	}))
 	defer server.Close()
 
@@ -381,8 +381,8 @@ func TestStackDeployCmd_Success(t *testing.T) {
 func TestStackDeployCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "100"})
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeployResponse{LogID: "100", Message: "Deployment started"})
 	}))
 	defer server.Close()
 
@@ -400,8 +400,8 @@ func TestStackStopCmd_Success(t *testing.T) {
 		require.Equal(t, "/api/v1/stack-instances/42/stop", r.URL.Path)
 		require.Equal(t, http.MethodPost, r.Method)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "101", InstanceID: "42", Action: "stop", Status: "started"})
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeployResponse{LogID: "101", Message: "Stop started"})
 	}))
 	defer server.Close()
 
@@ -423,7 +423,7 @@ func TestStackCleanCmd_WithConfirmation(t *testing.T) {
 		require.Equal(t, "/api/v1/stack-instances/42/clean", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "102"})
+		json.NewEncoder(w).Encode(types.DeployResponse{LogID: "102", Message: "Clean started"})
 	}))
 	defer server.Close()
 
@@ -474,7 +474,7 @@ func TestStackCleanCmd_WithYesFlag(t *testing.T) {
 		called = true
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "103"})
+		json.NewEncoder(w).Encode(types.DeployResponse{LogID: "103", Message: "Clean started"})
 	}))
 	defer server.Close()
 
@@ -893,8 +893,8 @@ func TestStackDeleteCmd_QuietOutput(t *testing.T) {
 func TestStackStopCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "101"})
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeployResponse{LogID: "101", Message: "Stop started"})
 	}))
 	defer server.Close()
 
@@ -927,8 +927,8 @@ func TestStackExtendCmd_QuietOutput(t *testing.T) {
 func TestStackCleanCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.DeploymentLog{ID: "102"})
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(types.DeployResponse{LogID: "102", Message: "Clean started"})
 	}))
 	defer server.Close()
 
@@ -982,7 +982,7 @@ func TestStackGetCmd_YAMLOutput(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "name: my-stack")
-	assert.Contains(t, out, "owner: admin")
+	assert.Contains(t, out, "owner_id: admin")
 }
 
 func TestStackStatusCmd_YAMLOutput(t *testing.T) {

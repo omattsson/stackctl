@@ -122,24 +122,18 @@ func startTemplateDefMockServer(t *testing.T, state *templateDefMockState) *http
 						return
 					}
 					state.mu.Lock()
-					inst := &types.StackInstance{
-						Base:              types.Base{ID: fmt.Sprintf("%d", state.nextInstID), Version: "1"},
-						Name:              req.Name,
-						Branch:            req.Branch,
-						Status:            "draft",
-						Owner:             "admin",
-						StackDefinitionID: "",
+					def := &types.StackDefinition{
+						Base:          types.Base{ID: fmt.Sprintf("%d", state.nextDefID), Version: "1"},
+						Name:          req.Name,
+						DefaultBranch: req.Branch,
+						Owner:         "admin",
 					}
-					if req.ClusterID != "" {
-						cid := req.ClusterID
-						inst.ClusterID = &cid
-					}
-					state.instances[inst.ID] = inst
-					state.nextInstID++
+					state.definitions[def.ID] = def
+					state.nextDefID++
 					state.mu.Unlock()
 
 					w.WriteHeader(http.StatusCreated)
-					json.NewEncoder(w).Encode(inst)
+					json.NewEncoder(w).Encode(def)
 					return
 
 				case tmplAction == "quick-deploy" && r.Method == http.MethodPost:
@@ -352,18 +346,17 @@ func TestTemplateWorkflow_BrowseAndInstantiate(t *testing.T) {
 	assert.Len(t, tmpl.Charts, 2)
 
 	// 4. Instantiate from template
-	instance, err := c.InstantiateTemplate("1", &types.InstantiateTemplateRequest{
+	def, err := c.InstantiateTemplate("1", &types.InstantiateTemplateRequest{
 		Name:   "my-web-app",
 		Branch: "main",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "my-web-app", instance.Name)
-	assert.Equal(t, "draft", instance.Status)
-	assert.Equal(t, "main", instance.Branch)
+	assert.Equal(t, "my-web-app", def.Name)
+	assert.Equal(t, "main", def.DefaultBranch)
 
-	// 5. Verify instance is stored
+	// 5. Verify definition is stored
 	state.mu.Lock()
-	_, exists := state.instances[instance.ID]
+	_, exists := state.definitions[def.ID]
 	state.mu.Unlock()
 	assert.True(t, exists)
 }

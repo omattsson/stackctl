@@ -148,11 +148,9 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				inst.Status = "deploying"
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(types.DeploymentLog{
-					ID:         "deploy-" + id,
-					InstanceID: id,
-					Action:     "deploy",
-					Status:     "started",
+				json.NewEncoder(w).Encode(types.DeployResponse{
+					LogID:   "deploy-" + id,
+					Message: "Deploy started",
 				})
 
 			// Stop
@@ -161,11 +159,9 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				inst.Status = "stopped"
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(types.DeploymentLog{
-					ID:         "stop-" + id,
-					InstanceID: id,
-					Action:     "stop",
-					Status:     "started",
+				json.NewEncoder(w).Encode(types.DeployResponse{
+					LogID:   "stop-" + id,
+					Message: "Stop started",
 				})
 
 			// Clean
@@ -174,11 +170,9 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				inst.Status = "cleaned"
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(types.DeploymentLog{
-					ID:         "clean-" + id,
-					InstanceID: id,
-					Action:     "clean",
-					Status:     "started",
+				json.NewEncoder(w).Encode(types.DeployResponse{
+					LogID:   "clean-" + id,
+					Message: "Clean started",
 				})
 
 			// Status
@@ -302,10 +296,10 @@ func TestStackWorkflow_CreateDeployStatusLogsStopCleanDelete(t *testing.T) {
 	assert.Equal(t, "lifecycle-stack", got.Name)
 
 	// 3. Deploy
-	deployLog, err := c.DeployStack(id)
+	deployResp, err := c.DeployStack(id)
 	require.NoError(t, err)
-	assert.Equal(t, "deploy", deployLog.Action)
-	assert.Equal(t, id, deployLog.InstanceID)
+	assert.Equal(t, "deploy-"+id, deployResp.LogID)
+	assert.NotEmpty(t, deployResp.Message)
 
 	// 4. Status — should be deploying
 	status, err := c.GetStackStatus(id)
@@ -320,14 +314,14 @@ func TestStackWorkflow_CreateDeployStatusLogsStopCleanDelete(t *testing.T) {
 	assert.Contains(t, log.Output, "completed successfully")
 
 	// 6. Stop
-	stopLog, err := c.StopStack(id)
+	stopResp, err := c.StopStack(id)
 	require.NoError(t, err)
-	assert.Equal(t, "stop", stopLog.Action)
+	assert.Equal(t, "stop-"+id, stopResp.LogID)
 
 	// 7. Clean
-	cleanLog, err := c.CleanStack(id)
+	cleanResp, err := c.CleanStack(id)
 	require.NoError(t, err)
-	assert.Equal(t, "clean", cleanLog.Action)
+	assert.Equal(t, "clean-"+id, cleanResp.LogID)
 
 	// 8. Delete
 	err = c.DeleteStack(id)

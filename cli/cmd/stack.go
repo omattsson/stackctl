@@ -203,17 +203,17 @@ Examples:
 			return err
 		}
 
-		log, err := c.DeployStack(id)
+		resp, err := c.DeployStack(id)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, log.ID)
+			fmt.Fprintln(printer.Writer, resp.LogID)
 			return nil
 		}
 
-		printer.PrintMessage("Deploying stack %s... (log ID: %s)", id, log.ID)
+		printer.PrintMessage("Deploying stack %s... (log ID: %s)", id, resp.LogID)
 		return nil
 	},
 }
@@ -238,17 +238,17 @@ Examples:
 			return err
 		}
 
-		log, err := c.StopStack(id)
+		resp, err := c.StopStack(id)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, log.ID)
+			fmt.Fprintln(printer.Writer, resp.LogID)
 			return nil
 		}
 
-		printer.PrintMessage("Stopping stack %s... (log ID: %s)", id, log.ID)
+		printer.PrintMessage("Stopping stack %s... (log ID: %s)", id, resp.LogID)
 		return nil
 	},
 }
@@ -286,17 +286,17 @@ Examples:
 			return err
 		}
 
-		log, err := c.CleanStack(id)
+		resp, err := c.CleanStack(id)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, log.ID)
+			fmt.Fprintln(printer.Writer, resp.LogID)
 			return nil
 		}
 
-		printer.PrintMessage("Cleaning stack %s... (log ID: %s)", id, log.ID)
+		printer.PrintMessage("Cleaning stack %s... (log ID: %s)", id, resp.LogID)
 		return nil
 	},
 }

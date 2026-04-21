@@ -81,7 +81,7 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(resp)
 		default:
-			headers := []string{"ID", "NAME", "DESCRIPTION", "OWNER", "CHARTS"}
+			headers := []string{"ID", "NAME", "DESCRIPTION", "OWNER"}
 			rows := make([][]string, len(resp.Data))
 			for i, d := range resp.Data {
 				rows[i] = []string{
@@ -89,7 +89,6 @@ Examples:
 					d.Name,
 					d.Description,
 					d.Owner,
-					strconv.Itoa(len(d.Charts)),
 				}
 			}
 			return printer.PrintTable(headers, rows)
@@ -391,7 +390,7 @@ func printDefinition(def *types.StackDefinition) error {
 		for _, ch := range def.Charts {
 			fields = append(fields, output.KeyValue{
 				Key:   "Chart",
-				Value: fmt.Sprintf("%s (%s@%s)", ch.Name, ch.RepoURL, ch.ChartVersion),
+				Value: fmt.Sprintf("%s (%s@%s)", ch.ChartName, ch.RepoURL, ch.ChartVersion),
 			})
 		}
 		return printer.PrintSingle(def, fields)

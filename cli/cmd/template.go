@@ -70,7 +70,7 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(resp)
 		default:
-			headers := []string{"ID", "NAME", "DESCRIPTION", "PUBLISHED", "CHARTS"}
+			headers := []string{"ID", "NAME", "DESCRIPTION", "PUBLISHED", "DEFINITIONS"}
 			rows := make([][]string, len(resp.Data))
 			for i, t := range resp.Data {
 				published := "false"
@@ -82,7 +82,7 @@ Examples:
 					t.Name,
 					t.Description,
 					published,
-					strconv.Itoa(len(t.Charts)),
+					strconv.Itoa(t.DefinitionCount),
 				}
 			}
 			return printer.PrintTable(headers, rows)
@@ -141,7 +141,7 @@ Examples:
 			for _, ch := range tmpl.Charts {
 				fields = append(fields, output.KeyValue{
 					Key:   "Chart",
-					Value: fmt.Sprintf("%s (%s@%s)", ch.Name, ch.RepoURL, ch.ChartVersion),
+					Value: fmt.Sprintf("%s (%s@%s)", ch.ChartName, ch.RepoURL, ch.ChartVersion),
 				})
 			}
 			return printer.PrintSingle(tmpl, fields)
@@ -151,8 +151,8 @@ Examples:
 
 var templateInstantiateCmd = &cobra.Command{
 	Use:   "instantiate <id>",
-	Short: "Create a stack instance from a template",
-	Long: `Create a new stack instance from a template.
+	Short: "Create a stack definition from a template",
+	Long: `Create a new stack definition from a template.
 
 Examples:
   stackctl template instantiate 1 --name my-stack
@@ -180,12 +180,12 @@ Examples:
 			return err
 		}
 
-		instance, err := c.InstantiateTemplate(id, req)
+		def, err := c.InstantiateTemplate(id, req)
 		if err != nil {
 			return err
 		}
 
-		return printInstance(instance)
+		return printDefinition(def)
 	},
 }
 
@@ -236,7 +236,7 @@ func init() {
 	templateListCmd.Flags().Int(flagPageSize, 0, "Page size")
 
 	// template instantiate flags
-	templateInstantiateCmd.Flags().String("name", "", "Stack instance name (required)")
+	templateInstantiateCmd.Flags().String("name", "", "Stack definition name (required)")
 	templateInstantiateCmd.Flags().String("branch", "", "Git branch")
 	templateInstantiateCmd.Flags().String("cluster", "", "Target cluster ID")
 	_ = templateInstantiateCmd.MarkFlagRequired("name")
