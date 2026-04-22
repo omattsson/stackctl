@@ -223,7 +223,7 @@ stackctl override branch set 42 3 feature/hotfix
 
 # Quota overrides
 stackctl override quota get 42
-stackctl override quota set 42 --cpu 4 --memory 8Gi
+stackctl override quota set 42 --cpu-request 200m --cpu-limit 500m --memory-request 256Mi --memory-limit 1Gi
 stackctl override quota delete 42
 
 # View merged values
@@ -289,6 +289,12 @@ stackctl stack list --cluster 1 -q | xargs stackctl bulk delete --yes
 ```bash
 stackctl cluster list
 stackctl cluster get 1
+
+# Cluster-level shared Helm values (applied to all deploys on a cluster)
+stackctl cluster shared-values list 1
+stackctl cluster shared-values set 1 --name "local-dev-defaults" --file values.yaml
+stackctl cluster shared-values set 1 --name "local-dev-defaults" --set persistence.storageClass=local-path --priority 10
+stackctl cluster shared-values delete 1 5
 ```
 
 ### Git
@@ -373,7 +379,7 @@ cli/
     bulk.go               # bulk deploy/stop/clean/delete (names or IDs)
     resolve.go            # name/ID resolution helpers
     git.go                # git branches/validate
-    cluster.go            # cluster list/get
+    cluster.go            # cluster list/get + shared-values list/set/delete
     completion.go         # shell completion (bash/zsh/fish/powershell)
   pkg/
     client/               # HTTP client (auth, error handling)

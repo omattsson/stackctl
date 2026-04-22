@@ -23,6 +23,8 @@ const (
 	pathOverride        = "/api/v1/stack-instances/%s/overrides/%s"
 	pathBranchOverride  = "/api/v1/stack-instances/%s/branches/%s"
 	pathQuotaOverride   = "/api/v1/stack-instances/%s/quota-overrides"
+	pathSharedValues    = "/api/v1/clusters/%s/shared-values"
+	pathSharedValuesID  = "/api/v1/clusters/%s/shared-values/%s"
 )
 
 // Client is the HTTP client for the k8s-stack-manager API.
@@ -777,4 +779,29 @@ func (c *Client) GetClusterHealth(id string) (*types.ClusterHealthSummary, error
 		return nil, err
 	}
 	return &health, nil
+}
+
+// ListSharedValues returns all shared values for a cluster.
+func (c *Client) ListSharedValues(clusterID string) ([]types.SharedValues, error) {
+	var sv []types.SharedValues
+	err := c.Get(fmt.Sprintf(pathSharedValues, clusterID), &sv)
+	if err != nil {
+		return nil, err
+	}
+	return sv, nil
+}
+
+// SetSharedValues creates or updates shared values for a cluster.
+func (c *Client) SetSharedValues(clusterID string, req *types.SetSharedValuesRequest) (*types.SharedValues, error) {
+	var sv types.SharedValues
+	err := c.Post(fmt.Sprintf(pathSharedValues, clusterID), req, &sv)
+	if err != nil {
+		return nil, err
+	}
+	return &sv, nil
+}
+
+// DeleteSharedValues deletes shared values from a cluster.
+func (c *Client) DeleteSharedValues(clusterID, sharedValuesID string) error {
+	return c.Delete(fmt.Sprintf(pathSharedValuesID, clusterID, sharedValuesID))
 }

@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -354,4 +358,407 @@ func TestClusterGetCmd_Unauthorized(t *testing.T) {
 	err := clusterGetCmd.RunE(clusterGetCmd, []string{"1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Not authenticated")
+}
+
+// ---------- shared values helpers ----------
+
+func sampleSharedValues() types.SharedValues {
+	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	return types.SharedValues{
+		Base:      types.Base{ID: "5", CreatedAt: now, UpdatedAt: now, Version: "1"},
+		ClusterID: "1",
+		Name:      "local-dev-defaults",
+		Values:    "persistence:\n  storageClass: local-path\n",
+		Priority:  10,
+	}
+}
+
+func resetSharedValuesSetFlags(t *testing.T) {
+	t.Helper()
+	clusterSharedValuesSetCmd.Flags().Set("name", "")
+	clusterSharedValuesSetCmd.Flags().Set("file", "")
+	clusterSharedValuesSetCmd.Flags().Set("priority", "0")
+	if f := clusterSharedValuesSetCmd.Flags().Lookup("set"); f != nil {
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			sv.Replace([]string{})
+		}
+		f.Changed = false
+	}
+}
+
+// ---------- shared-values list ----------
+
+func TestClusterSharedValuesListCmd_TableOutput(t *testing.T) {
+	sv := sampleSharedValues()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1/shared-values", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]types.SharedValues{sv})
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	err := clusterSharedValuesListCmd.RunE(clusterSharedValuesListCmd, []string{"1"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "ID")
+	assert.Contains(t, out, "NAME")
+	assert.Contains(t, out, "PRIORITY")
+	assert.Contains(t, out, "local-dev-defaults")
+	assert.Contains(t, out, "10")
+}
+
+func TestClusterSharedValuesListCmd_JSONOutput(t *testing.T) {
+	sv := sampleSharedValues()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]types.SharedValues{sv})
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+
+	err := clusterSharedValuesListCmd.RunE(clusterSharedValuesListCmd, []string{"1"})
+	require.NoError(t, err)
+
+	var result []types.SharedValues
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result, 1)
+	assert.Equal(t, "local-dev-defaults", result[0].Name)
+}
+
+func TestClusterSharedValuesListCmd_QuietOutput(t *testing.T) {
+	sv1 := sampleSharedValues()
+	sv2 := sampleSharedValues()
+	sv2.ID = "6"
+	sv2.Name = "acr-pull-secrets"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]types.SharedValues{sv1, sv2})
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	err := clusterSharedValuesListCmd.RunE(clusterSharedValuesListCmd, []string{"1"})
+	require.NoError(t, err)
+
+	lines := strings.TrimSpace(buf.String())
+	assert.Equal(t, "5\n6", lines)
+}
+
+func TestClusterSharedValuesListCmd_YAMLOutput(t *testing.T) {
+	sv := sampleSharedValues()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]types.SharedValues{sv})
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	err := clusterSharedValuesListCmd.RunE(clusterSharedValuesListCmd, []string{"1"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "name: local-dev-defaults")
+	assert.Contains(t, out, "cluster_id: \"1\"")
+}
+
+func TestClusterSharedValuesListCmd_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]types.SharedValues{})
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	err := clusterSharedValuesListCmd.RunE(clusterSharedValuesListCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "No shared values found")
+}
+
+func TestClusterSharedValuesListCmd_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	err := clusterSharedValuesListCmd.RunE(clusterSharedValuesListCmd, []string{"999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cluster not found")
+}
+
+// ---------- shared-values set ----------
+
+func TestClusterSharedValuesSetCmd_WithFile(t *testing.T) {
+	sv := sampleSharedValues()
+
+	tmpDir := t.TempDir()
+	fp := filepath.Join(tmpDir, "values.yaml")
+	require.NoError(t, os.WriteFile(fp, []byte("persistence:\n  storageClass: local-path\n"), 0644))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1/shared-values", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+
+		var body types.SetSharedValuesRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "local-dev-defaults", body.Name)
+		assert.Contains(t, body.Values, "storageClass")
+		assert.Equal(t, 10, body.Priority)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sv)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	clusterSharedValuesSetCmd.Flags().Set("name", "local-dev-defaults")
+	clusterSharedValuesSetCmd.Flags().Set("file", fp)
+	clusterSharedValuesSetCmd.Flags().Set("priority", "10")
+	t.Cleanup(func() { resetSharedValuesSetFlags(t) })
+
+	err := clusterSharedValuesSetCmd.RunE(clusterSharedValuesSetCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Set shared values")
+	assert.Contains(t, buf.String(), "local-dev-defaults")
+}
+
+func TestClusterSharedValuesSetCmd_WithSetFlag(t *testing.T) {
+	sv := sampleSharedValues()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body types.SetSharedValuesRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "test-values", body.Name)
+		assert.Contains(t, body.Values, "storageClass")
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sv)
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	clusterSharedValuesSetCmd.Flags().Set("name", "test-values")
+	clusterSharedValuesSetCmd.Flags().Set("set", "persistence.storageClass=local-path")
+	t.Cleanup(func() { resetSharedValuesSetFlags(t) })
+
+	err := clusterSharedValuesSetCmd.RunE(clusterSharedValuesSetCmd, []string{"1"})
+	require.NoError(t, err)
+}
+
+func TestClusterSharedValuesSetCmd_PathTraversal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called for path traversal")
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	clusterSharedValuesSetCmd.Flags().Set("name", "test")
+	clusterSharedValuesSetCmd.Flags().Set("file", "../../etc/passwd")
+	t.Cleanup(func() { resetSharedValuesSetFlags(t) })
+
+	err := clusterSharedValuesSetCmd.RunE(clusterSharedValuesSetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must not contain '..'")
+}
+
+func TestClusterSharedValuesSetCmd_NoFileOrSet(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called when no --file or --set provided")
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	resetSharedValuesSetFlags(t)
+	clusterSharedValuesSetCmd.Flags().Set("name", "test")
+	t.Cleanup(func() { resetSharedValuesSetFlags(t) })
+
+	err := clusterSharedValuesSetCmd.RunE(clusterSharedValuesSetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one of --file or --set is required")
+}
+
+func TestClusterSharedValuesSetCmd_JSONOutput(t *testing.T) {
+	sv := sampleSharedValues()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sv)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+
+	clusterSharedValuesSetCmd.Flags().Set("name", "test")
+	clusterSharedValuesSetCmd.Flags().Set("set", "key=val")
+	t.Cleanup(func() { resetSharedValuesSetFlags(t) })
+
+	err := clusterSharedValuesSetCmd.RunE(clusterSharedValuesSetCmd, []string{"1"})
+	require.NoError(t, err)
+
+	var result types.SharedValues
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "local-dev-defaults", result.Name)
+}
+
+func TestClusterSharedValuesSetCmd_QuietOutput(t *testing.T) {
+	sv := sampleSharedValues()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sv)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	clusterSharedValuesSetCmd.Flags().Set("name", "test")
+	clusterSharedValuesSetCmd.Flags().Set("set", "key=val")
+	t.Cleanup(func() { resetSharedValuesSetFlags(t) })
+
+	err := clusterSharedValuesSetCmd.RunE(clusterSharedValuesSetCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "5\n", buf.String())
+}
+
+func TestClusterSharedValuesSetCmd_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "internal error"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	clusterSharedValuesSetCmd.Flags().Set("name", "test")
+	clusterSharedValuesSetCmd.Flags().Set("set", "key=val")
+	t.Cleanup(func() { resetSharedValuesSetFlags(t) })
+
+	err := clusterSharedValuesSetCmd.RunE(clusterSharedValuesSetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "internal error")
+}
+
+// ---------- shared-values delete ----------
+
+func TestClusterSharedValuesDeleteCmd_WithYesFlag(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, "/api/v1/clusters/1/shared-values/5", r.URL.Path)
+		require.Equal(t, http.MethodDelete, r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	clusterSharedValuesDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { clusterSharedValuesDeleteCmd.Flags().Set("yes", "false") })
+
+	err := clusterSharedValuesDeleteCmd.RunE(clusterSharedValuesDeleteCmd, []string{"1", "5"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted shared values 5 from cluster 1")
+}
+
+func TestClusterSharedValuesDeleteCmd_ConfirmAccept(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	clusterSharedValuesDeleteCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		clusterSharedValuesDeleteCmd.Flags().Set("yes", "false")
+		clusterSharedValuesDeleteCmd.SetIn(nil)
+		clusterSharedValuesDeleteCmd.SetErr(nil)
+	})
+
+	clusterSharedValuesDeleteCmd.SetIn(strings.NewReader("y\n"))
+	clusterSharedValuesDeleteCmd.SetErr(&bytes.Buffer{})
+
+	err := clusterSharedValuesDeleteCmd.RunE(clusterSharedValuesDeleteCmd, []string{"1", "5"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted shared values")
+}
+
+func TestClusterSharedValuesDeleteCmd_Declined(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called when user declines")
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	clusterSharedValuesDeleteCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		clusterSharedValuesDeleteCmd.Flags().Set("yes", "false")
+		clusterSharedValuesDeleteCmd.SetIn(nil)
+		clusterSharedValuesDeleteCmd.SetErr(nil)
+	})
+
+	clusterSharedValuesDeleteCmd.SetIn(strings.NewReader("n\n"))
+	clusterSharedValuesDeleteCmd.SetErr(&bytes.Buffer{})
+
+	err := clusterSharedValuesDeleteCmd.RunE(clusterSharedValuesDeleteCmd, []string{"1", "5"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Aborted")
+}
+
+func TestClusterSharedValuesDeleteCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	clusterSharedValuesDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { clusterSharedValuesDeleteCmd.Flags().Set("yes", "false") })
+
+	err := clusterSharedValuesDeleteCmd.RunE(clusterSharedValuesDeleteCmd, []string{"1", "5"})
+	require.NoError(t, err)
+	assert.Equal(t, "5\n", buf.String())
+}
+
+func TestClusterSharedValuesDeleteCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "shared values not found"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	clusterSharedValuesDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { clusterSharedValuesDeleteCmd.Flags().Set("yes", "false") })
+
+	err := clusterSharedValuesDeleteCmd.RunE(clusterSharedValuesDeleteCmd, []string{"1", "999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shared values not found")
 }

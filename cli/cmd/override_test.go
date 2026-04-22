@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // Tests in this file are NOT parallelized because they mutate package-level
@@ -226,7 +227,9 @@ func TestOverrideSetCmd_WithSetFlag(t *testing.T) {
 
 		var body types.SetValueOverrideRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, float64(3), body.Values["replicas"])
+		var parsed map[string]interface{}
+		require.NoError(t, yaml.Unmarshal([]byte(body.Values), &parsed))
+		assert.Equal(t, 3, parsed["replicas"])
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -256,7 +259,9 @@ func TestOverrideSetCmd_WithFile(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body types.SetValueOverrideRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, float64(5), body.Values["replicas"])
+		var parsed map[string]interface{}
+		require.NoError(t, yaml.Unmarshal([]byte(body.Values), &parsed))
+		assert.Equal(t, 5, parsed["replicas"])
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -284,8 +289,10 @@ func TestOverrideSetCmd_FileAndSetCombined(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body types.SetValueOverrideRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		var parsed map[string]interface{}
+		require.NoError(t, yaml.Unmarshal([]byte(body.Values), &parsed))
 		// --set should override the file value for replicas
-		assert.Equal(t, float64(5), body.Values["replicas"])
+		assert.Equal(t, 5, parsed["replicas"])
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1354,11 +1361,11 @@ func TestOverrideSetCmd_WithYAMLFile(t *testing.T) {
 	fp := filepath.Join(tmpDir, "values.yaml")
 	require.NoError(t, os.WriteFile(fp, []byte("replicas: 3\nimage:\n  tag: v2\n"), 0644))
 
-	var captured map[string]interface{}
+	var capturedYAML string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body types.SetValueOverrideRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		captured = body.Values
+		capturedYAML = body.Values
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1375,8 +1382,9 @@ func TestOverrideSetCmd_WithYAMLFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Set value override for chart 1 on instance 42")
 
-	// YAML integers round-trip through JSON as float64
-	assert.Equal(t, float64(3), captured["replicas"])
+	var captured map[string]interface{}
+	require.NoError(t, yaml.Unmarshal([]byte(capturedYAML), &captured))
+	assert.Equal(t, 3, captured["replicas"])
 	imageMap, ok := captured["image"].(map[string]interface{})
 	require.True(t, ok, "image should be a nested map")
 	assert.Equal(t, "v2", imageMap["tag"])
@@ -1387,11 +1395,11 @@ func TestOverrideSetCmd_WithYAMLFile(t *testing.T) {
 func TestOverrideSetCmd_ScalarTypeParsing(t *testing.T) {
 	override := sampleValueOverride()
 
-	var captured map[string]interface{}
+	var capturedYAML string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body types.SetValueOverrideRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		captured = body.Values
+		capturedYAML = body.Values
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1409,11 +1417,10 @@ func TestOverrideSetCmd_ScalarTypeParsing(t *testing.T) {
 	err := overrideSetCmd.RunE(overrideSetCmd, []string{"42", "1"})
 	require.NoError(t, err)
 
-	// Integer: JSON round-trips int64 as float64
-	assert.Equal(t, float64(3), captured["replicas"])
-	// Boolean
+	var captured map[string]interface{}
+	require.NoError(t, yaml.Unmarshal([]byte(capturedYAML), &captured))
+	assert.Equal(t, 3, captured["replicas"])
 	assert.Equal(t, true, captured["enabled"])
-	// Nested key with string value
 	imageMap, ok := captured["image"].(map[string]interface{})
 	require.True(t, ok, "image should be a nested map")
 	assert.Equal(t, "v2", imageMap["tag"])
