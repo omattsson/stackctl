@@ -2,15 +2,15 @@ package cmd
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
 )
 
-const flagDescIDs = "Comma-separated list of instance IDs"
+const flagDescIDs = "Comma-separated list of stack names or IDs"
 
 var bulkCmd = &cobra.Command{
 	Use:   "bulk",
@@ -19,25 +19,25 @@ var bulkCmd = &cobra.Command{
 }
 
 var bulkDeployCmd = &cobra.Command{
-	Use:   "deploy [IDs...]",
+	Use:   "deploy [name|ID...]",
 	Short: "Deploy multiple stack instances",
 	Long: `Deploy multiple stack instances at once.
 
-IDs can be provided via --ids flag, positional arguments, or both.
+Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
   stackctl bulk deploy --ids 1,2,3
-  stackctl bulk deploy 1 2 3
-  stackctl bulk deploy --ids 1,2 3
+  stackctl bulk deploy my-stack other-stack
+  stackctl bulk deploy --ids my-stack,2 3
   stackctl bulk deploy --ids 1,2,3 -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := parseBulkIDs(cmd, args)
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
 		}
@@ -52,25 +52,25 @@ Examples:
 }
 
 var bulkStopCmd = &cobra.Command{
-	Use:   "stop [IDs...]",
+	Use:   "stop [name|ID...]",
 	Short: "Stop multiple stack instances",
 	Long: `Stop multiple stack instances at once.
 
-IDs can be provided via --ids flag, positional arguments, or both.
+Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
   stackctl bulk stop --ids 1,2,3
-  stackctl bulk stop 1 2 3
-  stackctl bulk stop --ids 1,2 3
+  stackctl bulk stop my-stack other-stack
+  stackctl bulk stop --ids my-stack,2 3
   stackctl bulk stop --ids 1,2,3 -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := parseBulkIDs(cmd, args)
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
 		}
@@ -85,22 +85,27 @@ Examples:
 }
 
 var bulkCleanCmd = &cobra.Command{
-	Use:   "clean [IDs...]",
+	Use:   "clean [name|ID...]",
 	Short: "Clean multiple stack instances",
 	Long: `Undeploy and remove namespaces for multiple stack instances.
 
 This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
-IDs can be provided via --ids flag, positional arguments, or both.
+Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
   stackctl bulk clean --ids 1,2,3
-  stackctl bulk clean 1 2 3
+  stackctl bulk clean my-stack other-stack
   stackctl bulk clean --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := parseBulkIDs(cmd, args)
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
 		}
@@ -114,11 +119,6 @@ Examples:
 			return nil
 		}
 
-		c, err := newClient()
-		if err != nil {
-			return err
-		}
-
 		resp, err := c.BulkClean(ids)
 		if err != nil {
 			return err
@@ -129,22 +129,27 @@ Examples:
 }
 
 var bulkDeleteCmd = &cobra.Command{
-	Use:   "delete [IDs...]",
+	Use:   "delete [name|ID...]",
 	Short: "Delete multiple stack instances",
 	Long: `Permanently delete multiple stack instances.
 
 This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
-IDs can be provided via --ids flag, positional arguments, or both.
+Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
   stackctl bulk delete --ids 1,2,3
-  stackctl bulk delete 1 2 3
+  stackctl bulk delete my-stack other-stack
   stackctl bulk delete --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ids, err := parseBulkIDs(cmd, args)
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
 		}
@@ -156,11 +161,6 @@ Examples:
 		if !confirmed {
 			printer.PrintMessage("Aborted.")
 			return nil
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
 		}
 
 		resp, err := c.BulkDelete(ids)
@@ -190,7 +190,7 @@ func init() {
 	rootCmd.AddCommand(bulkCmd)
 }
 
-func parseBulkIDs(cmd *cobra.Command, args []string) ([]string, error) {
+func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]string, error) {
 	var rawParts []string
 
 	idsStr, _ := cmd.Flags().GetString("ids")
@@ -199,6 +199,10 @@ func parseBulkIDs(cmd *cobra.Command, args []string) ([]string, error) {
 	}
 	rawParts = append(rawParts, args...)
 
+	if len(rawParts) > 50 {
+		return nil, fmt.Errorf("maximum 50 stacks allowed, got %d", len(rawParts))
+	}
+
 	seen := make(map[string]bool)
 	ids := make([]string, 0, len(rawParts))
 	for _, p := range rawParts {
@@ -206,23 +210,23 @@ func parseBulkIDs(cmd *cobra.Command, args []string) ([]string, error) {
 		if p == "" {
 			continue
 		}
-		id, err := strconv.ParseUint(p, 10, 64)
-		if err != nil || id == 0 {
-			return nil, fmt.Errorf("invalid ID %q: must be a positive integer", p)
+		resolved, err := resolveStackID(c, p)
+		if err != nil {
+			return nil, err
 		}
-		if seen[p] {
+		if seen[resolved] {
 			continue
 		}
-		seen[p] = true
-		ids = append(ids, p)
+		seen[resolved] = true
+		ids = append(ids, resolved)
 	}
 
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("at least one instance ID is required (use --ids or positional arguments)")
+		return nil, fmt.Errorf("at least one stack name or ID is required (use --ids or positional arguments)")
 	}
 
 	if len(ids) > 50 {
-		return nil, fmt.Errorf("maximum 50 IDs allowed, got %d", len(ids))
+		return nil, fmt.Errorf("maximum 50 stacks allowed, got %d", len(ids))
 	}
 
 	return ids, nil

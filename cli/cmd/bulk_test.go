@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
@@ -309,60 +310,131 @@ func TestBulkDeleteCmd_WithYesFlag(t *testing.T) {
 	assert.Contains(t, buf.String(), "ID")
 }
 
-// ---------- parseBulkIDs ----------
+// ---------- resolveBulkIDs ----------
 
-func TestParseBulkIDs_Valid(t *testing.T) {
+func TestResolveBulkIDs_NumericIDs(t *testing.T) {
+	c := client.New("http://unused")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", "1,2,3")
 
-	ids, err := parseBulkIDs(cmd, nil)
+	ids, err := resolveBulkIDs(c, cmd, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
 
-func TestParseBulkIDs_InvalidID(t *testing.T) {
+func TestResolveBulkIDs_UUIDs(t *testing.T) {
+	c := client.New("http://unused")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
-	cmd.Flags().Set("ids", "1,abc,3")
+	cmd.Flags().Set("ids", "550e8400-e29b-41d4-a716-446655440000,660e8400-e29b-41d4-a716-446655440001")
 
-	_, err := parseBulkIDs(cmd, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
+	ids, err := resolveBulkIDs(c, cmd, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440001"}, ids)
 }
 
-func TestParseBulkIDs_TooMany(t *testing.T) {
+func TestResolveBulkIDs_StackNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		id := "resolved-" + name
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{
+			Data:  []types.StackInstance{{Base: types.Base{ID: id}, Name: name}},
+			Total: 1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
-	// Build 51 unique IDs
+	cmd.Flags().Set("ids", "my-stack,other-stack")
+
+	ids, err := resolveBulkIDs(c, cmd, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"resolved-my-stack", "resolved-other-stack"}, ids)
+}
+
+func TestResolveBulkIDs_MixedNamesAndIDs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{
+			Data:  []types.StackInstance{{Base: types.Base{ID: "99"}, Name: name}},
+			Total: 1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("ids", "", "")
+	cmd.Flags().Set("ids", "1,my-stack")
+
+	ids, err := resolveBulkIDs(c, cmd, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1", "99"}, ids)
+}
+
+func TestResolveBulkIDs_NameDedup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{
+			Data:  []types.StackInstance{{Base: types.Base{ID: "42"}, Name: r.URL.Query().Get("name")}},
+			Total: 1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("ids", "", "")
+	cmd.Flags().Set("ids", "my-stack,42")
+
+	ids, err := resolveBulkIDs(c, cmd, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"42"}, ids)
+}
+
+func TestResolveBulkIDs_UnknownName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{
+			Data: []types.StackInstance{}, Total: 0, Page: 1, PageSize: 0,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("ids", "", "")
+	cmd.Flags().Set("ids", "nonexistent")
+
+	_, err := resolveBulkIDs(c, cmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no stack found")
+}
+
+func TestResolveBulkIDs_TooMany(t *testing.T) {
+	c := client.New("http://unused")
+	cmd := &cobra.Command{}
+	cmd.Flags().String("ids", "", "")
 	parts := make([]string, 51)
 	for i := range parts {
 		parts[i] = strconv.Itoa(i + 1)
 	}
 	cmd.Flags().Set("ids", strings.Join(parts, ","))
 
-	_, err := parseBulkIDs(cmd, nil)
+	_, err := resolveBulkIDs(c, cmd, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "maximum 50")
 }
 
-func TestParseBulkIDs_Empty(t *testing.T) {
+func TestResolveBulkIDs_Empty(t *testing.T) {
+	c := client.New("http://unused")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
-	cmd.Flags().Set("ids", "")
 
-	_, err := parseBulkIDs(cmd, nil)
+	_, err := resolveBulkIDs(c, cmd, nil)
 	require.Error(t, err)
-}
-
-func TestParseBulkIDs_ZeroID(t *testing.T) {
-	cmd := &cobra.Command{}
-	cmd.Flags().String("ids", "", "")
-	cmd.Flags().Set("ids", "0")
-
-	_, err := parseBulkIDs(cmd, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
+	assert.Contains(t, err.Error(), "at least one stack name or ID")
 }
 
 func TestBulkDeployCmd_APIError(t *testing.T) {
@@ -554,65 +626,60 @@ func TestBulkDeleteCmd_YAMLOutput(t *testing.T) {
 	assert.Contains(t, out, "success: true")
 }
 
-// ---------- parseBulkIDs edge cases ----------
+// ---------- resolveBulkIDs edge cases ----------
 
-func TestParseBulkIDs_OnlyCommas(t *testing.T) {
+func TestResolveBulkIDs_OnlyCommas(t *testing.T) {
+	c := client.New("http://unused")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", ",,,")
 
-	_, err := parseBulkIDs(cmd, nil)
+	_, err := resolveBulkIDs(c, cmd, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "at least one instance ID is required")
+	assert.Contains(t, err.Error(), "at least one stack name or ID")
 }
 
-func TestParseBulkIDs_WhitespaceHandling(t *testing.T) {
+func TestResolveBulkIDs_WhitespaceHandling(t *testing.T) {
+	c := client.New("http://unused")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", " 1 , 2 , 3 ")
 
-	ids, err := parseBulkIDs(cmd, nil)
+	ids, err := resolveBulkIDs(c, cmd, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"1", "2", "3"}, ids)
-}
-
-func TestParseBulkIDs_NegativeID(t *testing.T) {
-	cmd := &cobra.Command{}
-	cmd.Flags().String("ids", "", "")
-	cmd.Flags().Set("ids", "-1")
-
-	_, err := parseBulkIDs(cmd, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid ID")
 }
 
 // ---------- positional and mixed args ----------
 
-func TestParseBulkIDs_PositionalArgs(t *testing.T) {
+func TestResolveBulkIDs_PositionalArgs(t *testing.T) {
+	c := client.New("http://unused")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
 
-	ids, err := parseBulkIDs(cmd, []string{"1", "2", "3"})
+	ids, err := resolveBulkIDs(c, cmd, []string{"1", "2", "3"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
 
-func TestParseBulkIDs_MixedFlagAndPositional(t *testing.T) {
+func TestResolveBulkIDs_MixedFlagAndPositional(t *testing.T) {
+	c := client.New("http://unused")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", "1,2")
 
-	ids, err := parseBulkIDs(cmd, []string{"3"})
+	ids, err := resolveBulkIDs(c, cmd, []string{"3"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
 
-func TestParseBulkIDs_MixedDedup(t *testing.T) {
+func TestResolveBulkIDs_MixedDedup(t *testing.T) {
+	c := client.New("http://unused")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("ids", "", "")
 	cmd.Flags().Set("ids", "1,2")
 
-	ids, err := parseBulkIDs(cmd, []string{"2", "3"})
+	ids, err := resolveBulkIDs(c, cmd, []string{"2", "3"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"1", "2", "3"}, ids)
 }
