@@ -29,23 +29,23 @@ var overrideCmd = &cobra.Command{
 // --- Value Overrides ---
 
 var overrideListCmd = &cobra.Command{
-	Use:   "list <instance-id>",
+	Use:   "list <name|id>",
 	Short: "List value overrides for a stack instance",
 	Long: `List all value overrides for a stack instance.
 
 Examples:
-  stackctl override list 42
-  stackctl override list 42 -o json
-  stackctl override list 42 -q`,
+  stackctl override list my-stack
+  stackctl override list my-stack -o json
+  stackctl override list my-stack -q`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -88,7 +88,7 @@ Examples:
 }
 
 var overrideSetCmd = &cobra.Command{
-	Use:   "set <instance-id> <chart-id>",
+	Use:   "set <name|id> <chart-id>",
 	Short: "Set value overrides for a chart",
 	Long: `Set value overrides for a specific chart in a stack instance.
 
@@ -96,17 +96,13 @@ Provide values via --file (JSON or YAML file) or --set key=value (repeatable).
 At least one of --file or --set is required.
 
 Examples:
-  stackctl override set 42 1 --file values.json
-  stackctl override set 42 1 --file values.yaml
-  stackctl override set 42 1 --set replicas=3 --set image.tag=v2
-  stackctl override set 42 1 --file values.json --set replicas=5`,
+  stackctl override set my-stack 1 --file values.json
+  stackctl override set my-stack 1 --file values.yaml
+  stackctl override set my-stack 1 --set replicas=3 --set image.tag=v2
+  stackctl override set my-stack 1 --file values.json --set replicas=5`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
 		chartID, err := parseID(args[1])
 		if err != nil {
 			return err
@@ -132,9 +128,7 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", file, err)
 			}
-			// Try JSON first, then YAML
 			if err := json.Unmarshal(data, &values); err != nil {
-				// Try YAML
 				if yamlErr := yaml.Unmarshal(data, &values); yamlErr != nil {
 					return fmt.Errorf("invalid JSON/YAML in file %s (json: %v): %w", file, err, yamlErr)
 				}
@@ -150,6 +144,11 @@ Examples:
 		}
 
 		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -179,7 +178,7 @@ Examples:
 }
 
 var overrideDeleteCmd = &cobra.Command{
-	Use:   "delete <instance-id> <chart-id>",
+	Use:   "delete <name|id> <chart-id>",
 	Short: "Delete a value override",
 	Long: `Delete a value override for a specific chart in a stack instance.
 
@@ -187,8 +186,8 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl override delete 42 1
-  stackctl override delete 42 1 --yes`,
+  stackctl override delete my-stack 1
+  stackctl override delete my-stack 1 --yes`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -207,22 +206,22 @@ var overrideBranchCmd = &cobra.Command{
 }
 
 var overrideBranchListCmd = &cobra.Command{
-	Use:   "list <instance-id>",
+	Use:   "list <name|id>",
 	Short: "List branch overrides for a stack instance",
 	Long: `List all branch overrides for a stack instance.
 
 Examples:
-  stackctl override branch list 42
-  stackctl override branch list 42 -o json`,
+  stackctl override branch list my-stack
+  stackctl override branch list my-stack -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -261,20 +260,16 @@ Examples:
 }
 
 var overrideBranchSetCmd = &cobra.Command{
-	Use:   "set <instance-id> <chart-id> <branch>",
+	Use:   "set <name|id> <chart-id> <branch>",
 	Short: "Set a branch override for a chart",
 	Long: `Set a branch override for a specific chart in a stack instance.
 
 Examples:
-  stackctl override branch set 42 1 feature/my-branch
-  stackctl override branch set 42 1 main -o json`,
+  stackctl override branch set my-stack 1 feature/my-branch
+  stackctl override branch set my-stack 1 main -o json`,
 	Args:         cobra.ExactArgs(3),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
 		chartID, err := parseID(args[1])
 		if err != nil {
 			return err
@@ -282,6 +277,11 @@ Examples:
 		branch := args[2]
 
 		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -311,7 +311,7 @@ Examples:
 }
 
 var overrideBranchDeleteCmd = &cobra.Command{
-	Use:   "delete <instance-id> <chart-id>",
+	Use:   "delete <name|id> <chart-id>",
 	Short: "Delete a branch override",
 	Long: `Delete a branch override for a specific chart in a stack instance.
 
@@ -319,8 +319,8 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl override branch delete 42 1
-  stackctl override branch delete 42 1 --yes`,
+  stackctl override branch delete my-stack 1
+  stackctl override branch delete my-stack 1 --yes`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -339,22 +339,22 @@ var overrideQuotaCmd = &cobra.Command{
 }
 
 var overrideQuotaGetCmd = &cobra.Command{
-	Use:   "get <instance-id>",
+	Use:   "get <name|id>",
 	Short: "Get quota override for a stack instance",
 	Long: `Get the resource quota override for a stack instance.
 
 Examples:
-  stackctl override quota get 42
-  stackctl override quota get 42 -o json`,
+  stackctl override quota get my-stack
+  stackctl override quota get my-stack -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -388,24 +388,19 @@ Examples:
 }
 
 var overrideQuotaSetCmd = &cobra.Command{
-	Use:   "set <instance-id>",
+	Use:   "set <name|id>",
 	Short: "Set quota override for a stack instance",
 	Long: `Set resource quota overrides for a stack instance.
 
 At least one of the quota flags must be specified.
 
 Examples:
-  stackctl override quota set 42 --cpu-request 100m --cpu-limit 500m
-  stackctl override quota set 42 --memory-request 128Mi --memory-limit 512Mi
-  stackctl override quota set 42 --cpu-request 200m --memory-limit 1Gi`,
+  stackctl override quota set my-stack --cpu-request 100m --cpu-limit 500m
+  stackctl override quota set my-stack --memory-request 128Mi --memory-limit 512Mi
+  stackctl override quota set my-stack --cpu-request 200m --memory-limit 1Gi`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
-
 		cpuReq, _ := cmd.Flags().GetString("cpu-request")
 		cpuLim, _ := cmd.Flags().GetString("cpu-limit")
 		memReq, _ := cmd.Flags().GetString("memory-request")
@@ -416,6 +411,11 @@ Examples:
 		}
 
 		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -448,7 +448,7 @@ Examples:
 }
 
 var overrideQuotaDeleteCmd = &cobra.Command{
-	Use:   "delete <instance-id>",
+	Use:   "delete <name|id>",
 	Short: "Delete quota override for a stack instance",
 	Long: `Delete the resource quota override for a stack instance.
 
@@ -456,12 +456,17 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl override quota delete 42
-  stackctl override quota delete 42 --yes`,
+  stackctl override quota delete my-stack
+  stackctl override quota delete my-stack --yes`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -473,11 +478,6 @@ Examples:
 		if !confirmed {
 			printer.PrintMessage(msgAborted)
 			return nil
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
 		}
 
 		if err := c.DeleteQuotaOverride(instanceID); err != nil {
@@ -495,11 +495,17 @@ Examples:
 }
 
 func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteFn func(*client.Client, string, string) error) error {
-	instanceID, err := parseID(args[0])
+	chartID, err := parseID(args[1])
 	if err != nil {
 		return err
 	}
-	chartID, err := parseID(args[1])
+
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+
+	instanceID, err := resolveStackID(c, args[0])
 	if err != nil {
 		return err
 	}
@@ -511,11 +517,6 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 	if !confirmed {
 		printer.PrintMessage(msgAborted)
 		return nil
-	}
-
-	c, err := newClient()
-	if err != nil {
-		return err
 	}
 
 	if err := deleteFn(c, instanceID, chartID); err != nil {

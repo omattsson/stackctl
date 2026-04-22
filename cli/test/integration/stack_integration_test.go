@@ -60,11 +60,15 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 			var data []types.StackInstance
 			status := r.URL.Query().Get("status")
 			owner := r.URL.Query().Get("owner")
+			name := r.URL.Query().Get("name")
 			for _, inst := range state.instances {
 				if status != "" && inst.Status != status {
 					continue
 				}
 				if owner != "" && owner != "me" && inst.Owner != owner {
+					continue
+				}
+				if name != "" && inst.Name != name {
 					continue
 				}
 				data = append(data, *inst)
@@ -403,6 +407,64 @@ func TestStackWorkflow_CloneAndExtend(t *testing.T) {
 	resp, err := c.ListStacks(nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, resp.Total)
+}
+
+func TestStackWorkflow_GetByName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newStackMockState()
+	server := startStackMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	created, err := c.CreateStack(&types.CreateStackRequest{Name: "named-stack"})
+	require.NoError(t, err)
+
+	resp, err := c.ListStacks(map[string]string{"name": "named-stack"})
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, created.ID, resp.Data[0].ID)
+	assert.Equal(t, "named-stack", resp.Data[0].Name)
+}
+
+func TestStackWorkflow_GetByNameAmbiguous(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newStackMockState()
+	server := startStackMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	_, err := c.CreateStack(&types.CreateStackRequest{Name: "dup-stack"})
+	require.NoError(t, err)
+	_, err = c.CreateStack(&types.CreateStackRequest{Name: "dup-stack"})
+	require.NoError(t, err)
+
+	resp, err := c.ListStacks(map[string]string{"name": "dup-stack"})
+	require.NoError(t, err)
+	assert.Len(t, resp.Data, 2)
+}
+
+func TestStackWorkflow_GetByNameNotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newStackMockState()
+	server := startStackMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	resp, err := c.ListStacks(map[string]string{"name": "nonexistent"})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Data)
 }
 
 func TestStackWorkflow_DestructiveOpsOnMissingInstance(t *testing.T) {

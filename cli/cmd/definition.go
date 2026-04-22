@@ -260,6 +260,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return deleteByID(cmd, args,
 			"This will permanently delete definition %s. Continue? (y/n): ",
+			passthroughID,
 			func(c *client.Client, id string) error { return c.DeleteDefinition(id) },
 			"Deleted definition %s",
 		)
