@@ -211,9 +211,26 @@ type CreateDefinitionRequest struct {
 
 // UpdateDefinitionRequest is the request body for PUT /api/v1/stack-definitions/:id.
 type UpdateDefinitionRequest struct {
-	Name        string        `json:"name,omitempty" yaml:"name,omitempty"`
-	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
-	Charts      []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+	Name          string        `json:"name,omitempty" yaml:"name,omitempty"`
+	Description   string        `json:"description,omitempty" yaml:"description,omitempty"`
+	DefaultBranch string        `json:"default_branch,omitempty" yaml:"default_branch,omitempty"`
+	Charts        []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+}
+
+// UpdateChartConfigRequest is the request body for PUT /api/v1/stack-definitions/:id/charts/:chartID.
+type UpdateChartConfigRequest struct {
+	ChartName     string `json:"chart_name,omitempty" yaml:"chart_name,omitempty"`
+	ChartPath     string `json:"chart_path,omitempty" yaml:"chart_path,omitempty"`
+	ChartVersion  string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
+	DeployOrder   *int   `json:"deploy_order,omitempty" yaml:"deploy_order,omitempty"`
+	DefaultValues string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
+}
+
+// OrphanedNamespace represents a Kubernetes namespace with no matching stack record.
+type OrphanedNamespace struct {
+	Namespace string `json:"namespace" yaml:"namespace"`
+	Cluster   string `json:"cluster,omitempty" yaml:"cluster,omitempty"`
+	CreatedAt string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
 // BulkRequest is the request body for bulk operations.

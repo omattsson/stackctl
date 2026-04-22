@@ -879,7 +879,7 @@ func TestDefinitionUpdateCmd_NoFlagsSpecified(t *testing.T) {
 
 	err := definitionUpdateCmd.RunE(definitionUpdateCmd, []string{"1"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "at least one of --name, --description, or --from-file must be specified")
+	assert.Contains(t, err.Error(), "at least one of --name, --description, --branch, or --from-file must be specified")
 }
 
 // ---------- create --from-file requires name field ----------
@@ -952,4 +952,277 @@ func TestDefinitionImportCmd_InvalidJSON(t *testing.T) {
 	err := definitionImportCmd.RunE(definitionImportCmd, []string{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid JSON")
+}
+
+// ---------- definition update --branch ----------
+
+func TestDefinitionUpdateCmd_WithBranch(t *testing.T) {
+	updated := sampleDefinition()
+	updated.DefaultBranch = "develop"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/stack-definitions/5", r.URL.Path)
+		require.Equal(t, http.MethodPut, r.Method)
+
+		var body types.UpdateDefinitionRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "develop", body.DefaultBranch)
+		assert.Empty(t, body.Name)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(updated)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	definitionUpdateCmd.Flags().Set("branch", "develop")
+	t.Cleanup(func() {
+		definitionUpdateCmd.Flags().Set("name", "")
+		definitionUpdateCmd.Flags().Set("description", "")
+		definitionUpdateCmd.Flags().Set("branch", "")
+		definitionUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := definitionUpdateCmd.RunE(definitionUpdateCmd, []string{"5"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "develop")
+}
+
+func TestDefinitionUpdateCmd_NoFlags(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called when no flags provided")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	t.Cleanup(func() {
+		definitionUpdateCmd.Flags().Set("name", "")
+		definitionUpdateCmd.Flags().Set("description", "")
+		definitionUpdateCmd.Flags().Set("branch", "")
+		definitionUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := definitionUpdateCmd.RunE(definitionUpdateCmd, []string{"5"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one of")
+}
+
+// ---------- definition update-chart ----------
+
+func sampleChartConfig() types.ChartConfig {
+	return types.ChartConfig{
+		Base:          types.Base{ID: "1", Version: "1"},
+		Name:          "api",
+		RepoURL:       "https://charts.example.com",
+		ChartName:     "api-chart",
+		ChartVersion:  "2.0.0",
+		ReleaseName:   "api-release",
+		DefaultValues: "replicas: 1\nimage: app:latest",
+	}
+}
+
+func TestDefinitionUpdateChartCmd_ChartVersion(t *testing.T) {
+	chart := sampleChartConfig()
+	reqCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Contains(t, r.URL.Path, "/api/v1/stack-definitions/5/charts/1")
+		reqCount++
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(chart)
+			return
+		}
+
+		require.Equal(t, http.MethodPut, r.Method)
+		var body types.UpdateChartConfigRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "3.0.0", body.ChartVersion)
+		assert.Equal(t, chart.ChartName, body.ChartName)
+
+		chart.ChartVersion = "3.0.0"
+		json.NewEncoder(w).Encode(chart)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	definitionUpdateChartCmd.Flags().Set("chart-version", "3.0.0")
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
+		definitionUpdateChartCmd.Flags().Set("file", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, reqCount)
+	assert.Contains(t, buf.String(), "api-chart")
+}
+
+func TestDefinitionUpdateChartCmd_ValuesFromFile(t *testing.T) {
+	chart := sampleChartConfig()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(chart)
+			return
+		}
+		var body types.UpdateChartConfigRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "replicas: 3\nimage: app:v2\n", body.DefaultValues)
+
+		chart.DefaultValues = body.DefaultValues
+		json.NewEncoder(w).Encode(chart)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	valuesPath := filepath.Join(tmpDir, "values.yaml")
+	require.NoError(t, os.WriteFile(valuesPath, []byte("replicas: 3\nimage: app:v2\n"), 0644))
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	definitionUpdateChartCmd.Flags().Set("file", valuesPath)
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
+		definitionUpdateChartCmd.Flags().Set("file", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "api-chart")
+}
+
+func TestDefinitionUpdateChartCmd_DeployOrder(t *testing.T) {
+	chart := sampleChartConfig()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(chart)
+			return
+		}
+		var body types.UpdateChartConfigRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.NotNil(t, body.DeployOrder)
+		assert.Equal(t, 6, *body.DeployOrder)
+
+		json.NewEncoder(w).Encode(chart)
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	definitionUpdateChartCmd.Flags().Set("deploy-order", "6")
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
+		definitionUpdateChartCmd.Flags().Set("file", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+	require.NoError(t, err)
+}
+
+func TestDefinitionUpdateChartCmd_NoFlags(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called when no flags provided")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
+		definitionUpdateChartCmd.Flags().Set("file", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one of")
+}
+
+func TestDefinitionUpdateChartCmd_JSONOutput(t *testing.T) {
+	chart := sampleChartConfig()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(chart)
+			return
+		}
+		chart.ChartVersion = "3.0.0"
+		json.NewEncoder(w).Encode(chart)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+
+	definitionUpdateChartCmd.Flags().Set("chart-version", "3.0.0")
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
+		definitionUpdateChartCmd.Flags().Set("file", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+	require.NoError(t, err)
+
+	var result types.ChartConfig
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "1", result.ID)
+}
+
+func TestDefinitionUpdateChartCmd_QuietOutput(t *testing.T) {
+	chart := sampleChartConfig()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(chart)
+			return
+		}
+		json.NewEncoder(w).Encode(chart)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	definitionUpdateChartCmd.Flags().Set("chart-version", "3.0.0")
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
+		definitionUpdateChartCmd.Flags().Set("file", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", buf.String())
+}
+
+func TestDefinitionUpdateChartCmd_PathTraversal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called for path traversal")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	definitionUpdateChartCmd.Flags().Set("file", "../../../etc/passwd")
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("file", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "path")
 }
