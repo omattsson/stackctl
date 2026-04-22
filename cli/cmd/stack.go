@@ -18,7 +18,10 @@ const flagPageSize = "page-size"
 var stackCmd = &cobra.Command{
 	Use:   "stack",
 	Short: "Manage stack instances",
-	Long:  "Create, deploy, monitor, and manage stack instances.",
+	Long: `Create, deploy, monitor, and manage stack instances.
+
+Most commands accept a stack name or UUID as the argument. Purely numeric
+values (e.g. "42") are always treated as IDs, not names.`,
 }
 
 var stackListCmd = &cobra.Command{
@@ -113,22 +116,23 @@ Examples:
 }
 
 var stackGetCmd = &cobra.Command{
-	Use:   "get <id>",
+	Use:   "get <name|id>",
 	Short: "Show stack instance details",
 	Long: `Show detailed information about a stack instance.
 
 Examples:
-  stackctl stack get 42
-  stackctl stack get 42 -o json`,
+  stackctl stack get my-stack
+  stackctl stack get 550e8400-e29b-41d4-a716-446655440000
+  stackctl stack get my-stack -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -184,21 +188,22 @@ Examples:
 }
 
 var stackDeployCmd = &cobra.Command{
-	Use:   "deploy <id>",
+	Use:   "deploy <name|id>",
 	Short: "Deploy a stack instance",
 	Long: `Trigger a deployment for a stack instance.
 
 Examples:
-  stackctl stack deploy 42`,
+  stackctl stack deploy my-stack
+  stackctl stack deploy 550e8400-e29b-41d4-a716-446655440000`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -219,21 +224,22 @@ Examples:
 }
 
 var stackStopCmd = &cobra.Command{
-	Use:   "stop <id>",
+	Use:   "stop <name|id>",
 	Short: "Stop a stack instance",
 	Long: `Stop a running stack instance.
 
 Examples:
-  stackctl stack stop 42`,
+  stackctl stack stop my-stack
+  stackctl stack stop 550e8400-e29b-41d4-a716-446655440000`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -254,7 +260,7 @@ Examples:
 }
 
 var stackCleanCmd = &cobra.Command{
-	Use:   "clean <id>",
+	Use:   "clean <name|id>",
 	Short: "Undeploy and remove namespace for a stack instance",
 	Long: `Undeploy a stack instance and remove its namespace.
 
@@ -262,12 +268,17 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl stack clean 42
-  stackctl stack clean 42 --yes`,
+  stackctl stack clean my-stack
+  stackctl stack clean my-stack --yes`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -279,11 +290,6 @@ Examples:
 		if !confirmed {
 			printer.PrintMessage("Aborted.")
 			return nil
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
 		}
 
 		resp, err := c.CleanStack(id)
@@ -302,7 +308,7 @@ Examples:
 }
 
 var stackDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
+	Use:   "delete <name|id>",
 	Short: "Delete a stack instance",
 	Long: `Permanently delete a stack instance.
 
@@ -310,13 +316,14 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl stack delete 42
-  stackctl stack delete 42 --yes`,
+  stackctl stack delete my-stack
+  stackctl stack delete my-stack --yes`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return deleteByID(cmd, args,
 			"This will permanently delete stack %s. Continue? (y/n): ",
+			resolveStackID,
 			func(c *client.Client, id string) error { return c.DeleteStack(id) },
 			"Deleted stack %s",
 		)
@@ -324,22 +331,22 @@ Examples:
 }
 
 var stackStatusCmd = &cobra.Command{
-	Use:   "status <id>",
+	Use:   "status <name|id>",
 	Short: "Show pod status for a stack instance",
 	Long: `Show the current status and pod states for a stack instance.
 
 Examples:
-  stackctl stack status 42
-  stackctl stack status 42 -o json`,
+  stackctl stack status my-stack
+  stackctl stack status my-stack -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -386,22 +393,22 @@ Examples:
 }
 
 var stackLogsCmd = &cobra.Command{
-	Use:   "logs <id>",
+	Use:   "logs <name|id>",
 	Short: "Show latest deployment log for a stack instance",
 	Long: `Show the latest deployment log for a stack instance.
 
 Examples:
-  stackctl stack logs 42
-  stackctl stack logs 42 -o json`,
+  stackctl stack logs my-stack
+  stackctl stack logs my-stack -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -434,22 +441,22 @@ Examples:
 }
 
 var stackCloneCmd = &cobra.Command{
-	Use:   "clone <id>",
+	Use:   "clone <name|id>",
 	Short: "Clone a stack instance",
 	Long: `Clone a stack instance, creating a new instance with the same configuration.
 
 Examples:
-  stackctl stack clone 42
-  stackctl stack clone 42 -q`,
+  stackctl stack clone my-stack
+  stackctl stack clone my-stack -q`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -470,27 +477,27 @@ Examples:
 }
 
 var stackExtendCmd = &cobra.Command{
-	Use:   "extend <id>",
+	Use:   "extend <name|id>",
 	Short: "Extend the TTL of a stack instance",
 	Long: `Extend the time-to-live of a stack instance by the specified number of minutes.
 
 Examples:
-  stackctl stack extend 42 --minutes 60
-  stackctl stack extend 42 --minutes 120`,
+  stackctl stack extend my-stack --minutes 60
+  stackctl stack extend my-stack --minutes 120`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
-
 		minutes, _ := cmd.Flags().GetInt("minutes")
 		if minutes <= 0 {
 			return fmt.Errorf("--minutes must be a positive integer")
 		}
 
 		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -511,27 +518,27 @@ Examples:
 }
 
 var stackValuesCmd = &cobra.Command{
-	Use:   "values <id>",
+	Use:   "values <name|id>",
 	Short: "Show merged Helm values for a stack instance",
 	Long: `Show the fully merged Helm values for a stack instance.
 
 Nested values are displayed as JSON by default. Use -o yaml for YAML format.
 
 Examples:
-  stackctl stack values 1
-  stackctl stack values 1 --chart my-chart
-  stackctl stack values 1 -o json`,
+  stackctl stack values my-stack
+  stackctl stack values my-stack --chart my-chart
+  stackctl stack values my-stack -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		chart, _ := cmd.Flags().GetString("chart")
+
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		chart, _ := cmd.Flags().GetString("chart")
-
-		c, err := newClient()
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -558,32 +565,32 @@ Examples:
 }
 
 var stackCompareCmd = &cobra.Command{
-	Use:   "compare <id1> <id2>",
+	Use:   "compare <name|id> <name|id>",
 	Short: "Compare two stack instances",
 	Long: `Compare two stack instances and show their differences.
 
 Examples:
-  stackctl stack compare 42 43
-  stackctl stack compare 42 43 -o json`,
+  stackctl stack compare my-stack other-stack
+  stackctl stack compare my-stack other-stack -o json`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		leftID, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		rightID, err := parseID(args[1])
+
+		leftID, err := resolveStackID(c, args[0])
+		if err != nil {
+			return err
+		}
+		rightID, err := resolveStackID(c, args[1])
 		if err != nil {
 			return err
 		}
 
 		if leftID == rightID {
 			return fmt.Errorf("cannot compare an instance with itself (both IDs are %s)", leftID)
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
 		}
 
 		result, err := c.CompareInstances(leftID, rightID)
@@ -628,25 +635,25 @@ Examples:
 }
 
 var stackHistoryCmd = &cobra.Command{
-	Use:   "history <id>",
+	Use:   "history <name|id>",
 	Short: "Show deployment history for a stack instance",
 	Long: `Show the deployment history for a stack instance.
 
 Examples:
-  stackctl stack history 42
-  stackctl stack history 42 --limit 20
-  stackctl stack history 42 -o json`,
+  stackctl stack history my-stack
+  stackctl stack history my-stack --limit 20
+  stackctl stack history my-stack -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		limit, _ := cmd.Flags().GetInt("limit")
+
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		limit, _ := cmd.Flags().GetInt("limit")
-
-		c, err := newClient()
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -697,7 +704,7 @@ Examples:
 }
 
 var stackRollbackCmd = &cobra.Command{
-	Use:   "rollback <id>",
+	Use:   "rollback <name|id>",
 	Short: "Rollback a stack instance to the previous deployment",
 	Long: `Rollback all Helm releases in a stack instance to their previous revision.
 
@@ -707,13 +714,18 @@ confirmation unless --yes is specified.
 Optionally specify --target-log to rollback to a specific past deployment.
 
 Examples:
-  stackctl stack rollback 42
-  stackctl stack rollback 42 --yes
-  stackctl stack rollback 42 --target-log abc-123`,
+  stackctl stack rollback my-stack
+  stackctl stack rollback my-stack --yes
+  stackctl stack rollback my-stack --target-log abc-123`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -725,11 +737,6 @@ Examples:
 		if !confirmed {
 			printer.PrintMessage("Aborted.")
 			return nil
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
 		}
 
 		targetLog, _ := cmd.Flags().GetString("target-log")
@@ -751,26 +758,27 @@ Examples:
 }
 
 var stackHistoryValuesCmd = &cobra.Command{
-	Use:   "history-values <instance-id> <log-id>",
+	Use:   "history-values <name|id> <log-id>",
 	Short: "Show values used in a past deployment",
 	Long: `Show the merged Helm values that were used in a specific deployment.
 
 Examples:
-  stackctl stack history-values 42 abc-123
-  stackctl stack history-values 42 abc-123 -o yaml`,
+  stackctl stack history-values my-stack abc-123
+  stackctl stack history-values my-stack abc-123 -o yaml`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instanceID, err := parseID(args[0])
-		if err != nil {
-			return err
-		}
 		logID, err := parseID(args[1])
 		if err != nil {
 			return err
 		}
 
 		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}

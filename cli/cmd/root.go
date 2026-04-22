@@ -204,8 +204,13 @@ func confirmAction(cmd *cobra.Command, message string) (bool, error) {
 	return true, nil
 }
 
-func deleteByID(cmd *cobra.Command, args []string, promptFmt string, deleteFn func(*client.Client, string) error, successFmt string) error {
-	id, err := parseID(args[0])
+func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn func(*client.Client, string) (string, error), deleteFn func(*client.Client, string) error, successFmt string) error {
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+
+	id, err := resolveFn(c, args[0])
 	if err != nil {
 		return err
 	}
@@ -219,11 +224,6 @@ func deleteByID(cmd *cobra.Command, args []string, promptFmt string, deleteFn fu
 		return nil
 	}
 
-	c, err := newClient()
-	if err != nil {
-		return err
-	}
-
 	if err := deleteFn(c, id); err != nil {
 		return err
 	}
@@ -235,4 +235,8 @@ func deleteByID(cmd *cobra.Command, args []string, promptFmt string, deleteFn fu
 
 	printer.PrintMessage(successFmt, id)
 	return nil
+}
+
+func passthroughID(_ *client.Client, id string) (string, error) {
+	return parseID(id)
 }
