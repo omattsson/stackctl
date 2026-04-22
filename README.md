@@ -130,6 +130,8 @@ Configuration values are resolved in this order (highest priority first):
   <img src="assets/stackctl-stack.svg" alt="stackctl stack commands" width="700">
 </p>
 
+All stack commands accept a **name or ID** — e.g. `stackctl stack deploy my-app` or `stackctl stack deploy 42`.
+
 ```bash
 # List instances
 stackctl stack list
@@ -138,22 +140,27 @@ stackctl stack list --cluster 1 -o json
 
 # Create and deploy
 stackctl stack create --definition 1 --name my-app --branch feature/xyz --ttl 480
-stackctl stack deploy 42
+stackctl stack deploy my-app
 
 # Monitor
-stackctl stack status 42
-stackctl stack logs 42
+stackctl stack status my-app
+stackctl stack logs my-app
 
 # Lifecycle
-stackctl stack stop 42
-stackctl stack clean 42
-stackctl stack delete 42
+stackctl stack stop my-app
+stackctl stack clean my-app
+stackctl stack delete my-app
 
 # Clone an existing instance
-stackctl stack clone 42
+stackctl stack clone my-app
 
 # Extend TTL
-stackctl stack extend 42 --minutes 120
+stackctl stack extend my-app --minutes 120
+
+# Deployment history and rollback
+stackctl stack history my-app
+stackctl stack history-values my-app <log-id>
+stackctl stack rollback my-app --target <log-id>
 ```
 
 ### Templates
@@ -168,6 +175,9 @@ stackctl template quick-deploy 1
 
 # Or step by step
 stackctl template instantiate 1 --name my-stack --branch main
+
+# Delete a template
+stackctl template delete 1
 ```
 
 ### Stack Definitions
@@ -179,6 +189,20 @@ stackctl definition get 5
 
 # Create from file
 stackctl definition create --from-file definition.json
+
+# Update metadata
+stackctl definition update 5 --name new-name
+stackctl definition update 5 --branch develop
+stackctl definition update 5 --description "Updated description"
+
+# Update a chart config (GET-merge-PUT preserves unspecified fields)
+stackctl definition update-chart 5 1 --chart-version 0.3.0
+stackctl definition update-chart 5 1 --chart-path /charts/kvk-core
+stackctl definition update-chart 5 1 --deploy-order 6
+stackctl definition update-chart 5 1 --file values.yaml
+
+# Delete
+stackctl definition delete 5
 
 # Export / import
 stackctl definition export 5 > backup.json
@@ -212,15 +236,30 @@ stackctl stack compare 42 43
 
 ### Bulk Operations
 
+Bulk commands accept **names or IDs** (up to 50 at a time).
+
 ```bash
-# Bulk deploy/stop/clean/delete (up to 50 instances)
-stackctl bulk deploy --ids 1,2,3,4,5
-stackctl bulk deploy 1 2 3 4 5          # positional args also work
+# Bulk deploy/stop/clean/delete
+stackctl bulk deploy --ids my-app,other-app,3
+stackctl bulk deploy my-app other-app 3   # positional args also work
 stackctl bulk stop --ids 1,2,3
 stackctl bulk clean --ids 1,2,3
 
 # Piping workflows with quiet mode
 stackctl stack list --status stopped --mine -q | xargs stackctl bulk deploy
+```
+
+### Orphaned Namespaces
+
+Manage Kubernetes namespaces that have the stack-manager label but no matching database record.
+
+```bash
+# List orphaned namespaces
+stackctl orphaned list
+stackctl orphaned list -o json
+
+# Delete an orphaned namespace
+stackctl orphaned delete stack-old-namespace
 ```
 
 ### Scripting Examples
@@ -326,11 +365,13 @@ cli/
   cmd/                    # Cobra commands (one file per command group)
     config.go             # config set/get/list/use-context/current-context/delete-context
     login.go              # login, logout, whoami
-    stack.go              # stack lifecycle (13 subcommands)
-    template.go           # template list/get/instantiate/quick-deploy
-    definition.go         # definition CRUD + export/import
+    stack.go              # stack lifecycle (create, deploy, stop, clean, delete, clone, extend, status, logs, history, rollback, compare, values)
+    template.go           # template list/get/instantiate/quick-deploy/delete
+    definition.go         # definition CRUD + export/import + update-chart
     override.go           # value, branch, and quota overrides
-    bulk.go               # bulk deploy/stop/clean/delete
+    orphaned.go           # orphaned namespace list/delete
+    bulk.go               # bulk deploy/stop/clean/delete (names or IDs)
+    resolve.go            # name/ID resolution helpers
     git.go                # git branches/validate
     cluster.go            # cluster list/get
     completion.go         # shell completion (bash/zsh/fish/powershell)
