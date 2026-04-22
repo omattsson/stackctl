@@ -116,18 +116,12 @@ func startOverrideMockServer(t *testing.T, state *overrideMockState) *httptest.S
 					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid body"})
 					return
 				}
-				valBytes, err := json.Marshal(req.Values)
-				if err != nil {
-					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid values: " + err.Error()})
-					return
-				}
 				state.mu.Lock()
 				vo := &types.ValueOverride{
 					Base:       types.Base{ID: chartID, Version: "1"},
 					InstanceID: instanceID,
 					ChartID:    chartID,
-					Values:     string(valBytes),
+					Values:     req.Values,
 				}
 				state.valueOverrides[key] = vo
 				state.mu.Unlock()
@@ -323,7 +317,7 @@ func TestValueOverrideWorkflow_CRUDLifecycle(t *testing.T) {
 
 	// 2. Set a value override
 	vo, err := c.SetValueOverride("42", "1", &types.SetValueOverrideRequest{
-		Values: map[string]interface{}{"replicas": float64(5)},
+		Values: "replicas: 5\n",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "1", vo.ChartID)
@@ -343,7 +337,7 @@ func TestValueOverrideWorkflow_CRUDLifecycle(t *testing.T) {
 
 	// 5. Set another override on different chart
 	_, err = c.SetValueOverride("42", "2", &types.SetValueOverrideRequest{
-		Values: map[string]interface{}{"debug": true},
+		Values: "debug: true\n",
 	})
 	require.NoError(t, err)
 

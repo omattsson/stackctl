@@ -292,8 +292,9 @@ type QuotaOverride struct {
 }
 
 // SetValueOverrideRequest is the request body for setting value overrides.
+// The backend expects Values as a YAML string, not a structured map.
 type SetValueOverrideRequest struct {
-	Values map[string]interface{} `json:"values"`
+	Values string `json:"values"`
 }
 
 // SetBranchOverrideRequest is the request body for setting a branch override.
@@ -313,6 +314,22 @@ type SetQuotaOverrideRequest struct {
 type MergedValues struct {
 	InstanceID string                              `json:"instance_id" yaml:"instance_id"`
 	Charts     map[string]map[string]interface{} `json:"charts" yaml:"charts"`
+}
+
+// SharedValues represents cluster-level shared Helm values.
+type SharedValues struct {
+	Base
+	ClusterID string `json:"cluster_id" yaml:"cluster_id"`
+	Name      string `json:"name" yaml:"name"`
+	Values    string `json:"values" yaml:"values"`
+	Priority  int    `json:"priority" yaml:"priority"`
+}
+
+// SetSharedValuesRequest is the request body for creating/updating shared values.
+type SetSharedValuesRequest struct {
+	Name     string `json:"name"`
+	Values   string `json:"values"`
+	Priority int    `json:"priority,omitempty"`
 }
 
 // CompareResult represents the comparison between two stack instances.

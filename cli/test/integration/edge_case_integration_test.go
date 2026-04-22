@@ -205,7 +205,7 @@ func TestEdgeCase_InvalidInputValidation(t *testing.T) {
 				return
 			}
 			values, ok := body["values"]
-			if !ok || values == nil {
+			if !ok || values == nil || values == "" {
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "values are required"})
 				return
@@ -244,20 +244,19 @@ func TestEdgeCase_InvalidInputValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid stack ID")
 	})
 
-	t.Run("SetValueOverrideNilValues", func(t *testing.T) {
+	t.Run("SetValueOverrideEmptyValues", func(t *testing.T) {
 		t.Parallel()
 		_, err := c.SetValueOverride("1", "1", &types.SetValueOverrideRequest{
-			Values: nil,
+			Values: "",
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "values are required")
 	})
 
-	t.Run("SetValueOverrideEmptyValues", func(t *testing.T) {
+	t.Run("SetValueOverrideWithValues", func(t *testing.T) {
 		t.Parallel()
-		// Empty map (not nil) should succeed
 		override, err := c.SetValueOverride("1", "1", &types.SetValueOverrideRequest{
-			Values: map[string]interface{}{},
+			Values: "replicas: 1\n",
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "10", override.ID)

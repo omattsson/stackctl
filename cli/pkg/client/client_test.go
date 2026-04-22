@@ -1342,18 +1342,18 @@ func TestSetValueOverride_Success(t *testing.T) {
 
 		var body types.SetValueOverrideRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, float64(5), body.Values["replicas"])
+		assert.Contains(t, body.Values, "replicas")
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ValueOverride{
-			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Values: `{"replicas":5}`,
+			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Values: `replicas: 5`,
 		})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
 	override, err := c.SetValueOverride("42", "1", &types.SetValueOverrideRequest{
-		Values: map[string]interface{}{"replicas": float64(5)},
+		Values: "replicas: 5\n",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "1", override.ChartID)
@@ -1369,7 +1369,7 @@ func TestSetValueOverride_Error(t *testing.T) {
 
 	c := New(server.URL)
 	override, err := c.SetValueOverride("42", "1", &types.SetValueOverrideRequest{
-		Values: map[string]interface{}{"key": "val"},
+		Values: "key: val\n",
 	})
 	require.Error(t, err)
 	assert.Nil(t, override)
@@ -2127,6 +2127,112 @@ func TestGetClusterHealth_Error(t *testing.T) {
 	health, err := c.GetClusterHealth("1")
 	require.Error(t, err)
 	assert.Nil(t, health)
+}
+
+// ---------- shared values ----------
+
+func TestListSharedValues_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/shared-values", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.SharedValues{
+			{Base: types.Base{ID: "5"}, ClusterID: "1", Name: "defaults", Values: "key: val\n"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	sv, err := c.ListSharedValues("1")
+	require.NoError(t, err)
+	require.Len(t, sv, 1)
+	assert.Equal(t, "defaults", sv[0].Name)
+}
+
+func TestListSharedValues_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	sv, err := c.ListSharedValues("999")
+	require.Error(t, err)
+	assert.Nil(t, sv)
+}
+
+func TestSetSharedValues_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/shared-values", r.URL.Path)
+
+		var body types.SetSharedValuesRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "defaults", body.Name)
+		assert.Contains(t, body.Values, "storageClass")
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.SharedValues{
+			Base: types.Base{ID: "5"}, ClusterID: "1", Name: "defaults",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	sv, err := c.SetSharedValues("1", &types.SetSharedValuesRequest{
+		Name:   "defaults",
+		Values: "persistence:\n  storageClass: local-path\n",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "5", sv.ID)
+}
+
+func TestSetSharedValues_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "set failed"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	sv, err := c.SetSharedValues("1", &types.SetSharedValuesRequest{
+		Name: "test", Values: "key: val\n",
+	})
+	require.Error(t, err)
+	assert.Nil(t, sv)
+}
+
+func TestDeleteSharedValues_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/shared-values/5", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteSharedValues("1", "5")
+	require.NoError(t, err)
+}
+
+func TestDeleteSharedValues_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteSharedValues("1", "999")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }
 
 // ---------- malformed / empty response body ----------

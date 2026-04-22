@@ -153,8 +153,13 @@ Examples:
 			return err
 		}
 
+		yamlBytes, err := yaml.Marshal(values)
+		if err != nil {
+			return fmt.Errorf("serializing values to YAML: %w", err)
+		}
+
 		override, err := c.SetValueOverride(instanceID, chartID, &types.SetValueOverrideRequest{
-			Values: values,
+			Values: string(yamlBytes),
 		})
 		if err != nil {
 			return err

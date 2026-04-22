@@ -120,7 +120,7 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 
 		t.Log("Step 6: Set overrides")
 		_, err = c.SetValueOverride(instance.ID, chartID, &types.SetValueOverrideRequest{
-			Values: map[string]interface{}{"replicas": 2},
+			Values: "replicas: 2\n",
 		})
 		require.NoError(t, err, "set value override")
 
