@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -538,4 +539,111 @@ func TestTemplateInstantiateCmd_Forbidden(t *testing.T) {
 	err := templateInstantiateCmd.RunE(templateInstantiateCmd, []string{"10"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Permission denied")
+}
+
+// ---------- template delete ----------
+
+func TestTemplateDeleteCmd_WithYesFlag(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, "/api/v1/templates/10", r.URL.Path)
+		require.Equal(t, http.MethodDelete, r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	templateDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { templateDeleteCmd.Flags().Set("yes", "false") })
+
+	err := templateDeleteCmd.RunE(templateDeleteCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted template 10")
+}
+
+func TestTemplateDeleteCmd_WithConfirmation(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	templateDeleteCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		templateDeleteCmd.Flags().Set("yes", "false")
+		templateDeleteCmd.SetIn(nil)
+		templateDeleteCmd.SetErr(nil)
+	})
+
+	templateDeleteCmd.SetIn(strings.NewReader("y\n"))
+	templateDeleteCmd.SetErr(&bytes.Buffer{})
+
+	err := templateDeleteCmd.RunE(templateDeleteCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted template 10")
+}
+
+func TestTemplateDeleteCmd_Declined(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called when user declines")
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	templateDeleteCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		templateDeleteCmd.Flags().Set("yes", "false")
+		templateDeleteCmd.SetIn(nil)
+		templateDeleteCmd.SetErr(nil)
+	})
+
+	templateDeleteCmd.SetIn(strings.NewReader("n\n"))
+	templateDeleteCmd.SetErr(&bytes.Buffer{})
+
+	err := templateDeleteCmd.RunE(templateDeleteCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Aborted")
+}
+
+func TestTemplateDeleteCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	templateDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { templateDeleteCmd.Flags().Set("yes", "false") })
+
+	err := templateDeleteCmd.RunE(templateDeleteCmd, []string{"999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template not found")
+}
+
+func TestTemplateDeleteCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	templateDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { templateDeleteCmd.Flags().Set("yes", "false") })
+
+	err := templateDeleteCmd.RunE(templateDeleteCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Equal(t, "10\n", buf.String())
 }

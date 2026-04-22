@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
@@ -229,6 +230,29 @@ Examples:
 	},
 }
 
+var templateDeleteCmd = &cobra.Command{
+	Use:   "delete <id>",
+	Short: "Delete a stack template",
+	Long: `Permanently delete a stack template.
+
+This is a destructive operation. You will be prompted for confirmation
+unless --yes is specified.
+
+Examples:
+  stackctl template delete 1
+  stackctl template delete 1 --yes`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return deleteByID(cmd, args,
+			"This will permanently delete template %s. Continue? (y/n): ",
+			passthroughID,
+			func(c *client.Client, id string) error { return c.DeleteTemplate(id) },
+			"Deleted template %s",
+		)
+	},
+}
+
 func init() {
 	// template list flags
 	templateListCmd.Flags().Bool("published", false, "Show only published templates")
@@ -247,10 +271,14 @@ func init() {
 	templateQuickDeployCmd.Flags().String("cluster", "", "Target cluster ID")
 	_ = templateQuickDeployCmd.MarkFlagRequired("name")
 
+	// template delete flags
+	templateDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+
 	// Wire up subcommands
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateGetCmd)
 	templateCmd.AddCommand(templateInstantiateCmd)
 	templateCmd.AddCommand(templateQuickDeployCmd)
+	templateCmd.AddCommand(templateDeleteCmd)
 	rootCmd.AddCommand(templateCmd)
 }

@@ -189,6 +189,7 @@ var definitionUpdateCmd = &cobra.Command{
 
 Examples:
   stackctl definition update 1 --name new-name
+  stackctl definition update 1 --branch develop
   stackctl definition update 1 --from-file definition.json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
@@ -201,9 +202,10 @@ Examples:
 		fromFile, _ := cmd.Flags().GetString(flagFromFile)
 		name, _ := cmd.Flags().GetString("name")
 		description, _ := cmd.Flags().GetString("description")
+		branch, _ := cmd.Flags().GetString("branch")
 
-		if fromFile == "" && name == "" && description == "" {
-			return fmt.Errorf("at least one of --name, --description, or --from-file must be specified")
+		if fromFile == "" && name == "" && description == "" && branch == "" {
+			return fmt.Errorf("at least one of --name, --description, --branch, or --from-file must be specified")
 		}
 
 		var req types.UpdateDefinitionRequest
@@ -227,6 +229,9 @@ Examples:
 			}
 			if description != "" {
 				req.Description = description
+			}
+			if branch != "" {
+				req.DefaultBranch = branch
 			}
 		}
 
@@ -368,6 +373,116 @@ Examples:
 	},
 }
 
+var definitionUpdateChartCmd = &cobra.Command{
+	Use:   "update-chart <definition-id> <chart-id>",
+	Short: "Update a chart config within a definition",
+	Long: `Update a chart configuration's settings within a stack definition.
+
+The command fetches the current chart config and merges your changes,
+so unspecified fields are preserved.
+
+Examples:
+  stackctl definition update-chart 1 5 --chart-version 0.3.0
+  stackctl definition update-chart 1 5 --chart-path /charts/kvk-core
+  stackctl definition update-chart 1 5 --deploy-order 6
+  stackctl definition update-chart 1 5 --file values.yaml`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		defID, err := parseID(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid definition ID: %w", err)
+		}
+		chartID, err := parseID(args[1])
+		if err != nil {
+			return fmt.Errorf("invalid chart ID: %w", err)
+		}
+
+		chartPath, _ := cmd.Flags().GetString("chart-path")
+		chartVersion, _ := cmd.Flags().GetString("chart-version")
+		deployOrder, _ := cmd.Flags().GetInt("deploy-order")
+		valuesFile, _ := cmd.Flags().GetString("file")
+
+		if chartPath == "" && chartVersion == "" && deployOrder < 0 && valuesFile == "" {
+			return fmt.Errorf("at least one of --chart-path, --chart-version, --deploy-order, or --file must be specified")
+		}
+
+		if valuesFile != "" {
+			for _, segment := range strings.Split(filepath.ToSlash(valuesFile), "/") {
+				if segment == ".." {
+					return errors.New(msgPathTraversal)
+				}
+			}
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		current, err := c.GetDefinitionChart(defID, chartID)
+		if err != nil {
+			return fmt.Errorf("fetching current chart config: %w", err)
+		}
+
+		req := types.UpdateChartConfigRequest{
+			ChartName:     current.ChartName,
+			ChartPath:     current.RepoURL,
+			ChartVersion:  current.ChartVersion,
+			DefaultValues: current.DefaultValues,
+		}
+
+		if chartPath != "" {
+			req.ChartPath = chartPath
+		}
+		if chartVersion != "" {
+			req.ChartVersion = chartVersion
+		}
+		if deployOrder >= 0 {
+			req.DeployOrder = &deployOrder
+		}
+		if valuesFile != "" {
+			valuesFile = filepath.Clean(valuesFile)
+			data, err := os.ReadFile(valuesFile)
+			if err != nil {
+				return readFileErr(valuesFile, err)
+			}
+			req.DefaultValues = string(data)
+		}
+
+		updated, err := c.UpdateDefinitionChart(defID, chartID, &req)
+		if err != nil {
+			return err
+		}
+
+		return printChartConfig(updated)
+	},
+}
+
+func printChartConfig(ch *types.ChartConfig) error {
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, ch.ID)
+		return nil
+	}
+
+	switch printer.Format {
+	case output.FormatJSON:
+		return printer.PrintJSON(ch)
+	case output.FormatYAML:
+		return printer.PrintYAML(ch)
+	default:
+		fields := []output.KeyValue{
+			{Key: "ID", Value: ch.ID},
+			{Key: "Name", Value: ch.Name},
+			{Key: "Chart", Value: ch.ChartName},
+			{Key: "Repository", Value: ch.RepoURL},
+			{Key: "Version", Value: ch.ChartVersion},
+			{Key: "Release Name", Value: ch.ReleaseName},
+		}
+		return printer.PrintSingle(ch, fields)
+	}
+}
+
 // printDefinition prints a stack definition in the configured output format.
 func printDefinition(def *types.StackDefinition) error {
 	if printer.Quiet {
@@ -412,7 +527,14 @@ func init() {
 	// definition update flags
 	definitionUpdateCmd.Flags().String("name", "", "New definition name")
 	definitionUpdateCmd.Flags().String("description", "", "New definition description")
+	definitionUpdateCmd.Flags().String("branch", "", "New default branch")
 	definitionUpdateCmd.Flags().String(flagFromFile, "", "Update from JSON file")
+
+	// definition update-chart flags
+	definitionUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/kvk-core)")
+	definitionUpdateChartCmd.Flags().String("chart-version", "", "Chart version")
+	definitionUpdateChartCmd.Flags().Int("deploy-order", -1, "Deploy order (0+)")
+	definitionUpdateChartCmd.Flags().String("file", "", "File containing default values")
 
 	// definition delete flags
 	definitionDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
@@ -432,6 +554,7 @@ func init() {
 	definitionCmd.AddCommand(definitionDeleteCmd)
 	definitionCmd.AddCommand(definitionExportCmd)
 	definitionCmd.AddCommand(definitionImportCmd)
+	definitionCmd.AddCommand(definitionUpdateChartCmd)
 	rootCmd.AddCommand(definitionCmd)
 }
 

@@ -17,10 +17,12 @@ const defaultTimeout = 30 * time.Second
 const maxServerMessageLen = 256
 
 const (
-	pathDefinition     = "/api/v1/stack-definitions/%s"
-	pathOverride       = "/api/v1/stack-instances/%s/overrides/%s"
-	pathBranchOverride = "/api/v1/stack-instances/%s/branches/%s"
-	pathQuotaOverride  = "/api/v1/stack-instances/%s/quota-overrides"
+	pathDefinition      = "/api/v1/stack-definitions/%s"
+	pathDefinitionChart = "/api/v1/stack-definitions/%s/charts/%s"
+	pathTemplate        = "/api/v1/templates/%s"
+	pathOverride        = "/api/v1/stack-instances/%s/overrides/%s"
+	pathBranchOverride  = "/api/v1/stack-instances/%s/branches/%s"
+	pathQuotaOverride   = "/api/v1/stack-instances/%s/quota-overrides"
 )
 
 // Client is the HTTP client for the k8s-stack-manager API.
@@ -442,6 +444,46 @@ func (c *Client) QuickDeployTemplate(id string, req *types.QuickDeployRequest) (
 		return nil, err
 	}
 	return &instance, nil
+}
+
+// DeleteTemplate deletes a stack template by ID.
+func (c *Client) DeleteTemplate(id string) error {
+	return c.Delete(fmt.Sprintf(pathTemplate, id))
+}
+
+// ListOrphanedNamespaces returns namespaces that have the stack-manager label but no matching DB record.
+func (c *Client) ListOrphanedNamespaces() ([]types.OrphanedNamespace, error) {
+	var ns []types.OrphanedNamespace
+	err := c.Get("/api/v1/orphaned-namespaces", &ns)
+	if err != nil {
+		return nil, err
+	}
+	return ns, nil
+}
+
+// DeleteOrphanedNamespace removes an orphaned namespace.
+func (c *Client) DeleteOrphanedNamespace(namespace string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/orphaned-namespaces/%s", namespace))
+}
+
+// GetDefinitionChart returns a single chart config within a definition.
+func (c *Client) GetDefinitionChart(defID, chartID string) (*types.ChartConfig, error) {
+	var chart types.ChartConfig
+	err := c.Get(fmt.Sprintf(pathDefinitionChart, defID, chartID), &chart)
+	if err != nil {
+		return nil, err
+	}
+	return &chart, nil
+}
+
+// UpdateDefinitionChart updates a chart config within a definition.
+func (c *Client) UpdateDefinitionChart(defID, chartID string, req *types.UpdateChartConfigRequest) (*types.ChartConfig, error) {
+	var chart types.ChartConfig
+	err := c.Put(fmt.Sprintf(pathDefinitionChart, defID, chartID), req, &chart)
+	if err != nil {
+		return nil, err
+	}
+	return &chart, nil
 }
 
 // ListDefinitions returns a paginated list of stack definitions, filtered by query params.
