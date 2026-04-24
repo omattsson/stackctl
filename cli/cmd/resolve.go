@@ -52,3 +52,35 @@ func resolveStackID(c *client.Client, nameOrID string) (string, error) {
 		return "", fmt.Errorf("%s", msg)
 	}
 }
+
+func resolveDefinitionID(c *client.Client, nameOrID string) (string, error) {
+	nameOrID = strings.TrimSpace(nameOrID)
+	if nameOrID == "" {
+		return "", fmt.Errorf("definition name or ID must not be empty")
+	}
+
+	if looksLikeID(nameOrID) {
+		return nameOrID, nil
+	}
+
+	resp, err := c.ListDefinitions(map[string]string{"name": nameOrID})
+	if err != nil {
+		return "", fmt.Errorf("resolving definition name %q: %w", nameOrID, err)
+	}
+
+	switch len(resp.Data) {
+	case 0:
+		return "", fmt.Errorf("no definition found with name %q", nameOrID)
+	case 1:
+		if !strings.EqualFold(resp.Data[0].Name, nameOrID) {
+			return "", fmt.Errorf("no definition found with name %q", nameOrID)
+		}
+		return resp.Data[0].ID, nil
+	default:
+		msg := fmt.Sprintf("multiple definitions match name %q — use the ID instead:\n", nameOrID)
+		for _, d := range resp.Data {
+			msg += fmt.Sprintf("  %s  (owner: %s)\n", d.ID, d.Owner)
+		}
+		return "", fmt.Errorf("%s", msg)
+	}
+}

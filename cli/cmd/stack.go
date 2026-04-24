@@ -29,10 +29,13 @@ var stackListCmd = &cobra.Command{
 	Short: "List stack instances",
 	Long: `List stack instances with optional filtering.
 
+The --definition flag accepts either a definition name or ID.
+
 Examples:
   stackctl stack list
   stackctl stack list --mine
   stackctl stack list --status running --cluster 1
+  stackctl stack list --definition klaravik-dev
   stackctl stack list -o json
   stackctl stack list -q | xargs -I{} stackctl stack deploy {}`,
 	SilenceUsage: true,
@@ -58,7 +61,11 @@ Examples:
 			params["cluster_id"] = cluster
 		}
 		if def, _ := cmd.Flags().GetString("definition"); def != "" {
-			params["definition_id"] = def
+			defID, err := resolveDefinitionID(c, def)
+			if err != nil {
+				return err
+			}
+			params["definition_id"] = defID
 		}
 		if cmd.Flags().Changed("page") {
 			page, _ := cmd.Flags().GetInt("page")
@@ -151,18 +158,31 @@ var stackCreateCmd = &cobra.Command{
 	Short: "Create a new stack instance",
 	Long: `Create a new stack instance from a definition.
 
+The --definition flag accepts either a definition name or ID.
+
 Examples:
-  stackctl stack create --name my-stack --definition 1
-  stackctl stack create --name my-stack --definition 1 --branch feature/xyz --cluster 2 --ttl 120`,
+  stackctl stack create --name my-stack --definition klaravik-dev
+  stackctl stack create --name my-stack --definition e9af3b10-4633-436b-a131-975a3b598e3e
+  stackctl stack create --name my-stack --definition klaravik-dev --branch feature/xyz --cluster 2 --ttl 120`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
-		defID, _ := cmd.Flags().GetString("definition")
+		defNameOrID, _ := cmd.Flags().GetString("definition")
 		branch, _ := cmd.Flags().GetString("branch")
 		clusterID, _ := cmd.Flags().GetString("cluster")
 		ttl, _ := cmd.Flags().GetInt("ttl")
 		if ttl < 0 {
 			return fmt.Errorf("--ttl must be a non-negative integer (0 means no TTL)")
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		defID, err := resolveDefinitionID(c, defNameOrID)
+		if err != nil {
+			return err
 		}
 
 		req := &types.CreateStackRequest{
@@ -171,11 +191,6 @@ Examples:
 			Branch:            branch,
 			ClusterID:         clusterID,
 			TTLMinutes:        ttl,
-		}
-
-		c, err := newClient()
-		if err != nil {
-			return err
 		}
 
 		created, err := c.CreateStack(req)
@@ -810,14 +825,14 @@ func init() {
 	stackListCmd.Flags().String("owner", "", "Filter by owner")
 	stackListCmd.Flags().String("status", "", "Filter by status")
 	stackListCmd.Flags().String("cluster", "", "Filter by cluster ID")
-	stackListCmd.Flags().String("definition", "", "Filter by definition ID")
+	stackListCmd.Flags().String("definition", "", "Filter by definition name or ID")
 	stackListCmd.Flags().Int("page", 0, "Page number")
 	stackListCmd.Flags().Int(flagPageSize, 0, "Page size")
 	stackListCmd.MarkFlagsMutuallyExclusive("mine", "owner")
 
 	// stack create flags
 	stackCreateCmd.Flags().String("name", "", "Stack instance name (required)")
-	stackCreateCmd.Flags().String("definition", "", "Stack definition ID (required)")
+	stackCreateCmd.Flags().String("definition", "", "Stack definition name or ID (required)")
 	stackCreateCmd.Flags().String("branch", "", "Git branch")
 	stackCreateCmd.Flags().String("cluster", "", "Target cluster ID")
 	stackCreateCmd.Flags().Int("ttl", 0, "Time to live in minutes")

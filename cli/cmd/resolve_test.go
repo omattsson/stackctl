@@ -175,3 +175,142 @@ func TestPassthroughID(t *testing.T) {
 	_, err = passthroughID(nil, "")
 	assert.Error(t, err)
 }
+
+func TestResolveDefinitionID_UUID(t *testing.T) {
+	t.Parallel()
+	c := client.New("http://unused")
+	id, err := resolveDefinitionID(c, "550e8400-e29b-41d4-a716-446655440000")
+	require.NoError(t, err)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", id)
+}
+
+func TestResolveDefinitionID_NumericID(t *testing.T) {
+	t.Parallel()
+	c := client.New("http://unused")
+	id, err := resolveDefinitionID(c, "42")
+	require.NoError(t, err)
+	assert.Equal(t, "42", id)
+}
+
+func TestResolveDefinitionID_Empty(t *testing.T) {
+	t.Parallel()
+	c := client.New("http://unused")
+	_, err := resolveDefinitionID(c, "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
+
+func TestResolveDefinitionID_Whitespace(t *testing.T) {
+	t.Parallel()
+	c := client.New("http://unused")
+	_, err := resolveDefinitionID(c, "   ")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
+
+func TestResolveDefinitionID_NameWithWhitespace(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "klaravik-dev", r.URL.Query().Get("name"))
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
+			Data: []types.StackDefinition{
+				{Base: types.Base{ID: "def-123"}, Name: "klaravik-dev"},
+			},
+			Total: 1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	id, err := resolveDefinitionID(c, "  klaravik-dev  ")
+	require.NoError(t, err)
+	assert.Equal(t, "def-123", id)
+}
+
+func TestResolveDefinitionID_NameSingleMatch(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/stack-definitions", r.URL.Path)
+		assert.Equal(t, "klaravik-dev", r.URL.Query().Get("name"))
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
+			Data: []types.StackDefinition{
+				{Base: types.Base{ID: "def-123"}, Name: "klaravik-dev", Owner: "alice"},
+			},
+			Total: 1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	id, err := resolveDefinitionID(c, "klaravik-dev")
+	require.NoError(t, err)
+	assert.Equal(t, "def-123", id)
+}
+
+func TestResolveDefinitionID_NameNoMatch(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
+			Data: []types.StackDefinition{}, Total: 0, Page: 1, PageSize: 0,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	_, err := resolveDefinitionID(c, "nonexistent")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `no definition found with name "nonexistent"`)
+}
+
+func TestResolveDefinitionID_NameMultipleMatches(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
+			Data: []types.StackDefinition{
+				{Base: types.Base{ID: "def-1"}, Name: "klaravik-dev", Owner: "alice"},
+				{Base: types.Base{ID: "def-2"}, Name: "klaravik-dev", Owner: "bob"},
+			},
+			Total: 2, Page: 1, PageSize: 2,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	_, err := resolveDefinitionID(c, "klaravik-dev")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple definitions match")
+	assert.Contains(t, err.Error(), "def-1")
+	assert.Contains(t, err.Error(), "def-2")
+}
+
+func TestResolveDefinitionID_NameMismatch(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
+			Data: []types.StackDefinition{
+				{Base: types.Base{ID: "def-123"}, Name: "other-def", Owner: "alice"},
+			},
+			Total: 1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	_, err := resolveDefinitionID(c, "klaravik-dev")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `no definition found with name "klaravik-dev"`)
+}
+
+func TestResolveDefinitionID_APIError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"internal server error"}`))
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	_, err := resolveDefinitionID(c, "klaravik-dev")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving definition name")
+}
