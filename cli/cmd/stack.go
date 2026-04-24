@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"strings"
+	"os"
+	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
@@ -12,6 +15,29 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
 )
+
+// followLogs streams deployment logs via WebSocket until a terminal status is
+// received. Returns an error if the deployment ended in error status.
+func followLogs(c *client.Client, instanceID string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	result, err := c.StreamDeploymentLogs(ctx, instanceID, os.Stdout)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+
+	if result.Status == "error" {
+		if result.ErrorMessage != "" {
+			return fmt.Errorf("deployment failed: %s", result.ErrorMessage)
+		}
+		return fmt.Errorf("deployment failed")
+	}
+	return nil
+}
 
 const flagPageSize = "page-size"
 
@@ -207,8 +233,11 @@ var stackDeployCmd = &cobra.Command{
 	Short: "Deploy a stack instance",
 	Long: `Trigger a deployment for a stack instance.
 
+Use --follow to stream deployment logs in real-time until completion.
+
 Examples:
   stackctl stack deploy my-stack
+  stackctl stack deploy my-stack --follow
   stackctl stack deploy 550e8400-e29b-41d4-a716-446655440000`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
@@ -228,6 +257,11 @@ Examples:
 			return err
 		}
 
+		follow, _ := cmd.Flags().GetBool("follow")
+		if follow {
+			return followLogs(c, id)
+		}
+
 		if printer.Quiet {
 			fmt.Fprintln(printer.Writer, resp.LogID)
 			return nil
@@ -243,9 +277,11 @@ var stackStopCmd = &cobra.Command{
 	Short: "Stop a stack instance",
 	Long: `Stop a running stack instance.
 
+Use --follow to stream logs in real-time until completion.
+
 Examples:
   stackctl stack stop my-stack
-  stackctl stack stop 550e8400-e29b-41d4-a716-446655440000`,
+  stackctl stack stop my-stack --follow`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -264,6 +300,11 @@ Examples:
 			return err
 		}
 
+		follow, _ := cmd.Flags().GetBool("follow")
+		if follow {
+			return followLogs(c, id)
+		}
+
 		if printer.Quiet {
 			fmt.Fprintln(printer.Writer, resp.LogID)
 			return nil
@@ -280,11 +321,12 @@ var stackCleanCmd = &cobra.Command{
 	Long: `Undeploy a stack instance and remove its namespace.
 
 This is a destructive operation. You will be prompted for confirmation
-unless --yes is specified.
+unless --yes is specified. Use --follow to stream logs in real-time.
 
 Examples:
   stackctl stack clean my-stack
-  stackctl stack clean my-stack --yes`,
+  stackctl stack clean my-stack --yes
+  stackctl stack clean my-stack --yes --follow`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -310,6 +352,11 @@ Examples:
 		resp, err := c.CleanStack(id)
 		if err != nil {
 			return err
+		}
+
+		follow, _ := cmd.Flags().GetBool("follow")
+		if follow {
+			return followLogs(c, id)
 		}
 
 		if printer.Quiet {
@@ -412,8 +459,11 @@ var stackLogsCmd = &cobra.Command{
 	Short: "Show latest deployment log for a stack instance",
 	Long: `Show the latest deployment log for a stack instance.
 
+Use --follow to stream logs from an active deployment in real-time.
+
 Examples:
   stackctl stack logs my-stack
+  stackctl stack logs my-stack --follow
   stackctl stack logs my-stack -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
@@ -426,6 +476,11 @@ Examples:
 		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
+		}
+
+		follow, _ := cmd.Flags().GetBool("follow")
+		if follow {
+			return followLogs(c, id)
 		}
 
 		log, err := c.GetStackLogs(id)
@@ -724,13 +779,13 @@ var stackRollbackCmd = &cobra.Command{
 	Long: `Rollback all Helm releases in a stack instance to their previous revision.
 
 This is a potentially disruptive operation. You will be prompted for
-confirmation unless --yes is specified.
+confirmation unless --yes is specified. Use --follow to stream logs in real-time.
 
 Optionally specify --target-log to rollback to a specific past deployment.
 
 Examples:
   stackctl stack rollback my-stack
-  stackctl stack rollback my-stack --yes
+  stackctl stack rollback my-stack --yes --follow
   stackctl stack rollback my-stack --target-log abc-123`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
@@ -760,6 +815,11 @@ Examples:
 		resp, err := c.RollbackStack(id, req)
 		if err != nil {
 			return err
+		}
+
+		follow, _ := cmd.Flags().GetBool("follow")
+		if follow {
+			return followLogs(c, id)
 		}
 
 		if printer.Quiet {
@@ -838,6 +898,13 @@ func init() {
 	stackCreateCmd.Flags().Int("ttl", 0, "Time to live in minutes")
 	_ = stackCreateCmd.MarkFlagRequired("name")
 	_ = stackCreateCmd.MarkFlagRequired("definition")
+
+	// --follow flags
+	stackDeployCmd.Flags().BoolP("follow", "f", false, "Stream deployment logs until completion")
+	stackStopCmd.Flags().BoolP("follow", "f", false, "Stream logs until completion")
+	stackCleanCmd.Flags().BoolP("follow", "f", false, "Stream logs until completion")
+	stackLogsCmd.Flags().BoolP("follow", "f", false, "Stream logs from active deployment")
+	stackRollbackCmd.Flags().BoolP("follow", "f", false, "Stream logs until completion")
 
 	// stack clean flags
 	stackCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")

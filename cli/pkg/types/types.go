@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Base fields shared by all API resources.
 type Base struct {
@@ -330,6 +333,33 @@ type SetSharedValuesRequest struct {
 	Name     string `json:"name"`
 	Values   string `json:"values"`
 	Priority int    `json:"priority,omitempty"`
+}
+
+// WSMessage is the envelope for all WebSocket messages.
+type WSMessage struct {
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"payload"`
+}
+
+// WSDeploymentLog is the payload for "deployment.log" WebSocket messages.
+type WSDeploymentLog struct {
+	InstanceID string `json:"instance_id"`
+	LogID      string `json:"log_id"`
+	Line       string `json:"line"`
+}
+
+// WSDeploymentStatus is the payload for "deployment.status" WebSocket messages.
+type WSDeploymentStatus struct {
+	InstanceID   string `json:"instance_id"`
+	Status       string `json:"status"`
+	LogID        string `json:"log_id"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// StreamResult is the outcome of a WebSocket log-streaming session.
+type StreamResult struct {
+	Status       string
+	ErrorMessage string
 }
 
 // CompareResult represents the comparison between two stack instances.
