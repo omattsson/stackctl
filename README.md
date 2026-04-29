@@ -8,19 +8,16 @@ Command-line interface for [K8s Stack Manager](https://github.com/omattsson/k8s-
 
 ## Installation
 
-### From source
+### Quick install (Linux / macOS)
 
 ```bash
-git clone https://github.com/omattsson/stackctl.git
-cd stackctl/cli
-go build -o bin/stackctl .
-sudo cp bin/stackctl /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/omattsson/stackctl/main/install.sh | sudo bash
 ```
 
-### Go install
+### Homebrew (macOS / Linux)
 
 ```bash
-go install github.com/omattsson/stackctl/cli@latest
+brew install omattsson/tap/stackctl
 ```
 
 ### From release binaries
@@ -28,8 +25,17 @@ go install github.com/omattsson/stackctl/cli@latest
 Download the latest binary for your platform from [Releases](https://github.com/omattsson/stackctl/releases), then:
 
 ```bash
-chmod +x stackctl-*
-sudo mv stackctl-* /usr/local/bin/stackctl
+tar -xzf stackctl_*.tar.gz
+sudo install -m 755 stackctl /usr/local/bin/stackctl
+```
+
+### From source
+
+```bash
+git clone https://github.com/omattsson/stackctl.git
+cd stackctl/cli
+go build -o bin/stackctl .
+sudo cp bin/stackctl /usr/local/bin/
 ```
 
 ## Quick Start
