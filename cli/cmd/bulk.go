@@ -42,6 +42,10 @@ Examples:
 			return err
 		}
 
+		if isDryRun(cmd, "Would deploy %d stacks: %s", len(ids), strings.Join(ids, ", ")) {
+			return nil
+		}
+
 		resp, err := c.BulkDeploy(ids)
 		if err != nil {
 			return err
@@ -73,6 +77,10 @@ Examples:
 		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
+		}
+
+		if isDryRun(cmd, "Would stop %d stacks: %s", len(ids), strings.Join(ids, ", ")) {
+			return nil
 		}
 
 		resp, err := c.BulkStop(ids)
@@ -108,6 +116,10 @@ Examples:
 		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
+		}
+
+		if isDryRun(cmd, "Would clean %d stacks: %s", len(ids), strings.Join(ids, ", ")) {
+			return nil
 		}
 
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will clean %d stack instances. Continue? (y/n): ", len(ids)))
@@ -154,6 +166,10 @@ Examples:
 			return err
 		}
 
+		if isDryRun(cmd, "Would delete %d stacks: %s", len(ids), strings.Join(ids, ", ")) {
+			return nil
+		}
+
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d stack instances. Continue? (y/n): ", len(ids)))
 		if err != nil {
 			return err
@@ -174,14 +190,18 @@ Examples:
 
 func init() {
 	bulkDeployCmd.Flags().String("ids", "", flagDescIDs)
+	bulkDeployCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	bulkStopCmd.Flags().String("ids", "", flagDescIDs)
+	bulkStopCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	bulkCleanCmd.Flags().String("ids", "", flagDescIDs)
 	bulkCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	bulkCleanCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	bulkDeleteCmd.Flags().String("ids", "", flagDescIDs)
 	bulkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	bulkDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	bulkCmd.AddCommand(bulkDeployCmd)
 	bulkCmd.AddCommand(bulkStopCmd)

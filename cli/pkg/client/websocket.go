@@ -22,7 +22,7 @@ var terminalStatuses = map[string]bool{
 // StreamDeploymentLogs connects to the backend WebSocket and streams deployment
 // log lines for the given instance to w. It blocks until a terminal status is
 // received, the context is cancelled, or the connection drops.
-func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w io.Writer) (*types.StreamResult, error) {
+func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w io.Writer, warnWriter io.Writer) (*types.StreamResult, error) {
 	wsURL, err := c.websocketURL("/ws")
 	if err != nil {
 		return nil, err
@@ -41,6 +41,8 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 			dialer = &websocket.Dialer{
 				TLSClientConfig: t.TLSClientConfig,
 			}
+		} else if warnWriter != nil {
+			fmt.Fprintln(warnWriter, "Warning: custom HTTP transport detected; WebSocket TLS config may not be applied")
 		}
 	}
 
@@ -85,6 +87,9 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 
 		var msg types.WSMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
+			if warnWriter != nil {
+				fmt.Fprintf(warnWriter, "Warning: skipping malformed WebSocket message: %v\n", err)
+			}
 			continue
 		}
 
@@ -92,6 +97,9 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 		case "deployment.log":
 			var logLine types.WSDeploymentLog
 			if err := json.Unmarshal(msg.Data, &logLine); err != nil {
+				if warnWriter != nil {
+					fmt.Fprintf(warnWriter, "Warning: skipping malformed log payload: %v\n", err)
+				}
 				continue
 			}
 			if logLine.InstanceID != instanceID {
@@ -102,6 +110,9 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 		case "deployment.status":
 			var status types.WSDeploymentStatus
 			if err := json.Unmarshal(msg.Data, &status); err != nil {
+				if warnWriter != nil {
+					fmt.Fprintf(warnWriter, "Warning: skipping malformed status payload: %v\n", err)
+				}
 				continue
 			}
 			if status.InstanceID != instanceID {

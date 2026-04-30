@@ -224,3 +224,41 @@ func TestRegisterPlugins_RunViaCobraRouting(t *testing.T) {
 	assert.Contains(t, string(contents), "--hello=world")
 	assert.Contains(t, string(contents), "posarg")
 }
+
+// ---------- pluginEnv ----------
+
+func TestPluginEnv_PassesDebugFlag(t *testing.T) {
+	t.Parallel()
+	root := &cobra.Command{Use: "stackctl"}
+	root.PersistentFlags().Bool("debug", false, "")
+	require.NoError(t, root.PersistentFlags().Set("debug", "true"))
+
+	env := pluginEnv(root)
+	found := false
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "STACKCTL_DEBUG=") {
+			assert.Equal(t, "STACKCTL_DEBUG=1", kv)
+			found = true
+		}
+	}
+	assert.True(t, found, "STACKCTL_DEBUG should be set when --debug flag is changed")
+}
+
+func TestPluginEnv_OmitsDebugWhenNotChanged(t *testing.T) {
+	t.Parallel()
+	root := &cobra.Command{Use: "stackctl"}
+	root.PersistentFlags().Bool("debug", false, "")
+
+	env := pluginEnv(root)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "STACKCTL_DEBUG=") {
+			t.Fatal("STACKCTL_DEBUG should not be set when --debug flag is not changed")
+		}
+	}
+}
+
+func TestPluginEnv_NilCommand(t *testing.T) {
+	t.Parallel()
+	env := pluginEnv(nil)
+	assert.NotEmpty(t, env)
+}

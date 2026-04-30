@@ -75,7 +75,7 @@ func TestStreamDeploymentLogs_Success(t *testing.T) {
 
 	c := New(server.URL)
 	var buf bytes.Buffer
-	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, "running", result.Status)
@@ -98,7 +98,7 @@ func TestStreamDeploymentLogs_ErrorStatus(t *testing.T) {
 
 	c := New(server.URL)
 	var buf bytes.Buffer
-	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, "error", result.Status)
@@ -127,7 +127,7 @@ func TestStreamDeploymentLogs_FiltersOtherInstances(t *testing.T) {
 
 	c := New(server.URL)
 	var buf bytes.Buffer
-	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, "stopped", result.Status)
@@ -156,7 +156,7 @@ func TestStreamDeploymentLogs_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_, err := c.StreamDeploymentLogs(ctx, "42", &buf)
+	_, err := c.StreamDeploymentLogs(ctx, "42", &buf, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -179,7 +179,7 @@ func TestStreamDeploymentLogs_AuthHeaders(t *testing.T) {
 	c := New(server.URL)
 	c.Token = "my-jwt-token"
 	var buf bytes.Buffer
-	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer my-jwt-token", capturedHeader.Get("Authorization"))
 }
@@ -203,7 +203,7 @@ func TestStreamDeploymentLogs_APIKeyAuth(t *testing.T) {
 	c.APIKey = "sk_test_123"
 	c.Token = "should-be-ignored"
 	var buf bytes.Buffer
-	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "sk_test_123", capturedHeader.Get("X-API-Key"))
 	assert.Empty(t, capturedHeader.Get("Authorization"))
@@ -226,7 +226,7 @@ func TestStreamDeploymentLogs_SkipsMalformedMessages(t *testing.T) {
 
 	c := New(server.URL)
 	var buf bytes.Buffer
-	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "running", result.Status)
 	assert.Equal(t, "Valid line\n", buf.String())
@@ -244,7 +244,7 @@ func TestStreamDeploymentLogs_DraftTerminal(t *testing.T) {
 
 	c := New(server.URL)
 	var buf bytes.Buffer
-	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "draft", result.Status)
 }
@@ -267,7 +267,7 @@ func TestStreamDeploymentLogs_NonTerminalStatusIgnored(t *testing.T) {
 
 	c := New(server.URL)
 	var buf bytes.Buffer
-	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "running", result.Status)
 	assert.Contains(t, buf.String(), "Still going...")
@@ -277,7 +277,7 @@ func TestStreamDeploymentLogs_ConnectionError(t *testing.T) {
 	t.Parallel()
 	c := New("http://localhost:1")
 	var buf bytes.Buffer
-	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "connecting to WebSocket")
 }
@@ -286,7 +286,7 @@ func TestStreamDeploymentLogs_BadScheme(t *testing.T) {
 	t.Parallel()
 	c := &Client{BaseURL: "ftp://example.com"}
 	var buf bytes.Buffer
-	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf)
+	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported URL scheme")
 }
@@ -326,4 +326,50 @@ func TestWebsocketURL_StripTrailingSlash(t *testing.T) {
 	got, err := c.websocketURL("/ws")
 	require.NoError(t, err)
 	assert.False(t, strings.Contains(got, "//ws"))
+}
+
+func TestStreamDeploymentLogs_MalformedMessageWarning(t *testing.T) {
+	t.Parallel()
+	server := wsServer(t, func(conn *websocket.Conn) {
+		readSubscribe(t, conn, "42")
+		conn.WriteMessage(websocket.TextMessage, []byte(`not json`))
+		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"deployment.log","payload":"bad"}`))
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{
+			InstanceID: "42", Status: "running", LogID: "log-1",
+		})
+	})
+	defer server.Close()
+
+	c := New(server.URL)
+	var buf, warnBuf bytes.Buffer
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, &warnBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "running", result.Status)
+	assert.Contains(t, warnBuf.String(), "Warning: skipping malformed WebSocket message")
+	assert.Contains(t, warnBuf.String(), "Warning: skipping malformed log payload")
+}
+
+type customTransport struct{}
+
+func (t *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+func TestStreamDeploymentLogs_CustomTransportWarning(t *testing.T) {
+	t.Parallel()
+	server := wsServer(t, func(conn *websocket.Conn) {
+		readSubscribe(t, conn, "42")
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{
+			InstanceID: "42", Status: "running", LogID: "log-1",
+		})
+	})
+	defer server.Close()
+
+	c := New(server.URL)
+	c.HTTPClient.Transport = &customTransport{}
+	var buf, warnBuf bytes.Buffer
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, &warnBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "running", result.Status)
+	assert.Contains(t, warnBuf.String(), "Warning: custom HTTP transport detected")
 }

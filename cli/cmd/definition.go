@@ -538,6 +538,7 @@ func init() {
 
 	// definition delete flags
 	definitionDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	definitionDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	// definition export flags
 	definitionExportCmd.Flags().String("output-file", "", "Write export to file instead of stdout")

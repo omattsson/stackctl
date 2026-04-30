@@ -273,6 +273,7 @@ func init() {
 
 	// template delete flags
 	templateDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	templateDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	// Wire up subcommands
 	templateCmd.AddCommand(templateListCmd)

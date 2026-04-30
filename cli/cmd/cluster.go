@@ -358,6 +358,10 @@ Examples:
 			return err
 		}
 
+		if isDryRun(cmd, "Would delete shared values %s from cluster %s", svID, clusterID) {
+			return nil
+		}
+
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete shared values %s from cluster %s. Continue? (y/n): ", svID, clusterID))
 		if err != nil {
 			return err
@@ -396,6 +400,7 @@ func init() {
 
 	// shared-values delete flags
 	clusterSharedValuesDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
+	clusterSharedValuesDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	// Wire up shared-values subcommands
 	clusterSharedValuesCmd.AddCommand(clusterSharedValuesListCmd)
