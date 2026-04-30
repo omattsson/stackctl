@@ -23,6 +23,7 @@ var (
 	flagAPIURL   string
 	flagAPIKey   string
 	flagInsecure bool
+	flagDebug    bool
 
 	// Loaded at runtime
 	cfg     *config.Config
@@ -82,6 +83,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagAPIURL, "api-url", "", "API server URL (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", "", "API key (overrides config)")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Skip TLS certificate verification (use with caution)")
+	rootCmd.PersistentFlags().BoolVar(&flagDebug, "debug", false, "Log HTTP requests and responses to stderr")
 }
 
 // Execute runs the root command.
@@ -103,6 +105,12 @@ func newClient() (*client.Client, error) {
 
 	c := client.New(apiURL)
 
+	// Debug: flag > env
+	if flagDebug || os.Getenv("STACKCTL_DEBUG") == "1" {
+		c.Debug = true
+		c.DebugWriter = os.Stderr
+	}
+
 	// API key: flag > env > config
 	apiKey := flagAPIKey
 	if apiKey == "" {
@@ -117,11 +125,14 @@ func newClient() (*client.Client, error) {
 
 	// JWT token from stored token file (only if no API key)
 	if c.APIKey == "" {
-		token, err := loadToken()
+		token, warning, err := loadToken()
 		if err != nil && !flagQuiet {
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		}
 		c.Token = token
+		if warning != "" && !flagQuiet {
+			fmt.Fprintln(os.Stderr, warning)
+		}
 	}
 
 	return c, nil
@@ -215,6 +226,10 @@ func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn f
 		return err
 	}
 
+	if isDryRun(cmd, "Would delete %s", id) {
+		return nil
+	}
+
 	confirmed, err := confirmAction(cmd, fmt.Sprintf(promptFmt, id))
 	if err != nil {
 		return err
@@ -235,6 +250,15 @@ func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn f
 
 	printer.PrintMessage(successFmt, id)
 	return nil
+}
+
+func isDryRun(cmd *cobra.Command, format string, args ...interface{}) bool {
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	if dryRun {
+		printer.PrintMessage(format, args...)
+		return true
+	}
+	return false
 }
 
 func passthroughID(_ *client.Client, id string) (string, error) {

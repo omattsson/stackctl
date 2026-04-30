@@ -60,36 +60,47 @@ func saveToken(token, username string, expiresAt time.Time) error {
 }
 
 // loadToken reads the JWT token for the current context.
-// Returns empty string and nil error if no token exists.
-// Returns an error if the token is expired or the file cannot be read.
-func loadToken() (string, error) {
+// Returns the token, an optional expiry warning, and any error.
+// Returns empty strings and nil error if no token exists.
+func loadToken() (token string, warning string, err error) {
 	if cfg.CurrentContext == "" {
-		return "", nil
+		return "", "", nil
 	}
 
 	path, err := config.TokenPath(cfg.CurrentContext)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil
+			return "", "", nil
 		}
-		return "", fmt.Errorf("reading token file: %w", err)
+		return "", "", fmt.Errorf("reading token file: %w", err)
 	}
 
 	var t storedToken
 	if err := json.Unmarshal(data, &t); err != nil {
-		return "", fmt.Errorf("parsing token file: %w", err)
+		return "", "", fmt.Errorf("parsing token file: %w", err)
 	}
 
-	if !t.ExpiresAt.IsZero() && time.Now().After(t.ExpiresAt) {
-		return "", fmt.Errorf("token expired. Run 'stackctl login' to re-authenticate")
+	if !t.ExpiresAt.IsZero() {
+		if time.Now().After(t.ExpiresAt) {
+			return "", "", fmt.Errorf("token expired. Run 'stackctl login' to re-authenticate")
+		}
+		remaining := time.Until(t.ExpiresAt)
+		if remaining < 5*time.Minute {
+			mins := int(remaining.Minutes()) + 1
+			unit := "minutes"
+			if mins == 1 {
+				unit = "minute"
+			}
+			warning = fmt.Sprintf("Warning: token expires in %d %s. Run 'stackctl login' to refresh.", mins, unit)
+		}
 	}
 
-	return t.Token, nil
+	return t.Token, warning, nil
 }
 
 // deleteToken removes the token file for the current context.

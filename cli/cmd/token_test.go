@@ -64,9 +64,10 @@ func TestLoadToken_Valid(t *testing.T) {
 	data, _ := json.Marshal(stored)
 	require.NoError(t, os.WriteFile(filepath.Join(tokenDir, "test.json"), data, 0600))
 
-	token, err := loadToken()
+	token, warning, err := loadToken()
 	require.NoError(t, err)
 	assert.Equal(t, "valid-jwt", token)
+	assert.Empty(t, warning)
 }
 
 func TestLoadToken_Expired(t *testing.T) {
@@ -84,7 +85,7 @@ func TestLoadToken_Expired(t *testing.T) {
 	data, _ := json.Marshal(stored)
 	require.NoError(t, os.WriteFile(filepath.Join(tokenDir, "test.json"), data, 0600))
 
-	_, err := loadToken()
+	_, _, err := loadToken()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "token expired")
 }
@@ -95,7 +96,7 @@ func TestLoadToken_NoFile(t *testing.T) {
 
 	cfg = &config.Config{CurrentContext: "test", Contexts: map[string]*config.Context{"test": {}}}
 
-	token, err := loadToken()
+	token, _, err := loadToken()
 	require.NoError(t, err)
 	assert.Empty(t, token)
 }
@@ -103,7 +104,7 @@ func TestLoadToken_NoFile(t *testing.T) {
 func TestLoadToken_NoCurrentContext(t *testing.T) {
 	cfg = &config.Config{Contexts: map[string]*config.Context{}}
 
-	token, err := loadToken()
+	token, _, err := loadToken()
 	require.NoError(t, err)
 	assert.Empty(t, token)
 }
@@ -118,7 +119,7 @@ func TestLoadToken_InvalidJSON(t *testing.T) {
 	require.NoError(t, os.MkdirAll(tokenDir, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(tokenDir, "test.json"), []byte("not json"), 0600))
 
-	_, err := loadToken()
+	_, _, err := loadToken()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "parsing token file")
 }
@@ -138,9 +139,10 @@ func TestLoadToken_ZeroExpiry(t *testing.T) {
 	data, _ := json.Marshal(stored)
 	require.NoError(t, os.WriteFile(filepath.Join(tokenDir, "test.json"), data, 0600))
 
-	token, err := loadToken()
+	token, warning, err := loadToken()
 	require.NoError(t, err)
 	assert.Equal(t, "no-expiry-jwt", token)
+	assert.Empty(t, warning)
 }
 
 func TestDeleteToken(t *testing.T) {
@@ -180,6 +182,49 @@ func TestDeleteToken_NoCurrentContext(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestLoadToken_NearExpiryWarning(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("STACKCTL_CONFIG_DIR", dir)
+
+	cfg = &config.Config{CurrentContext: "test", Contexts: map[string]*config.Context{"test": {}}}
+
+	tokenDir := filepath.Join(dir, "tokens")
+	require.NoError(t, os.MkdirAll(tokenDir, 0700))
+	stored := storedToken{
+		Token:     "expiring-soon-jwt",
+		ExpiresAt: time.Now().Add(3 * time.Minute),
+	}
+	data, _ := json.Marshal(stored)
+	require.NoError(t, os.WriteFile(filepath.Join(tokenDir, "test.json"), data, 0600))
+
+	token, warning, err := loadToken()
+	require.NoError(t, err)
+	assert.Equal(t, "expiring-soon-jwt", token)
+	assert.Contains(t, warning, "Warning: token expires in")
+	assert.Contains(t, warning, "stackctl login")
+}
+
+func TestLoadToken_NoWarningWhenFarFromExpiry(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("STACKCTL_CONFIG_DIR", dir)
+
+	cfg = &config.Config{CurrentContext: "test", Contexts: map[string]*config.Context{"test": {}}}
+
+	tokenDir := filepath.Join(dir, "tokens")
+	require.NoError(t, os.MkdirAll(tokenDir, 0700))
+	stored := storedToken{
+		Token:     "valid-jwt",
+		ExpiresAt: time.Now().Add(2 * time.Hour),
+	}
+	data, _ := json.Marshal(stored)
+	require.NoError(t, os.WriteFile(filepath.Join(tokenDir, "test.json"), data, 0600))
+
+	token, warning, err := loadToken()
+	require.NoError(t, err)
+	assert.Equal(t, "valid-jwt", token)
+	assert.Empty(t, warning)
+}
+
 func TestSaveAndLoadToken_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("STACKCTL_CONFIG_DIR", dir)
@@ -189,7 +234,7 @@ func TestSaveAndLoadToken_RoundTrip(t *testing.T) {
 	expires := time.Now().Add(2 * time.Hour)
 	require.NoError(t, saveToken("my-jwt-token", "testuser", expires))
 
-	token, err := loadToken()
+	token, _, err := loadToken()
 	require.NoError(t, err)
 	assert.Equal(t, "my-jwt-token", token)
 }
