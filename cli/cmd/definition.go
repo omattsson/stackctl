@@ -429,7 +429,6 @@ Examples:
 
 		req := types.UpdateChartConfigRequest{
 			ChartName:     current.ChartName,
-			ChartPath:     current.RepoURL,
 			ChartVersion:  current.ChartVersion,
 			SourceRepoURL: current.SourceRepoURL,
 			DefaultValues: current.DefaultValues,

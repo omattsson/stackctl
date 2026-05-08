@@ -195,9 +195,7 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 		defer resp.Body.Close()
 		apiErr := &APIError{StatusCode: resp.StatusCode}
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-				apiErr.retryAfter = time.Duration(secs) * time.Second
-			}
+			apiErr.retryAfter = parseRetryAfter(ra)
 		}
 		var errResp types.ErrorResponse
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
@@ -316,6 +314,18 @@ func (c *Client) sleep(d time.Duration) {
 		return
 	}
 	time.Sleep(d)
+}
+
+func parseRetryAfter(value string) time.Duration {
+	if secs, err := strconv.Atoi(value); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(value); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 func maskCredential(header, value string) string {
