@@ -39,6 +39,7 @@ type Client struct {
 	Debug        bool
 	DebugWriter  io.Writer
 	RetryBackoff []time.Duration
+	Sleeper      func(time.Duration) // injectable for tests; defaults to time.Sleep
 }
 
 // New creates a new API client.
@@ -170,6 +171,11 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 
 	if c.Debug && c.DebugWriter != nil {
 		fmt.Fprintf(c.DebugWriter, "→ %s %s\n", method, u)
+		for _, h := range []string{"Authorization", "X-API-Key", "Content-Type"} {
+			if v := req.Header.Get(h); v != "" {
+				fmt.Fprintf(c.DebugWriter, "  %s: %s\n", h, maskCredential(h, v))
+			}
+		}
 	}
 
 	start := time.Now()
@@ -260,7 +266,7 @@ func (c *Client) doWithRetry(method, path string, body interface{}) (*http.Respo
 			if c.Debug && c.DebugWriter != nil {
 				fmt.Fprintf(c.DebugWriter, "↻ retrying in %s (attempt %d/%d)\n", wait, attempt+1, len(backoff))
 			}
-			time.Sleep(wait)
+			c.sleep(wait)
 		}
 	}
 	return nil, lastErr
@@ -302,6 +308,26 @@ func (c *Client) Post(path string, body interface{}, v interface{}) error {
 // Put performs a PUT request and decodes the response.
 func (c *Client) Put(path string, body interface{}, v interface{}) error {
 	return c.doJSON(http.MethodPut, path, body, v)
+}
+
+func (c *Client) sleep(d time.Duration) {
+	if c.Sleeper != nil {
+		c.Sleeper(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+func maskCredential(header, value string) string {
+	switch strings.ToLower(header) {
+	case "authorization", "x-api-key":
+		if len(value) <= 8 {
+			return "***"
+		}
+		return value[:8] + "***"
+	default:
+		return value
+	}
 }
 
 // Delete performs a DELETE request.

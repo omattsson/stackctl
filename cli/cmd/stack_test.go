@@ -1807,3 +1807,41 @@ func TestStackHistoryValuesCmd_QuietOutput(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "300\n", buf.String())
 }
+
+// ---- Dry-run Tests ----
+
+func TestStackDeleteCmd_DryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called in dry-run mode")
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	stackDeleteCmd.Flags().Set("dry-run", "true")
+	t.Cleanup(func() {
+		stackDeleteCmd.Flags().Set("dry-run", "false")
+	})
+
+	err := stackDeleteCmd.RunE(stackDeleteCmd, []string{"42"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Would delete 42")
+}
+
+func TestStackDeployCmd_DryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called in dry-run mode")
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	stackDeployCmd.Flags().Set("dry-run", "true")
+	t.Cleanup(func() {
+		stackDeployCmd.Flags().Set("dry-run", "false")
+	})
+
+	err := stackDeployCmd.RunE(stackDeployCmd, []string{"42"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Would deploy")
+}

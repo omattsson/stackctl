@@ -86,10 +86,10 @@ func loadToken() (token string, warning string, err error) {
 	}
 
 	if !t.ExpiresAt.IsZero() {
-		if time.Now().After(t.ExpiresAt) {
+		remaining := time.Until(t.ExpiresAt)
+		if remaining <= 0 {
 			return "", "", fmt.Errorf("token expired. Run 'stackctl login' to re-authenticate")
 		}
-		remaining := time.Until(t.ExpiresAt)
 		if remaining < 5*time.Minute {
 			mins := int(remaining.Minutes()) + 1
 			unit := "minutes"

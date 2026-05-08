@@ -2555,13 +2555,13 @@ func TestRetry_CapsRetryAfterAt30s(t *testing.T) {
 
 	c := New(server.URL)
 	c.RetryBackoff = []time.Duration{time.Millisecond, time.Millisecond}
-	start := time.Now()
+	var sleptFor time.Duration
+	c.Sleeper = func(d time.Duration) { sleptFor = d }
 	var result map[string]string
 	err := c.Get("/test", &result)
 	require.NoError(t, err)
 	assert.Equal(t, 2, attempts)
-	// Capped at 30s, not 3600s — but should complete within ~31s (we test < 35s)
-	assert.Less(t, time.Since(start), 35*time.Second)
+	assert.Equal(t, 30*time.Second, sleptFor, "Retry-After: 3600 should be capped to 30s")
 }
 
 func TestDebug_DisabledByDefault(t *testing.T) {
