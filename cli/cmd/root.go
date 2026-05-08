@@ -23,6 +23,7 @@ var (
 	flagAPIURL   string
 	flagAPIKey   string
 	flagInsecure bool
+	flagDebug    bool
 
 	// Loaded at runtime
 	cfg     *config.Config
@@ -82,6 +83,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagAPIURL, "api-url", "", "API server URL (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", "", "API key (overrides config)")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Skip TLS certificate verification (use with caution)")
+	rootCmd.PersistentFlags().BoolVar(&flagDebug, "debug", false, "Log HTTP requests and responses to stderr")
 }
 
 // Execute runs the root command.
@@ -103,6 +105,16 @@ func newClient() (*client.Client, error) {
 
 	c := client.New(apiURL)
 
+	// Debug: explicit flag overrides env var
+	if rootCmd.PersistentFlags().Changed("debug") {
+		c.Debug = flagDebug
+	} else if os.Getenv("STACKCTL_DEBUG") == "1" {
+		c.Debug = true
+	}
+	if c.Debug {
+		c.DebugWriter = os.Stderr
+	}
+
 	// API key: flag > env > config
 	apiKey := flagAPIKey
 	if apiKey == "" {
@@ -117,11 +129,14 @@ func newClient() (*client.Client, error) {
 
 	// JWT token from stored token file (only if no API key)
 	if c.APIKey == "" {
-		token, err := loadToken()
+		token, warning, err := loadToken()
 		if err != nil && !flagQuiet {
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		}
 		c.Token = token
+		if warning != "" && !flagQuiet {
+			fmt.Fprintln(os.Stderr, warning)
+		}
 	}
 
 	return c, nil
@@ -205,6 +220,10 @@ func confirmAction(cmd *cobra.Command, message string) (bool, error) {
 }
 
 func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn func(*client.Client, string) (string, error), deleteFn func(*client.Client, string) error, successFmt string) error {
+	if isDryRun(cmd, "Would delete %s", args[0]) {
+		return nil
+	}
+
 	c, err := newClient()
 	if err != nil {
 		return err
@@ -235,6 +254,15 @@ func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn f
 
 	printer.PrintMessage(successFmt, id)
 	return nil
+}
+
+func isDryRun(cmd *cobra.Command, format string, args ...interface{}) bool {
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	if dryRun {
+		printer.PrintMessage(format, args...)
+		return true
+	}
+	return false
 }
 
 func passthroughID(_ *client.Client, id string) (string, error) {

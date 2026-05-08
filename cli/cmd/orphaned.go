@@ -80,6 +80,10 @@ Examples:
 			return fmt.Errorf("namespace must not be empty")
 		}
 
+		if isDryRun(cmd, "Would delete orphaned namespace %q", namespace) {
+			return nil
+		}
+
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete orphaned namespace %q. Continue? (y/n): ", namespace))
 		if err != nil {
 			return err
@@ -110,6 +114,7 @@ Examples:
 
 func init() {
 	orphanedDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	orphanedDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	orphanedCmd.AddCommand(orphanedListCmd)
 	orphanedCmd.AddCommand(orphanedDeleteCmd)

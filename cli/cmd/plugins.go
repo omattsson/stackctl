@@ -142,6 +142,11 @@ func pluginEnv(cmd *cobra.Command) []string {
 			env = setEnv(env, "STACKCTL_OUTPUT", strings.ToLower(strings.TrimSpace(output)))
 		}
 	}
+	if flags.Changed("debug") {
+		if debug, err := flags.GetBool("debug"); err == nil {
+			env = setEnv(env, "STACKCTL_DEBUG", boolEnvValue(debug))
+		}
+	}
 	return env
 }
 

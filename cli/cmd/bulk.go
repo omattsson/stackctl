@@ -32,6 +32,10 @@ Examples:
   stackctl bulk deploy --ids 1,2,3 -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would deploy %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -65,6 +69,10 @@ Examples:
   stackctl bulk stop --ids 1,2,3 -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would stop %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -100,6 +108,10 @@ Examples:
   stackctl bulk clean --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would clean %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -144,6 +156,10 @@ Examples:
   stackctl bulk delete --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would delete %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -174,20 +190,40 @@ Examples:
 
 func init() {
 	bulkDeployCmd.Flags().String("ids", "", flagDescIDs)
+	bulkDeployCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	bulkStopCmd.Flags().String("ids", "", flagDescIDs)
+	bulkStopCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	bulkCleanCmd.Flags().String("ids", "", flagDescIDs)
 	bulkCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	bulkCleanCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	bulkDeleteCmd.Flags().String("ids", "", flagDescIDs)
 	bulkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	bulkDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	bulkCmd.AddCommand(bulkDeployCmd)
 	bulkCmd.AddCommand(bulkStopCmd)
 	bulkCmd.AddCommand(bulkCleanCmd)
 	bulkCmd.AddCommand(bulkDeleteCmd)
 	rootCmd.AddCommand(bulkCmd)
+}
+
+func rawBulkArgs(cmd *cobra.Command, args []string) []string {
+	var parts []string
+	if idsStr, _ := cmd.Flags().GetString("ids"); idsStr != "" {
+		parts = append(parts, strings.Split(idsStr, ",")...)
+	}
+	parts = append(parts, args...)
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]string, error) {

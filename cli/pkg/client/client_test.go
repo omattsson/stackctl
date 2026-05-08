@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -2406,4 +2407,178 @@ func TestGetDeployLogValues_NotFound(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
 	assert.Equal(t, "log entry not found", apiErr.Message)
+}
+
+// ---------- Debug logging ----------
+
+func TestDebug_LogsRequestAndResponse(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{})
+	}))
+	defer server.Close()
+
+	var debugBuf strings.Builder
+	c := New(server.URL)
+	c.Debug = true
+	c.DebugWriter = &debugBuf
+
+	var result map[string]string
+	err := c.Get("/test", &result)
+	require.NoError(t, err)
+
+	output := debugBuf.String()
+	assert.Contains(t, output, "→ GET")
+	assert.Contains(t, output, "/test")
+	assert.Contains(t, output, "← 200 OK")
+}
+
+func TestDebug_LogsConnectionError(t *testing.T) {
+	t.Parallel()
+	var debugBuf strings.Builder
+	c := New("http://127.0.0.1:1")
+	c.Debug = true
+	c.DebugWriter = &debugBuf
+
+	var result map[string]string
+	_ = c.Get("/test", &result)
+
+	output := debugBuf.String()
+	assert.Contains(t, output, "→ GET")
+	assert.Contains(t, output, "✗")
+}
+
+// ---------- Retry logic ----------
+
+func TestRetry_RetriesOnTransientError(t *testing.T) {
+	t.Parallel()
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "temporarily down"})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"ok": "true"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.RetryBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	var result map[string]string
+	err := c.Get("/test", &result)
+	require.NoError(t, err)
+	assert.Equal(t, 3, attempts)
+	assert.Equal(t, "true", result["ok"])
+}
+
+func TestRetry_NoRetryOnPost(t *testing.T) {
+	t.Parallel()
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "down"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.RetryBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	var result map[string]string
+	err := c.Post("/test", nil, &result)
+	require.Error(t, err)
+	assert.Equal(t, 1, attempts)
+}
+
+func TestRetry_NoRetryOnNonRetryableStatus(t *testing.T) {
+	t.Parallel()
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.RetryBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	var result map[string]string
+	err := c.Get("/test", &result)
+	require.Error(t, err)
+	assert.Equal(t, 1, attempts)
+}
+
+func TestRetry_RespectsRetryAfterHeader(t *testing.T) {
+	t.Parallel()
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "rate limited"})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"ok": "true"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.RetryBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	var sleptFor time.Duration
+	c.Sleeper = func(d time.Duration) { sleptFor = d }
+	var result map[string]string
+	err := c.Get("/test", &result)
+	require.NoError(t, err)
+	assert.Equal(t, 2, attempts)
+	assert.Equal(t, time.Second, sleptFor, "should respect Retry-After: 1")
+}
+
+func TestRetry_CapsRetryAfterAt30s(t *testing.T) {
+	t.Parallel()
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "3600")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "rate limited"})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"ok": "true"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.RetryBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	var sleptFor time.Duration
+	c.Sleeper = func(d time.Duration) { sleptFor = d }
+	var result map[string]string
+	err := c.Get("/test", &result)
+	require.NoError(t, err)
+	assert.Equal(t, 2, attempts)
+	assert.Equal(t, 30*time.Second, sleptFor, "Retry-After: 3600 should be capped to 30s")
+}
+
+func TestDebug_DisabledByDefault(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{})
+	}))
+	defer server.Close()
+
+	var debugBuf strings.Builder
+	c := New(server.URL)
+	c.DebugWriter = &debugBuf
+
+	var result map[string]string
+	_ = c.Get("/test", &result)
+
+	assert.Empty(t, debugBuf.String())
 }

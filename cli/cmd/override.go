@@ -466,6 +466,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would delete quota override for instance %s", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -500,6 +504,10 @@ Examples:
 }
 
 func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteFn func(*client.Client, string, string) error) error {
+	if isDryRun(cmd, "Would delete %s override for chart %s on instance %s", kind, args[1], args[0]) {
+		return nil
+	}
+
 	chartID, err := parseID(args[1])
 	if err != nil {
 		return err
@@ -586,9 +594,11 @@ func init() {
 
 	// override delete flags
 	overrideDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
+	overrideDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	// branch delete flags
 	overrideBranchDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
+	overrideBranchDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	// quota set flags
 	overrideQuotaSetCmd.Flags().String("cpu-request", "", "CPU request (e.g. 100m)")
@@ -598,6 +608,7 @@ func init() {
 
 	// quota delete flags
 	overrideQuotaDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
+	overrideQuotaDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	// Wire up branch subcommands
 	overrideBranchCmd.AddCommand(overrideBranchListCmd)

@@ -385,6 +385,7 @@ Examples:
   stackctl definition update-chart 1 5 --chart-version 0.3.0
   stackctl definition update-chart 1 5 --chart-path /charts/kvk-core
   stackctl definition update-chart 1 5 --deploy-order 6
+  stackctl definition update-chart 1 5 --source-repo-url https://dev.azure.com/org/project/_git/repo
   stackctl definition update-chart 1 5 --file values.yaml`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
@@ -400,11 +401,12 @@ Examples:
 
 		chartPath, _ := cmd.Flags().GetString("chart-path")
 		chartVersion, _ := cmd.Flags().GetString("chart-version")
+		sourceRepoURL, _ := cmd.Flags().GetString("source-repo-url")
 		deployOrder, _ := cmd.Flags().GetInt("deploy-order")
 		valuesFile, _ := cmd.Flags().GetString("file")
 
-		if chartPath == "" && chartVersion == "" && deployOrder < 0 && valuesFile == "" {
-			return fmt.Errorf("at least one of --chart-path, --chart-version, --deploy-order, or --file must be specified")
+		if chartPath == "" && chartVersion == "" && sourceRepoURL == "" && deployOrder < 0 && valuesFile == "" {
+			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --deploy-order, or --file must be specified")
 		}
 
 		if valuesFile != "" {
@@ -427,8 +429,8 @@ Examples:
 
 		req := types.UpdateChartConfigRequest{
 			ChartName:     current.ChartName,
-			ChartPath:     current.RepoURL,
 			ChartVersion:  current.ChartVersion,
+			SourceRepoURL: current.SourceRepoURL,
 			DefaultValues: current.DefaultValues,
 		}
 
@@ -437,6 +439,9 @@ Examples:
 		}
 		if chartVersion != "" {
 			req.ChartVersion = chartVersion
+		}
+		if sourceRepoURL != "" {
+			req.SourceRepoURL = sourceRepoURL
 		}
 		if deployOrder >= 0 {
 			req.DeployOrder = &deployOrder
@@ -533,11 +538,13 @@ func init() {
 	// definition update-chart flags
 	definitionUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/kvk-core)")
 	definitionUpdateChartCmd.Flags().String("chart-version", "", "Chart version")
+	definitionUpdateChartCmd.Flags().String("source-repo-url", "", "Git repository URL for branch listing")
 	definitionUpdateChartCmd.Flags().Int("deploy-order", -1, "Deploy order (0+)")
 	definitionUpdateChartCmd.Flags().String("file", "", "File containing default values")
 
 	// definition delete flags
 	definitionDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	definitionDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	// definition export flags
 	definitionExportCmd.Flags().String("output-file", "", "Write export to file instead of stdout")

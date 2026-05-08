@@ -57,6 +57,7 @@ type ChartConfig struct {
 	Base
 	Name          string `json:"name" yaml:"name"`
 	RepoURL       string `json:"repository_url" yaml:"repository_url"`
+	SourceRepoURL string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
 	ChartName     string `json:"chart_name" yaml:"chart_name"`
 	ChartVersion  string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
 	ReleaseName   string `json:"release_name,omitempty" yaml:"release_name,omitempty"`
@@ -225,6 +226,7 @@ type UpdateChartConfigRequest struct {
 	ChartName     string `json:"chart_name,omitempty" yaml:"chart_name,omitempty"`
 	ChartPath     string `json:"chart_path,omitempty" yaml:"chart_path,omitempty"`
 	ChartVersion  string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
+	SourceRepoURL string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
 	DeployOrder   *int   `json:"deploy_order,omitempty" yaml:"deploy_order,omitempty"`
 	DefaultValues string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
 }

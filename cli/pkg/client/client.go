@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,10 +32,14 @@ const (
 // TLS configuration (insecure mode) is handled by the caller setting
 // HTTPClient.Transport before making requests.
 type Client struct {
-	BaseURL    string
-	Token      string
-	APIKey     string
-	HTTPClient *http.Client
+	BaseURL      string
+	Token        string
+	APIKey       string
+	HTTPClient   *http.Client
+	Debug        bool
+	DebugWriter  io.Writer
+	RetryBackoff []time.Duration
+	Sleeper      func(time.Duration) // injectable for tests; defaults to time.Sleep
 }
 
 // New creates a new API client.
@@ -51,6 +56,7 @@ func New(baseURL string) *Client {
 type APIError struct {
 	StatusCode int
 	Message    string
+	retryAfter time.Duration
 }
 
 func (e *APIError) Error() string {
@@ -163,26 +169,110 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 
+	if c.Debug && c.DebugWriter != nil {
+		fmt.Fprintf(c.DebugWriter, "→ %s %s\n", method, u)
+		for _, h := range []string{"Authorization", "X-API-Key", "Content-Type"} {
+			if v := req.Header.Get(h); v != "" {
+				fmt.Fprintf(c.DebugWriter, "  %s: %s\n", h, maskCredential(h, v))
+			}
+		}
+	}
+
+	start := time.Now()
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		if c.Debug && c.DebugWriter != nil {
+			fmt.Fprintf(c.DebugWriter, "✗ %s (%s)\n", err, time.Since(start).Truncate(time.Millisecond))
+		}
 		return nil, fmt.Errorf("making request: %w", err)
+	}
+
+	if c.Debug && c.DebugWriter != nil {
+		fmt.Fprintf(c.DebugWriter, "← %d %s (%s)\n", resp.StatusCode, http.StatusText(resp.StatusCode), time.Since(start).Truncate(time.Millisecond))
 	}
 
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
+		apiErr := &APIError{StatusCode: resp.StatusCode}
+		if ra := resp.Header.Get("Retry-After"); ra != "" {
+			apiErr.retryAfter = parseRetryAfter(ra)
+		}
 		var errResp types.ErrorResponse
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
-			return nil, &APIError{StatusCode: resp.StatusCode, Message: http.StatusText(resp.StatusCode)}
+			apiErr.Message = http.StatusText(resp.StatusCode)
+			return nil, apiErr
 		}
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: errResp.Error}
+		apiErr.Message = errResp.Error
+		return nil, apiErr
 	}
 
 	return resp, nil
 }
 
+var retryableStatuses = map[int]bool{
+	http.StatusTooManyRequests:     true,
+	http.StatusBadGateway:          true,
+	http.StatusServiceUnavailable:  true,
+	http.StatusGatewayTimeout:      true,
+}
+
+var idempotentMethods = map[string]bool{
+	http.MethodGet:    true,
+	http.MethodPut:    true,
+	http.MethodDelete: true,
+	http.MethodHead:   true,
+}
+
+const maxRetryAfter = 30 * time.Second
+
+var defaultRetryBackoff = []time.Duration{time.Second, 3 * time.Second}
+
+// doWithRetry wraps do with retry logic for transient failures on idempotent methods.
+func (c *Client) doWithRetry(method, path string, body interface{}) (*http.Response, error) {
+	if !idempotentMethods[method] {
+		return c.do(method, path, body)
+	}
+
+	backoff := c.RetryBackoff
+	if backoff == nil {
+		backoff = defaultRetryBackoff
+	}
+	var lastErr error
+
+	for attempt := 0; attempt <= len(backoff); attempt++ {
+		resp, err := c.do(method, path, body)
+		if err == nil {
+			return resp, nil
+		}
+
+		apiErr, ok := err.(*APIError)
+		if !ok || !retryableStatuses[apiErr.StatusCode] {
+			return nil, err
+		}
+		lastErr = err
+
+		if attempt < len(backoff) {
+			wait := backoff[attempt]
+			if apiErr.StatusCode == http.StatusTooManyRequests {
+				if ra := apiErr.retryAfter; ra > 0 {
+					if ra > maxRetryAfter {
+						ra = maxRetryAfter
+					}
+					wait = ra
+				}
+			}
+			if c.Debug && c.DebugWriter != nil {
+				fmt.Fprintf(c.DebugWriter, "↻ retrying in %s (attempt %d/%d)\n", wait, attempt+1, len(backoff))
+			}
+			c.sleep(wait)
+		}
+	}
+	return nil, lastErr
+}
+
 // doJSON executes a request and decodes the JSON response into v.
 func (c *Client) doJSON(method, path string, body interface{}, v interface{}) error {
-	resp, err := c.do(method, path, body)
+	resp, err := c.doWithRetry(method, path, body)
 	if err != nil {
 		return err
 	}
@@ -218,9 +308,47 @@ func (c *Client) Put(path string, body interface{}, v interface{}) error {
 	return c.doJSON(http.MethodPut, path, body, v)
 }
 
+func (c *Client) sleep(d time.Duration) {
+	if c.Sleeper != nil {
+		c.Sleeper(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+func parseRetryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if secs, err := strconv.Atoi(value); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(value); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+func maskCredential(header, value string) string {
+	switch strings.ToLower(header) {
+	case "authorization":
+		if i := strings.IndexByte(value, ' '); i > 0 {
+			return value[:i] + " ***"
+		}
+		return "***"
+	case "x-api-key":
+		if len(value) > 4 {
+			return "***" + value[len(value)-4:]
+		}
+		return "***"
+	default:
+		return value
+	}
+}
+
 // Delete performs a DELETE request.
 func (c *Client) Delete(path string) error {
-	resp, err := c.do(http.MethodDelete, path, nil)
+	resp, err := c.doWithRetry(http.MethodDelete, path, nil)
 	if err != nil {
 		return err
 	}
@@ -535,7 +663,7 @@ func (c *Client) DeleteDefinition(id string) error {
 
 // ExportDefinition exports a stack definition as raw JSON bytes.
 func (c *Client) ExportDefinition(id string) ([]byte, error) {
-	resp, err := c.do(http.MethodGet, fmt.Sprintf("/api/v1/stack-definitions/%s/export", id), nil)
+	resp, err := c.doWithRetry(http.MethodGet, fmt.Sprintf("/api/v1/stack-definitions/%s/export", id), nil)
 	if err != nil {
 		return nil, err
 	}

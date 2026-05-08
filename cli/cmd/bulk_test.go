@@ -769,3 +769,46 @@ func TestBulkDeployCmd_Forbidden(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Permission denied")
 }
+
+// ---- Dry-run Tests ----
+
+func TestBulkDeleteCmd_DryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called in dry-run mode")
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	bulkDeleteCmd.Flags().Set("ids", "10,20,30")
+	bulkDeleteCmd.Flags().Set("dry-run", "true")
+	t.Cleanup(func() {
+		bulkDeleteCmd.Flags().Set("ids", "")
+		bulkDeleteCmd.Flags().Set("dry-run", "false")
+	})
+
+	err := bulkDeleteCmd.RunE(bulkDeleteCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Would delete 3 stacks")
+	assert.Contains(t, buf.String(), "10, 20, 30")
+}
+
+func TestBulkCleanCmd_DryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called in dry-run mode")
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	bulkCleanCmd.Flags().Set("ids", "5,6")
+	bulkCleanCmd.Flags().Set("dry-run", "true")
+	t.Cleanup(func() {
+		bulkCleanCmd.Flags().Set("ids", "")
+		bulkCleanCmd.Flags().Set("dry-run", "false")
+	})
+
+	err := bulkCleanCmd.RunE(bulkCleanCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Would clean 2 stacks")
+}

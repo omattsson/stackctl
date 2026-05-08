@@ -22,7 +22,7 @@ func followLogs(c *client.Client, instanceID string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	result, err := c.StreamDeploymentLogs(ctx, instanceID, os.Stdout)
+	result, err := c.StreamDeploymentLogs(ctx, instanceID, os.Stdout, os.Stderr)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil
@@ -242,6 +242,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would deploy stack %s", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -285,6 +289,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would stop stack %s", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -330,6 +338,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would clean stack %s (undeploy + remove namespace)", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -790,6 +802,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would rollback stack %s", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -905,6 +921,13 @@ func init() {
 	stackCleanCmd.Flags().BoolP("follow", "f", false, "Stream logs until completion")
 	stackLogsCmd.Flags().BoolP("follow", "f", false, "Stream logs from active deployment")
 	stackRollbackCmd.Flags().BoolP("follow", "f", false, "Stream logs until completion")
+
+	// --dry-run flags
+	stackDeployCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+	stackStopCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+	stackCleanCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+	stackDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+	stackRollbackCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
 	// stack clean flags
 	stackCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
