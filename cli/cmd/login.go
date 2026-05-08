@@ -225,21 +225,24 @@ func loginSSO(cmd *cobra.Command) error {
 	}
 
 	// Poll for completion
-	fmt.Fprint(cmd.ErrOrStderr(), "Waiting for authentication")
+	stderr := cmd.ErrOrStderr()
+	fmt.Fprint(stderr, "Waiting for authentication")
 
-	result, err := pollForToken(c, session.SessionID, session.ExpiresIn)
+	result, err := pollForToken(c, session.SessionID, session.ExpiresIn, stderr)
 	if err != nil {
-		fmt.Fprintln(cmd.ErrOrStderr()) // newline after dots
+		fmt.Fprintln(stderr) // newline after dots
 		return err
 	}
-	fmt.Fprintln(cmd.ErrOrStderr()) // newline after dots
+	fmt.Fprintln(stderr) // newline after dots
 
 	if result.Token == "" {
 		return fmt.Errorf("server returned an empty token")
 	}
 
-	// Parse token expiry from JWT claims (base64 decode the payload)
-	expiresAt := parseJWTExpiry(result.Token)
+	expiresAt, err := parseJWTExpiry(result.Token)
+	if err != nil {
+		return fmt.Errorf("parsing token expiry: %w", err)
+	}
 
 	if err := saveToken(result.Token, result.Username, expiresAt); err != nil {
 		return fmt.Errorf("saving token: %w", err)
@@ -249,9 +252,11 @@ func loginSSO(cmd *cobra.Command) error {
 	return nil
 }
 
-func pollForToken(c *client.Client, sessionID string, expiresIn int) (*types.CLITokenResponse, error) {
+var ssoPollInterval = 3 * time.Second
+
+func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer) (*types.CLITokenResponse, error) {
 	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(ssoPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -267,36 +272,31 @@ func pollForToken(c *client.Client, sessionID string, expiresIn int) (*types.CLI
 			if resp.Status == "completed" {
 				return resp, nil
 			}
-			fmt.Fprint(os.Stderr, ".")
+			fmt.Fprint(w, ".")
 		}
 	}
 }
 
 // parseJWTExpiry extracts the expiry time from a JWT token without verifying the signature.
-func parseJWTExpiry(token string) time.Time {
+func parseJWTExpiry(token string) (time.Time, error) {
 	parts := strings.SplitN(token, ".", 3)
 	if len(parts) != 3 {
-		return time.Time{}
+		return time.Time{}, fmt.Errorf("invalid JWT format")
 	}
-	// Add padding if needed
-	payload := parts[1]
-	switch len(payload) % 4 {
-	case 2:
-		payload += "=="
-	case 3:
-		payload += "="
-	}
-	data, err := base64.URLEncoding.DecodeString(payload)
+	data, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, fmt.Errorf("decoding JWT payload: %w", err)
 	}
 	var claims struct {
 		Exp int64 `json:"exp"`
 	}
-	if err := json.Unmarshal(data, &claims); err != nil || claims.Exp == 0 {
-		return time.Time{}
+	if err := json.Unmarshal(data, &claims); err != nil {
+		return time.Time{}, fmt.Errorf("parsing JWT claims: %w", err)
 	}
-	return time.Unix(claims.Exp, 0)
+	if claims.Exp == 0 {
+		return time.Time{}, fmt.Errorf("JWT missing exp claim")
+	}
+	return time.Unix(claims.Exp, 0), nil
 }
 
 func init() {

@@ -646,6 +646,10 @@ func setupSSOTestCmd(t *testing.T, apiURL string) (*bytes.Buffer, *bytes.Buffer)
 		loginCmd.Flags().Set("sso", "false")
 		loginCmd.Flags().Set("username", "")
 		loginCmd.Flags().Set("password", "")
+		loginCmd.SetIn(nil)
+		loginCmd.SetOut(nil)
+		loginCmd.SetErr(nil)
+		ssoPollInterval = 3 * time.Second
 	})
 
 	cfg = &config.Config{
@@ -783,6 +787,7 @@ func TestLoginSSO_PollCompleted(t *testing.T) {
 	defer server.Close()
 
 	outBuf, errBuf := setupSSOTestCmd(t, server.URL)
+	ssoPollInterval = 10 * time.Millisecond
 
 	loginCmd.Flags().Set("sso", "true")
 	loginCmd.SetOut(outBuf)
@@ -809,36 +814,36 @@ func TestParseJWTExpiry(t *testing.T) {
 		name    string
 		token   string
 		wantExp int64
+		wantErr bool
 	}{
 		{
-			name: "valid JWT with exp",
-			// Payload: {"exp":4102444800} (2100-01-01T00:00:00Z)
+			name:    "valid JWT with exp",
 			token:   "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjQxMDI0NDQ4MDB9.sig",
 			wantExp: 4102444800,
 		},
 		{
 			name:    "not a JWT",
 			token:   "not-a-jwt",
-			wantExp: 0,
+			wantErr: true,
 		},
 		{
 			name:    "empty token",
 			token:   "",
-			wantExp: 0,
+			wantErr: true,
 		},
 		{
-			name: "JWT without exp",
-			// Payload: {"sub":"user"}
+			name:    "JWT without exp",
 			token:   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.sig",
-			wantExp: 0,
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseJWTExpiry(tt.token)
-			if tt.wantExp == 0 {
-				assert.True(t, result.IsZero(), "expected zero time for token %q", tt.token)
+			result, err := parseJWTExpiry(tt.token)
+			if tt.wantErr {
+				assert.Error(t, err)
 			} else {
+				require.NoError(t, err)
 				assert.Equal(t, tt.wantExp, result.Unix())
 			}
 		})
