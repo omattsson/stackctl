@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -91,7 +92,10 @@ func loadToken() (token string, warning string, err error) {
 			return "", "", fmt.Errorf("token expired. Run 'stackctl login' to re-authenticate")
 		}
 		if remaining < 5*time.Minute {
-			mins := int(remaining.Minutes()) + 1
+			mins := int(math.Ceil(remaining.Minutes()))
+			if mins < 1 {
+				mins = 1
+			}
 			unit := "minutes"
 			if mins == 1 {
 				unit = "minute"

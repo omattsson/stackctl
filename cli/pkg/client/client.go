@@ -317,6 +317,7 @@ func (c *Client) sleep(d time.Duration) {
 }
 
 func parseRetryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
 	if secs, err := strconv.Atoi(value); err == nil && secs > 0 {
 		return time.Duration(secs) * time.Second
 	}
