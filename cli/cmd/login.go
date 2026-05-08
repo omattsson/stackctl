@@ -259,22 +259,20 @@ func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer
 	ticker := time.NewTicker(ssoPollInterval)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("SSO login timed out. Please try again")
-			}
-			resp, err := c.CLIToken(sessionID)
-			if err != nil {
-				return nil, fmt.Errorf("polling for SSO token: %w", err)
-			}
-			if resp.Status == "completed" {
-				return resp, nil
-			}
-			fmt.Fprint(w, ".")
+	for range ticker.C {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("SSO login timed out. Please try again")
 		}
+		resp, err := c.CLIToken(sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("polling for SSO token: %w", err)
+		}
+		if resp.Status == "completed" {
+			return resp, nil
+		}
+		fmt.Fprint(w, ".")
 	}
+	return nil, fmt.Errorf("SSO login polling stopped unexpectedly")
 }
 
 // parseJWTExpiry extracts the expiry time from a JWT token without verifying the signature.
