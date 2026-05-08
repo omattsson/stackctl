@@ -634,3 +634,213 @@ func TestLoginCmd_EmptyTokenFromServer(t *testing.T) {
 	_, statErr := os.Stat(tokenPath)
 	assert.True(t, os.IsNotExist(statErr), "token file should not exist when server returns empty token")
 }
+
+// ---------- SSO login tests ----------
+
+func setupSSOTestCmd(t *testing.T, apiURL string) (*bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("STACKCTL_CONFIG_DIR", dir)
+
+	t.Cleanup(func() {
+		loginCmd.Flags().Set("sso", "false")
+		loginCmd.Flags().Set("username", "")
+		loginCmd.Flags().Set("password", "")
+	})
+
+	cfg = &config.Config{
+		CurrentContext: "test",
+		Contexts: map[string]*config.Context{
+			"test": {APIURL: apiURL},
+		},
+	}
+	printer = output.NewPrinter("table", false, true)
+
+	var outBuf bytes.Buffer
+	printer.Writer = &outBuf
+
+	var errBuf bytes.Buffer
+
+	flagAPIURL = apiURL
+	flagAPIKey = ""
+	flagInsecure = false
+	flagQuiet = false
+
+	return &outBuf, &errBuf
+}
+
+func TestLoginSSO_OIDCDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/oidc/config":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"enabled":            false,
+				"provider_name":      "",
+				"local_auth_enabled": true,
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	outBuf, errBuf := setupSSOTestCmd(t, server.URL)
+
+	loginCmd.Flags().Set("sso", "true")
+	loginCmd.SetOut(outBuf)
+	loginCmd.SetErr(errBuf)
+
+	err := loginCmd.RunE(loginCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SSO is not enabled")
+}
+
+func TestLoginSSO_InitiateSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/oidc/config":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"enabled":            true,
+				"provider_name":      "azure-ad",
+				"local_auth_enabled": true,
+			})
+		case "/api/v1/auth/oidc/cli-auth":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"session_id": "sess-abc",
+				"login_url":  "https://login.example.com/auth?session=sess-abc",
+				"expires_in": 1, // 1 second to trigger quick timeout
+			})
+		case "/api/v1/auth/oidc/cli-token":
+			// Always return pending to trigger timeout
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "pending",
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	outBuf, errBuf := setupSSOTestCmd(t, server.URL)
+
+	loginCmd.Flags().Set("sso", "true")
+	loginCmd.SetOut(outBuf)
+	loginCmd.SetErr(errBuf)
+
+	err := loginCmd.RunE(loginCmd, []string{})
+	// It will timeout since we never complete, but we can verify the login URL was printed
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out")
+	assert.Contains(t, errBuf.String(), "https://login.example.com/auth?session=sess-abc")
+}
+
+func TestLoginSSO_PollCompleted(t *testing.T) {
+	// Build a JWT with an exp claim for testing
+	// Header: {"alg":"HS256","typ":"JWT"}
+	// Payload: {"exp":4102444800,"sub":"sso-user"} (exp = 2100-01-01)
+	testJWT := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjQxMDI0NDQ4MDAsInN1YiI6InNzby11c2VyIn0.signature"
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/oidc/config":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"enabled":            true,
+				"provider_name":      "azure-ad",
+				"local_auth_enabled": true,
+			})
+		case "/api/v1/auth/oidc/cli-auth":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"session_id": "sess-poll",
+				"login_url":  "https://login.example.com/auth?session=sess-poll",
+				"expires_in": 30,
+			})
+		case "/api/v1/auth/oidc/cli-token":
+			callCount++
+			w.WriteHeader(http.StatusOK)
+			if callCount >= 2 {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status":   "completed",
+					"token":    testJWT,
+					"username": "sso-user",
+					"user_id":  "42",
+				})
+			} else {
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"status": "pending",
+				})
+			}
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	outBuf, errBuf := setupSSOTestCmd(t, server.URL)
+
+	loginCmd.Flags().Set("sso", "true")
+	loginCmd.SetOut(outBuf)
+	loginCmd.SetErr(errBuf)
+
+	err := loginCmd.RunE(loginCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, outBuf.String(), "Logged in as sso-user via SSO")
+
+	// Verify token was saved
+	tokenPath := filepath.Join(os.Getenv("STACKCTL_CONFIG_DIR"), "tokens", "test.json")
+	data, readErr := os.ReadFile(tokenPath)
+	require.NoError(t, readErr)
+
+	var stored storedToken
+	require.NoError(t, json.Unmarshal(data, &stored))
+	assert.Equal(t, testJWT, stored.Token)
+	assert.Equal(t, "sso-user", stored.Username)
+	assert.False(t, stored.ExpiresAt.IsZero(), "expiry should be parsed from JWT")
+}
+
+func TestParseJWTExpiry(t *testing.T) {
+	tests := []struct {
+		name    string
+		token   string
+		wantExp int64
+	}{
+		{
+			name: "valid JWT with exp",
+			// Payload: {"exp":4102444800} (2100-01-01T00:00:00Z)
+			token:   "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjQxMDI0NDQ4MDB9.sig",
+			wantExp: 4102444800,
+		},
+		{
+			name:    "not a JWT",
+			token:   "not-a-jwt",
+			wantExp: 0,
+		},
+		{
+			name:    "empty token",
+			token:   "",
+			wantExp: 0,
+		},
+		{
+			name: "JWT without exp",
+			// Payload: {"sub":"user"}
+			token:   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.sig",
+			wantExp: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseJWTExpiry(tt.token)
+			if tt.wantExp == 0 {
+				assert.True(t, result.IsZero(), "expected zero time for token %q", tt.token)
+			} else {
+				assert.Equal(t, tt.wantExp, result.Unix())
+			}
+		})
+	}
+}

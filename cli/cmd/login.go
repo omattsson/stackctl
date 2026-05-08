@@ -2,13 +2,17 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
+	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -30,6 +34,11 @@ Environment variables:
   STACKCTL_PASSWORD   Password for authentication (avoids interactive prompt)`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		sso, _ := cmd.Flags().GetBool("sso")
+		if sso {
+			return loginSSO(cmd)
+		}
+
 		username, _ := cmd.Flags().GetString("username")
 		password, _ := cmd.Flags().GetString("password")
 
@@ -186,9 +195,114 @@ Examples:
 	},
 }
 
+func loginSSO(cmd *cobra.Command) error {
+	c, err := newUnauthenticatedClient()
+	if err != nil {
+		return err
+	}
+
+	// Check OIDC is enabled on the server
+	oidcCfg, err := c.GetOIDCConfig()
+	if err != nil {
+		return fmt.Errorf("checking SSO configuration: %w", err)
+	}
+	if !oidcCfg.Enabled {
+		return fmt.Errorf("SSO is not enabled on this server. Use 'stackctl login' with username/password instead")
+	}
+
+	// Initiate CLI auth session
+	session, err := c.CLIAuth()
+	if err != nil {
+		return fmt.Errorf("initiating SSO login: %w", err)
+	}
+
+	// Open browser
+	fmt.Fprintln(cmd.ErrOrStderr(), "Opening browser for SSO login...")
+	fmt.Fprintf(cmd.ErrOrStderr(), "If the browser doesn't open, visit:\n  %s\n\n", session.LoginURL)
+
+	if browserErr := openBrowser(session.LoginURL); browserErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not open browser: %s\n", browserErr)
+	}
+
+	// Poll for completion
+	fmt.Fprint(cmd.ErrOrStderr(), "Waiting for authentication")
+
+	result, err := pollForToken(c, session.SessionID, session.ExpiresIn)
+	if err != nil {
+		fmt.Fprintln(cmd.ErrOrStderr()) // newline after dots
+		return err
+	}
+	fmt.Fprintln(cmd.ErrOrStderr()) // newline after dots
+
+	if result.Token == "" {
+		return fmt.Errorf("server returned an empty token")
+	}
+
+	// Parse token expiry from JWT claims (base64 decode the payload)
+	expiresAt := parseJWTExpiry(result.Token)
+
+	if err := saveToken(result.Token, result.Username, expiresAt); err != nil {
+		return fmt.Errorf("saving token: %w", err)
+	}
+
+	printer.PrintMessage("Logged in as %s via SSO", result.Username)
+	return nil
+}
+
+func pollForToken(c *client.Client, sessionID string, expiresIn int) (*types.CLITokenResponse, error) {
+	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("SSO login timed out. Please try again")
+			}
+			resp, err := c.CLIToken(sessionID)
+			if err != nil {
+				return nil, fmt.Errorf("polling for SSO token: %w", err)
+			}
+			if resp.Status == "completed" {
+				return resp, nil
+			}
+			fmt.Fprint(os.Stderr, ".")
+		}
+	}
+}
+
+// parseJWTExpiry extracts the expiry time from a JWT token without verifying the signature.
+func parseJWTExpiry(token string) time.Time {
+	parts := strings.SplitN(token, ".", 3)
+	if len(parts) != 3 {
+		return time.Time{}
+	}
+	// Add padding if needed
+	payload := parts[1]
+	switch len(payload) % 4 {
+	case 2:
+		payload += "=="
+	case 3:
+		payload += "="
+	}
+	data, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		return time.Time{}
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(data, &claims); err != nil || claims.Exp == 0 {
+		return time.Time{}
+	}
+	return time.Unix(claims.Exp, 0)
+}
+
 func init() {
 	loginCmd.Flags().String("username", "", "Username for authentication")
 	loginCmd.Flags().String("password", "", "Password for authentication")
+	loginCmd.Flags().Bool("sso", false, "Authenticate via SSO (opens browser)")
 
 	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(logoutCmd)

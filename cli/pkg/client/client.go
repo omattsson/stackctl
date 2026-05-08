@@ -397,6 +397,33 @@ func (c *Client) Whoami() (*types.User, error) {
 	return &user, nil
 }
 
+// GetOIDCConfig fetches the OIDC configuration from the server.
+func (c *Client) GetOIDCConfig() (*types.OIDCConfig, error) {
+	var cfg types.OIDCConfig
+	if err := c.Get("/api/v1/auth/oidc/config", &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// CLIAuth initiates a CLI SSO authentication session.
+func (c *Client) CLIAuth() (*types.CLIAuthResponse, error) {
+	var resp types.CLIAuthResponse
+	if err := c.Post("/api/v1/auth/oidc/cli-auth", nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CLIToken polls for CLI SSO authentication completion.
+func (c *Client) CLIToken(sessionID string) (*types.CLITokenResponse, error) {
+	var resp types.CLITokenResponse
+	if err := c.Post("/api/v1/auth/oidc/cli-token", types.CLITokenRequest{SessionID: sessionID}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ListStacks returns a paginated list of stack instances, filtered by query params.
 func (c *Client) ListStacks(params map[string]string) (*types.ListResponse[types.StackInstance], error) {
 	var resp types.ListResponse[types.StackInstance]

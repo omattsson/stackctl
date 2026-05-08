@@ -337,6 +337,33 @@ type SetSharedValuesRequest struct {
 	Priority int    `json:"priority,omitempty"`
 }
 
+// OIDCConfig represents the OIDC configuration from the server.
+type OIDCConfig struct {
+	Enabled          bool   `json:"enabled"`
+	ProviderName     string `json:"provider_name"`
+	LocalAuthEnabled bool   `json:"local_auth_enabled"`
+}
+
+// CLIAuthResponse is returned by POST /api/v1/auth/oidc/cli-auth.
+type CLIAuthResponse struct {
+	SessionID string `json:"session_id"`
+	LoginURL  string `json:"login_url"`
+	ExpiresIn int    `json:"expires_in"`
+}
+
+// CLITokenRequest is the request body for POST /api/v1/auth/oidc/cli-token.
+type CLITokenRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// CLITokenResponse is returned by POST /api/v1/auth/oidc/cli-token.
+type CLITokenResponse struct {
+	Status   string `json:"status"`              // "pending" or "completed"
+	Token    string `json:"token,omitempty"`
+	Username string `json:"username,omitempty"`
+	UserID   string `json:"user_id,omitempty"`
+}
+
 // WSMessage is the envelope for all WebSocket messages.
 type WSMessage struct {
 	Type string          `json:"type"`
