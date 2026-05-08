@@ -2529,12 +2529,13 @@ func TestRetry_RespectsRetryAfterHeader(t *testing.T) {
 
 	c := New(server.URL)
 	c.RetryBackoff = []time.Duration{time.Millisecond, time.Millisecond}
-	start := time.Now()
+	var sleptFor time.Duration
+	c.Sleeper = func(d time.Duration) { sleptFor = d }
 	var result map[string]string
 	err := c.Get("/test", &result)
 	require.NoError(t, err)
 	assert.Equal(t, 2, attempts)
-	assert.GreaterOrEqual(t, time.Since(start), 900*time.Millisecond)
+	assert.Equal(t, time.Second, sleptFor, "should respect Retry-After: 1")
 }
 
 func TestRetry_CapsRetryAfterAt30s(t *testing.T) {

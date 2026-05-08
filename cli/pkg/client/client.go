@@ -320,11 +320,16 @@ func (c *Client) sleep(d time.Duration) {
 
 func maskCredential(header, value string) string {
 	switch strings.ToLower(header) {
-	case "authorization", "x-api-key":
-		if len(value) <= 8 {
-			return "***"
+	case "authorization":
+		if i := strings.IndexByte(value, ' '); i > 0 {
+			return value[:i] + " ***"
 		}
-		return value[:8] + "***"
+		return "***"
+	case "x-api-key":
+		if len(value) > 4 {
+			return "***" + value[len(value)-4:]
+		}
+		return "***"
 	default:
 		return value
 	}

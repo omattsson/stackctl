@@ -216,6 +216,10 @@ func confirmAction(cmd *cobra.Command, message string) (bool, error) {
 }
 
 func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn func(*client.Client, string) (string, error), deleteFn func(*client.Client, string) error, successFmt string) error {
+	if isDryRun(cmd, "Would delete %s", args[0]) {
+		return nil
+	}
+
 	c, err := newClient()
 	if err != nil {
 		return err
@@ -224,10 +228,6 @@ func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn f
 	id, err := resolveFn(c, args[0])
 	if err != nil {
 		return err
-	}
-
-	if isDryRun(cmd, "Would delete %s", id) {
-		return nil
 	}
 
 	confirmed, err := confirmAction(cmd, fmt.Sprintf(promptFmt, id))

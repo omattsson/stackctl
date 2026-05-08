@@ -228,7 +228,7 @@ func TestRegisterPlugins_RunViaCobraRouting(t *testing.T) {
 // ---------- pluginEnv ----------
 
 func TestPluginEnv_PassesDebugFlag(t *testing.T) {
-	t.Parallel()
+
 	root := &cobra.Command{Use: "stackctl"}
 	root.PersistentFlags().Bool("debug", false, "")
 	require.NoError(t, root.PersistentFlags().Set("debug", "true"))
@@ -245,7 +245,7 @@ func TestPluginEnv_PassesDebugFlag(t *testing.T) {
 }
 
 func TestPluginEnv_OmitsDebugWhenNotChanged(t *testing.T) {
-	t.Parallel()
+
 	root := &cobra.Command{Use: "stackctl"}
 	root.PersistentFlags().Bool("debug", false, "")
 
@@ -258,7 +258,7 @@ func TestPluginEnv_OmitsDebugWhenNotChanged(t *testing.T) {
 }
 
 func TestPluginEnv_NilCommand(t *testing.T) {
-	t.Parallel()
+
 	env := pluginEnv(nil)
 	assert.NotEmpty(t, env)
 }
