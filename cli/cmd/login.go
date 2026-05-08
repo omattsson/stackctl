@@ -36,6 +36,9 @@ Environment variables:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sso, _ := cmd.Flags().GetBool("sso")
 		if sso {
+			if cfg == nil || cfg.CurrentContext == "" {
+				return fmt.Errorf("no context configured. Run 'stackctl config use-context <name>' first")
+			}
 			return loginSSO(cmd)
 		}
 
@@ -244,11 +247,16 @@ func loginSSO(cmd *cobra.Command) error {
 		return fmt.Errorf("parsing token expiry: %w", err)
 	}
 
-	if err := saveToken(result.Token, result.Username, expiresAt); err != nil {
+	username := result.Username
+	if username == "" {
+		username = "unknown"
+	}
+
+	if err := saveToken(result.Token, username, expiresAt); err != nil {
 		return fmt.Errorf("saving token: %w", err)
 	}
 
-	printer.PrintMessage("Logged in as %s via SSO", result.Username)
+	printer.PrintMessage("Logged in as %s via SSO", username)
 	return nil
 }
 
@@ -259,7 +267,7 @@ func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer
 	ticker := time.NewTicker(ssoPollInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("SSO login timed out. Please try again")
 		}
@@ -271,8 +279,8 @@ func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer
 			return resp, nil
 		}
 		fmt.Fprint(w, ".")
+		<-ticker.C
 	}
-	return nil, fmt.Errorf("SSO login polling stopped unexpectedly")
 }
 
 // parseJWTExpiry extracts the expiry time from a JWT token without verifying the signature.

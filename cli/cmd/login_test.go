@@ -730,13 +730,13 @@ func TestLoginSSO_InitiateSession(t *testing.T) {
 	defer server.Close()
 
 	outBuf, errBuf := setupSSOTestCmd(t, server.URL)
+	ssoPollInterval = 10 * time.Millisecond
 
 	loginCmd.Flags().Set("sso", "true")
 	loginCmd.SetOut(outBuf)
 	loginCmd.SetErr(errBuf)
 
 	err := loginCmd.RunE(loginCmd, []string{})
-	// It will timeout since we never complete, but we can verify the login URL was printed
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "timed out")
 	assert.Contains(t, errBuf.String(), "https://login.example.com/auth?session=sess-abc")
