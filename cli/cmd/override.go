@@ -466,6 +466,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would delete quota override for instance %s", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -474,10 +478,6 @@ Examples:
 		instanceID, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would delete quota override for instance %s", instanceID) {
-			return nil
 		}
 
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the quota override for instance %s. Continue? (y/n): ", instanceID))
@@ -504,6 +504,10 @@ Examples:
 }
 
 func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteFn func(*client.Client, string, string) error) error {
+	if isDryRun(cmd, "Would delete %s override for chart %s on instance %s", kind, args[1], args[0]) {
+		return nil
+	}
+
 	chartID, err := parseID(args[1])
 	if err != nil {
 		return err
@@ -517,10 +521,6 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 	instanceID, err := resolveStackID(c, args[0])
 	if err != nil {
 		return err
-	}
-
-	if isDryRun(cmd, "Would delete %s override for chart %s on instance %s", kind, chartID, instanceID) {
-		return nil
 	}
 
 	confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the %s override for chart %s on instance %s. Continue? (y/n): ", kind, chartID, instanceID))

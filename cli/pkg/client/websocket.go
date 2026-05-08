@@ -38,9 +38,9 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 	dialer := websocket.DefaultDialer
 	if c.HTTPClient != nil && c.HTTPClient.Transport != nil {
 		if t, ok := c.HTTPClient.Transport.(*http.Transport); ok {
-			dialer = &websocket.Dialer{
-				TLSClientConfig: t.TLSClientConfig,
-			}
+			d := *websocket.DefaultDialer
+			d.TLSClientConfig = t.TLSClientConfig
+			dialer = &d
 		} else if warnWriter != nil {
 			fmt.Fprintln(warnWriter, "Warning: custom HTTP transport detected; WebSocket TLS config may not be applied")
 		}

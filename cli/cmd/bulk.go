@@ -32,6 +32,10 @@ Examples:
   stackctl bulk deploy --ids 1,2,3 -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would deploy %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -40,10 +44,6 @@ Examples:
 		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would deploy %d stacks: %s", len(ids), strings.Join(ids, ", ")) {
-			return nil
 		}
 
 		resp, err := c.BulkDeploy(ids)
@@ -69,6 +69,10 @@ Examples:
   stackctl bulk stop --ids 1,2,3 -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would stop %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -77,10 +81,6 @@ Examples:
 		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would stop %d stacks: %s", len(ids), strings.Join(ids, ", ")) {
-			return nil
 		}
 
 		resp, err := c.BulkStop(ids)
@@ -108,6 +108,10 @@ Examples:
   stackctl bulk clean --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would clean %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -116,10 +120,6 @@ Examples:
 		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would clean %d stacks: %s", len(ids), strings.Join(ids, ", ")) {
-			return nil
 		}
 
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will clean %d stack instances. Continue? (y/n): ", len(ids)))
@@ -156,6 +156,10 @@ Examples:
   stackctl bulk delete --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would delete %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -164,10 +168,6 @@ Examples:
 		ids, err := resolveBulkIDs(c, cmd, args)
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would delete %d stacks: %s", len(ids), strings.Join(ids, ", ")) {
-			return nil
 		}
 
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d stack instances. Continue? (y/n): ", len(ids)))
@@ -208,6 +208,22 @@ func init() {
 	bulkCmd.AddCommand(bulkCleanCmd)
 	bulkCmd.AddCommand(bulkDeleteCmd)
 	rootCmd.AddCommand(bulkCmd)
+}
+
+func rawBulkArgs(cmd *cobra.Command, args []string) []string {
+	var parts []string
+	if idsStr, _ := cmd.Flags().GetString("ids"); idsStr != "" {
+		parts = append(parts, strings.Split(idsStr, ",")...)
+	}
+	parts = append(parts, args...)
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]string, error) {

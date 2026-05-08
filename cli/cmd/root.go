@@ -105,9 +105,13 @@ func newClient() (*client.Client, error) {
 
 	c := client.New(apiURL)
 
-	// Debug: flag > env
-	if flagDebug || os.Getenv("STACKCTL_DEBUG") == "1" {
+	// Debug: explicit flag overrides env var
+	if rootCmd.PersistentFlags().Changed("debug") {
+		c.Debug = flagDebug
+	} else if os.Getenv("STACKCTL_DEBUG") == "1" {
 		c.Debug = true
+	}
+	if c.Debug {
 		c.DebugWriter = os.Stderr
 	}
 

@@ -242,6 +242,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would deploy stack %s", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -250,10 +254,6 @@ Examples:
 		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would deploy stack %s", id) {
-			return nil
 		}
 
 		resp, err := c.DeployStack(id)
@@ -289,6 +289,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would stop stack %s", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -297,10 +301,6 @@ Examples:
 		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would stop stack %s", id) {
-			return nil
 		}
 
 		resp, err := c.StopStack(id)
@@ -338,6 +338,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would clean stack %s (undeploy + remove namespace)", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -346,10 +350,6 @@ Examples:
 		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would clean stack %s (undeploy + remove namespace)", id) {
-			return nil
 		}
 
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will undeploy and remove the namespace for stack %s. Continue? (y/n): ", id))
@@ -802,6 +802,10 @@ Examples:
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isDryRun(cmd, "Would rollback stack %s", args[0]) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -810,10 +814,6 @@ Examples:
 		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
-		}
-
-		if isDryRun(cmd, "Would rollback stack %s", id) {
-			return nil
 		}
 
 		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will rollback stack %s. Continue? (y/n): ", id))
