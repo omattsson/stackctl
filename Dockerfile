@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM golang:1.26.2-alpine@sha256:f85330846cde1e57ca9ec309382da3b8e6ae3ab943d2739500e08c86393a21b1 AS builder
+FROM golang:1.26.3-alpine AS builder
 
 ARG VERSION=dev
 ARG COMMIT=none
