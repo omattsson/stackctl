@@ -8,7 +8,15 @@ import (
 	"strings"
 )
 
+// browserOpener is the function used to open URLs in a browser.
+// Override in tests to avoid spawning external processes.
+var browserOpener = openBrowserDefault
+
 func openBrowser(rawURL string) error {
+	return browserOpener(rawURL)
+}
+
+func openBrowserDefault(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
@@ -30,9 +38,5 @@ func openBrowser(rawURL string) error {
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go cmd.Wait()
-	return nil
+	return cmd.Run()
 }

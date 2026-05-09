@@ -650,6 +650,7 @@ func setupSSOTestCmd(t *testing.T, apiURL string) (*bytes.Buffer, *bytes.Buffer)
 		loginCmd.SetOut(nil)
 		loginCmd.SetErr(nil)
 		ssoPollInterval = 3 * time.Second
+		browserOpener = openBrowserDefault
 	})
 
 	cfg = &config.Config{
@@ -669,6 +670,7 @@ func setupSSOTestCmd(t *testing.T, apiURL string) (*bytes.Buffer, *bytes.Buffer)
 	flagAPIKey = ""
 	flagInsecure = false
 	flagQuiet = false
+	browserOpener = func(string) error { return nil }
 
 	return &outBuf, &errBuf
 }
