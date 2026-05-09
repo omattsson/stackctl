@@ -218,6 +218,9 @@ func loginSSO(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("initiating SSO login: %w", err)
 	}
+	if session.SessionID == "" || session.LoginURL == "" {
+		return fmt.Errorf("server returned incomplete SSO session (missing session ID or login URL)")
+	}
 
 	// Open browser
 	fmt.Fprintln(cmd.ErrOrStderr(), "Opening browser for SSO login...")
