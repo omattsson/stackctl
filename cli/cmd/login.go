@@ -2,13 +2,17 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
+	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -30,6 +34,14 @@ Environment variables:
   STACKCTL_PASSWORD   Password for authentication (avoids interactive prompt)`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		sso, _ := cmd.Flags().GetBool("sso")
+		if sso {
+			if cfg == nil || cfg.CurrentContext == "" {
+				return fmt.Errorf("no context configured. Run 'stackctl config use-context <name>' first")
+			}
+			return loginSSO(cmd)
+		}
+
 		username, _ := cmd.Flags().GetString("username")
 		password, _ := cmd.Flags().GetString("password")
 
@@ -186,9 +198,132 @@ Examples:
 	},
 }
 
+func loginSSO(cmd *cobra.Command) error {
+	c, err := newUnauthenticatedClient()
+	if err != nil {
+		return err
+	}
+
+	// Check OIDC is enabled on the server
+	oidcCfg, err := c.GetOIDCConfig()
+	if err != nil {
+		return fmt.Errorf("checking SSO configuration: %w", err)
+	}
+	if !oidcCfg.Enabled {
+		return fmt.Errorf("SSO is not enabled on this server. Use 'stackctl login' with username/password instead")
+	}
+
+	// Initiate CLI auth session
+	session, err := c.CLIAuth()
+	if err != nil {
+		return fmt.Errorf("initiating SSO login: %w", err)
+	}
+	if session.SessionID == "" || session.LoginURL == "" {
+		return fmt.Errorf("server returned incomplete SSO session (missing session ID or login URL)")
+	}
+
+	// Open browser
+	fmt.Fprintln(cmd.ErrOrStderr(), "Opening browser for SSO login...")
+	fmt.Fprintf(cmd.ErrOrStderr(), "If the browser doesn't open, visit:\n  %s\n\n", session.LoginURL)
+
+	if browserErr := openBrowser(session.LoginURL); browserErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not open browser: %s\n", browserErr)
+	}
+
+	// Poll for completion
+	stderr := cmd.ErrOrStderr()
+	fmt.Fprint(stderr, "Waiting for authentication")
+
+	if session.ExpiresIn <= 0 {
+		return fmt.Errorf("server returned invalid session expiry (%d)", session.ExpiresIn)
+	}
+
+	result, err := pollForToken(c, session.SessionID, session.ExpiresIn, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr) // newline after dots
+		return err
+	}
+	fmt.Fprintln(stderr) // newline after dots
+
+	if result.Token == "" {
+		return fmt.Errorf("server returned an empty token")
+	}
+
+	expiresAt, err := parseJWTExpiry(result.Token)
+	if err != nil {
+		return fmt.Errorf("parsing token expiry: %w", err)
+	}
+
+	if err := saveToken(result.Token, result.Username, expiresAt); err != nil {
+		return fmt.Errorf("saving token: %w", err)
+	}
+
+	displayName := result.Username
+	if displayName == "" {
+		displayName = "SSO user"
+	}
+	printer.PrintMessage("Logged in as %s via SSO", displayName)
+	return nil
+}
+
+var ssoPollInterval = 3 * time.Second
+
+func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer) (*types.CLITokenResponse, error) {
+	deadlineTimer := time.NewTimer(time.Duration(expiresIn) * time.Second)
+	defer deadlineTimer.Stop()
+
+	pollTimer := time.NewTimer(0) // fire immediately
+	defer pollTimer.Stop()
+
+	for {
+		select {
+		case <-deadlineTimer.C:
+			return nil, fmt.Errorf("SSO login timed out. Please try again")
+		case <-pollTimer.C:
+		}
+
+		resp, err := c.CLIToken(sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("polling for SSO token: %w", err)
+		}
+		switch resp.Status {
+		case "completed":
+			return resp, nil
+		case "pending":
+			fmt.Fprint(w, ".")
+		default:
+			return nil, fmt.Errorf("SSO login failed: %s", resp.Status)
+		}
+		pollTimer.Reset(ssoPollInterval)
+	}
+}
+
+// parseJWTExpiry extracts the expiry time from a JWT token without verifying the signature.
+func parseJWTExpiry(token string) (time.Time, error) {
+	parts := strings.SplitN(token, ".", 3)
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid JWT format")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decoding JWT payload: %w", err)
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(data, &claims); err != nil {
+		return time.Time{}, fmt.Errorf("parsing JWT claims: %w", err)
+	}
+	if claims.Exp == 0 {
+		return time.Time{}, fmt.Errorf("JWT missing exp claim")
+	}
+	return time.Unix(claims.Exp, 0), nil
+}
+
 func init() {
 	loginCmd.Flags().String("username", "", "Username for authentication")
 	loginCmd.Flags().String("password", "", "Password for authentication")
+	loginCmd.Flags().Bool("sso", false, "Authenticate via SSO (opens browser)")
 
 	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(logoutCmd)

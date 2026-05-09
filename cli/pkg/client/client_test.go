@@ -2582,3 +2582,100 @@ func TestDebug_DisabledByDefault(t *testing.T) {
 
 	assert.Empty(t, debugBuf.String())
 }
+
+func TestGetOIDCConfig(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/auth/oidc/config", r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.OIDCConfig{
+			Enabled:          true,
+			ProviderName:     "azure-ad",
+			LocalAuthEnabled: true,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	cfg, err := c.GetOIDCConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.Enabled)
+	assert.Equal(t, "azure-ad", cfg.ProviderName)
+	assert.True(t, cfg.LocalAuthEnabled)
+}
+
+func TestCLIAuth(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/auth/oidc/cli-auth", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.CLIAuthResponse{
+			SessionID: "sess-123",
+			LoginURL:  "https://login.example.com/auth?session=sess-123",
+			ExpiresIn: 300,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.CLIAuth()
+	require.NoError(t, err)
+	assert.Equal(t, "sess-123", resp.SessionID)
+	assert.Equal(t, "https://login.example.com/auth?session=sess-123", resp.LoginURL)
+	assert.Equal(t, 300, resp.ExpiresIn)
+}
+
+func TestCLIToken_Pending(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/auth/oidc/cli-token", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+
+		var req types.CLITokenRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		assert.Equal(t, "sess-123", req.SessionID)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.CLITokenResponse{
+			Status: "pending",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.CLIToken("sess-123")
+	require.NoError(t, err)
+	assert.Equal(t, "pending", resp.Status)
+	assert.Empty(t, resp.Token)
+}
+
+func TestCLIToken_Completed(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/auth/oidc/cli-token", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+
+		var req types.CLITokenRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		assert.Equal(t, "sess-456", req.SessionID)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.CLITokenResponse{
+			Status:   "completed",
+			Token:    "jwt-sso-token",
+			Username: "sso-user",
+			UserID:   "42",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.CLIToken("sess-456")
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, "jwt-sso-token", resp.Token)
+	assert.Equal(t, "sso-user", resp.Username)
+	assert.Equal(t, "42", resp.UserID)
+}
