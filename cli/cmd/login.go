@@ -231,6 +231,10 @@ func loginSSO(cmd *cobra.Command) error {
 	stderr := cmd.ErrOrStderr()
 	fmt.Fprint(stderr, "Waiting for authentication")
 
+	if session.ExpiresIn <= 0 {
+		return fmt.Errorf("server returned invalid session expiry (%d)", session.ExpiresIn)
+	}
+
 	result, err := pollForToken(c, session.SessionID, session.ExpiresIn, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr) // newline after dots
@@ -262,31 +266,32 @@ func loginSSO(cmd *cobra.Command) error {
 var ssoPollInterval = 3 * time.Second
 
 func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer) (*types.CLITokenResponse, error) {
-	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
-	timer := time.NewTimer(0) // fire immediately
-	defer timer.Stop()
+	deadlineTimer := time.NewTimer(time.Duration(expiresIn) * time.Second)
+	defer deadlineTimer.Stop()
+
+	pollTimer := time.NewTimer(0) // fire immediately
+	defer pollTimer.Stop()
 
 	for {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return nil, fmt.Errorf("SSO login timed out. Please try again")
-		}
-
 		select {
-		case <-timer.C:
-		case <-time.After(remaining):
+		case <-deadlineTimer.C:
 			return nil, fmt.Errorf("SSO login timed out. Please try again")
+		case <-pollTimer.C:
 		}
 
 		resp, err := c.CLIToken(sessionID)
 		if err != nil {
 			return nil, fmt.Errorf("polling for SSO token: %w", err)
 		}
-		if resp.Status == "completed" {
+		switch resp.Status {
+		case "completed":
 			return resp, nil
+		case "pending":
+			fmt.Fprint(w, ".")
+		default:
+			return nil, fmt.Errorf("SSO login failed: %s", resp.Status)
 		}
-		fmt.Fprint(w, ".")
-		timer.Reset(ssoPollInterval)
+		pollTimer.Reset(ssoPollInterval)
 	}
 }
 
