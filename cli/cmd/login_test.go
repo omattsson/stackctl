@@ -768,6 +768,10 @@ func TestLoginSSO_PollCompleted(t *testing.T) {
 				"expires_in": 30,
 			})
 		case "/api/v1/auth/oidc/cli-token":
+			var req types.CLITokenRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+				assert.Equal(t, "sess-poll", req.SessionID, "cli-token should send the session ID from cli-auth")
+			}
 			callCount++
 			w.WriteHeader(http.StatusOK)
 			if callCount >= 2 {

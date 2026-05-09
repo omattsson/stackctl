@@ -38,5 +38,11 @@ func openBrowserDefault(rawURL string) error {
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
-	return cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		cmd.Process.Release()
+	}
+	return nil
 }

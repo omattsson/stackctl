@@ -247,16 +247,15 @@ func loginSSO(cmd *cobra.Command) error {
 		return fmt.Errorf("parsing token expiry: %w", err)
 	}
 
-	username := result.Username
-	if username == "" {
-		username = "unknown"
-	}
-
-	if err := saveToken(result.Token, username, expiresAt); err != nil {
+	if err := saveToken(result.Token, result.Username, expiresAt); err != nil {
 		return fmt.Errorf("saving token: %w", err)
 	}
 
-	printer.PrintMessage("Logged in as %s via SSO", username)
+	displayName := result.Username
+	if displayName == "" {
+		displayName = "SSO user"
+	}
+	printer.PrintMessage("Logged in as %s via SSO", displayName)
 	return nil
 }
 
@@ -264,13 +263,21 @@ var ssoPollInterval = 3 * time.Second
 
 func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer) (*types.CLITokenResponse, error) {
 	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
-	ticker := time.NewTicker(ssoPollInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(0) // fire immediately
+	defer timer.Stop()
 
 	for {
-		if time.Now().After(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			return nil, fmt.Errorf("SSO login timed out. Please try again")
 		}
+
+		select {
+		case <-timer.C:
+		case <-time.After(remaining):
+			return nil, fmt.Errorf("SSO login timed out. Please try again")
+		}
+
 		resp, err := c.CLIToken(sessionID)
 		if err != nil {
 			return nil, fmt.Errorf("polling for SSO token: %w", err)
@@ -279,7 +286,7 @@ func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer
 			return resp, nil
 		}
 		fmt.Fprint(w, ".")
-		<-ticker.C
+		timer.Reset(ssoPollInterval)
 	}
 }
 
