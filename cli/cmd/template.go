@@ -383,6 +383,66 @@ Examples:
 	},
 }
 
+var templatePublishCmd = &cobra.Command{
+	Use:   "publish <id>",
+	Short: "Publish a stack template",
+	Long: `Publish a stack template to make it available for use.
+
+Examples:
+  stackctl template publish 1
+  stackctl template publish 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		tmpl, err := c.PublishTemplate(id)
+		if err != nil {
+			return err
+		}
+
+		return printTemplate(tmpl)
+	},
+}
+
+var templateUnpublishCmd = &cobra.Command{
+	Use:   "unpublish <id>",
+	Short: "Unpublish a stack template",
+	Long: `Unpublish a stack template to prevent new instantiations.
+
+Examples:
+  stackctl template unpublish 1
+  stackctl template unpublish 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		tmpl, err := c.UnpublishTemplate(id)
+		if err != nil {
+			return err
+		}
+
+		return printTemplate(tmpl)
+	},
+}
+
 // printTemplate outputs a StackTemplate in the active format.
 func printTemplate(tmpl *types.StackTemplate) error {
 	if printer.Quiet {
@@ -462,5 +522,7 @@ func init() {
 	templateCmd.AddCommand(templateCreateCmd)
 	templateCmd.AddCommand(templateUpdateCmd)
 	templateCmd.AddCommand(templateCloneCmd)
+	templateCmd.AddCommand(templatePublishCmd)
+	templateCmd.AddCommand(templateUnpublishCmd)
 	rootCmd.AddCommand(templateCmd)
 }
