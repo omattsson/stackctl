@@ -1179,3 +1179,185 @@ func TestTemplateCloneCmd_EmptyName(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--name must not be empty")
 }
+
+// ---------- template publish ----------
+
+func TestTemplatePublishCmd_Success(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates/10/publish", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := templatePublishCmd.RunE(templatePublishCmd, []string{"10"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "10")
+	assert.Contains(t, out, "web-app-template")
+}
+
+func TestTemplatePublishCmd_JSONOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := templatePublishCmd.RunE(templatePublishCmd, []string{"10"})
+	require.NoError(t, err)
+
+	var result types.StackTemplate
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "10", result.ID)
+	assert.True(t, result.Published)
+}
+
+func TestTemplatePublishCmd_YAMLOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templatePublishCmd.RunE(templatePublishCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "web-app-template")
+}
+
+func TestTemplatePublishCmd_QuietOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := templatePublishCmd.RunE(templatePublishCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Equal(t, "10\n", buf.String())
+}
+
+func TestTemplatePublishCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Permission denied"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := templatePublishCmd.RunE(templatePublishCmd, []string{"10"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}
+
+// ---------- template unpublish ----------
+
+func TestTemplateUnpublishCmd_Success(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates/10/unpublish", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := templateUnpublishCmd.RunE(templateUnpublishCmd, []string{"10"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "10")
+	assert.Contains(t, out, "web-app-template")
+}
+
+func TestTemplateUnpublishCmd_JSONOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := templateUnpublishCmd.RunE(templateUnpublishCmd, []string{"10"})
+	require.NoError(t, err)
+
+	var result types.StackTemplate
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "10", result.ID)
+	assert.False(t, result.Published)
+}
+
+func TestTemplateUnpublishCmd_YAMLOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templateUnpublishCmd.RunE(templateUnpublishCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "web-app-template")
+}
+
+func TestTemplateUnpublishCmd_QuietOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := templateUnpublishCmd.RunE(templateUnpublishCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Equal(t, "10\n", buf.String())
+}
+
+func TestTemplateUnpublishCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Permission denied"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := templateUnpublishCmd.RunE(templateUnpublishCmd, []string{"10"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}

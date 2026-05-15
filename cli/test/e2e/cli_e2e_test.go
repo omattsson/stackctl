@@ -815,6 +815,30 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(resp)
 
+		// Publish template
+		case r.URL.Path == "/api/v1/templates/1/publish" && r.Method == http.MethodPost:
+			resp := map[string]interface{}{
+				"id": "1", "name": "web-template", "description": "Web app stack",
+				"is_published": true, "owner_id": "admin", "charts": []map[string]interface{}{
+					{"id": "1", "chart_name": "frontend", "repository_url": "https://charts.example.com", "chart_version": "1.0.0"},
+				},
+				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// Unpublish template
+		case r.URL.Path == "/api/v1/templates/1/unpublish" && r.Method == http.MethodPost:
+			resp := map[string]interface{}{
+				"id": "1", "name": "web-template", "description": "Web app stack",
+				"is_published": false, "owner_id": "admin", "charts": []map[string]interface{}{
+					{"id": "1", "chart_name": "frontend", "repository_url": "https://charts.example.com", "chart_version": "1.0.0"},
+				},
+				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
@@ -1354,4 +1378,70 @@ func TestE2E_TemplateClone_QuietOutput(t *testing.T) {
 	stdout, _, err := runStackctl(t, dir, "template", "clone", "1", "--name", "my-clone", "--quiet")
 	require.NoError(t, err)
 	assert.Equal(t, "100\n", stdout)
+}
+
+func TestE2E_TemplatePublish(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "publish", "1")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "web-template")
+	assert.Contains(t, stdout, "true")
+}
+
+func TestE2E_TemplateUnpublish(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "unpublish", "1")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "web-template")
+	assert.Contains(t, stdout, "false")
+}
+
+func TestE2E_TemplatePublish_QuietOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "publish", "1", "--quiet")
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", stdout)
+}
+
+func TestE2E_TemplateUnpublish_QuietOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "unpublish", "1", "--quiet")
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", stdout)
 }

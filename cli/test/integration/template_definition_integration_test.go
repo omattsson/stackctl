@@ -226,6 +226,22 @@ func startTemplateDefMockServer(t *testing.T, state *templateDefMockState) *http
 					w.WriteHeader(http.StatusCreated)
 					json.NewEncoder(w).Encode(inst)
 					return
+
+				case tmplAction == "publish" && r.Method == http.MethodPost:
+					state.mu.Lock()
+					tmpl.Published = true
+					state.mu.Unlock()
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(tmpl)
+					return
+
+				case tmplAction == "unpublish" && r.Method == http.MethodPost:
+					state.mu.Lock()
+					tmpl.Published = false
+					state.mu.Unlock()
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(tmpl)
+					return
 				}
 			}
 		}
@@ -761,6 +777,66 @@ func TestTemplateClone_NotFound(t *testing.T) {
 	c := client.New(server.URL)
 
 	_, err := c.CloneTemplate("999", &types.CloneTemplateRequest{Name: "clone"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template not found")
+}
+
+func TestTemplatePublish_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	tmpl, err := c.PublishTemplate("1")
+	require.NoError(t, err)
+	assert.True(t, tmpl.Published)
+
+	fetched, err := c.GetTemplate("1")
+	require.NoError(t, err)
+	assert.True(t, fetched.Published)
+}
+
+func TestTemplateUnpublish_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	// Ensure published first
+	_, err := c.PublishTemplate("1")
+	require.NoError(t, err)
+
+	tmpl, err := c.UnpublishTemplate("1")
+	require.NoError(t, err)
+	assert.False(t, tmpl.Published)
+
+	fetched, err := c.GetTemplate("1")
+	require.NoError(t, err)
+	assert.False(t, fetched.Published)
+}
+
+func TestTemplatePublish_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	_, err := c.PublishTemplate("999")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "template not found")
 }

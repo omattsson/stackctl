@@ -638,6 +638,26 @@ func (c *Client) CloneTemplate(id string, req *types.CloneTemplateRequest) (*typ
 	return &tmpl, nil
 }
 
+// PublishTemplate publishes a stack template by ID.
+func (c *Client) PublishTemplate(id string) (*types.StackTemplate, error) {
+	var tmpl types.StackTemplate
+	err := c.Post(fmt.Sprintf(pathTemplate+"/publish", id), nil, &tmpl)
+	if err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
+}
+
+// UnpublishTemplate unpublishes a stack template by ID.
+func (c *Client) UnpublishTemplate(id string) (*types.StackTemplate, error) {
+	var tmpl types.StackTemplate
+	err := c.Post(fmt.Sprintf(pathTemplate+"/unpublish", id), nil, &tmpl)
+	if err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
+}
+
 // ListOrphanedNamespaces returns namespaces that have the stack-manager label but no matching DB record.
 func (c *Client) ListOrphanedNamespaces() ([]types.OrphanedNamespace, error) {
 	var ns []types.OrphanedNamespace

@@ -2816,3 +2816,109 @@ func TestCloneTemplate_NotFound(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
 }
+
+func TestPublishTemplate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		statusCode int
+		body       interface{}
+		wantErr    bool
+		wantStatus int
+	}{
+		{
+			name:       "Success",
+			statusCode: http.StatusOK,
+			body:       types.StackTemplate{Base: types.Base{ID: "1"}, Name: "web-app", Published: true},
+			wantErr:    false,
+		},
+		{
+			name:       "Forbidden",
+			statusCode: http.StatusForbidden,
+			body:       types.ErrorResponse{Error: "Permission denied"},
+			wantErr:    true,
+			wantStatus: http.StatusForbidden,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, "/api/v1/templates/1/publish", r.URL.Path)
+				w.WriteHeader(tt.statusCode)
+				json.NewEncoder(w).Encode(tt.body)
+			}))
+			defer server.Close()
+
+			c := New(server.URL)
+			tmpl, err := c.PublishTemplate("1")
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, tmpl)
+				apiErr, ok := err.(*APIError)
+				require.True(t, ok)
+				assert.Equal(t, tt.wantStatus, apiErr.StatusCode)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, tmpl)
+				assert.Equal(t, "1", tmpl.ID)
+				assert.True(t, tmpl.Published)
+			}
+		})
+	}
+}
+
+func TestUnpublishTemplate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		statusCode int
+		body       interface{}
+		wantErr    bool
+		wantStatus int
+	}{
+		{
+			name:       "Success",
+			statusCode: http.StatusOK,
+			body:       types.StackTemplate{Base: types.Base{ID: "1"}, Name: "web-app", Published: false},
+			wantErr:    false,
+		},
+		{
+			name:       "Forbidden",
+			statusCode: http.StatusForbidden,
+			body:       types.ErrorResponse{Error: "Permission denied"},
+			wantErr:    true,
+			wantStatus: http.StatusForbidden,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, "/api/v1/templates/1/unpublish", r.URL.Path)
+				w.WriteHeader(tt.statusCode)
+				json.NewEncoder(w).Encode(tt.body)
+			}))
+			defer server.Close()
+
+			c := New(server.URL)
+			tmpl, err := c.UnpublishTemplate("1")
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, tmpl)
+				apiErr, ok := err.(*APIError)
+				require.True(t, ok)
+				assert.Equal(t, tt.wantStatus, apiErr.StatusCode)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, tmpl)
+				assert.Equal(t, "1", tmpl.ID)
+				assert.False(t, tmpl.Published)
+			}
+		})
+	}
+}
