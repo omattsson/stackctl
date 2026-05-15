@@ -79,6 +79,29 @@ func startTemplateDefMockServer(t *testing.T, state *templateDefMockState) *http
 				Data: data, Total: len(data), Page: 1, PageSize: 20, TotalPages: 1,
 			})
 			return
+
+		case r.URL.Path == "/api/v1/templates" && r.Method == http.MethodPost:
+			var req types.CreateTemplateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid body"})
+				return
+			}
+			state.mu.Lock()
+			nextID := len(state.templates) + 10
+			tmpl := types.StackTemplate{
+				Base:        types.Base{ID: fmt.Sprintf("%d", nextID), Version: "1"},
+				Name:        req.Name,
+				Description: req.Description,
+				Published:   false,
+				Owner:       "admin",
+				Charts:      req.Charts,
+			}
+			state.templates = append(state.templates, tmpl)
+			state.mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(tmpl)
+			return
 		}
 
 		// Template get/instantiate/quick-deploy
@@ -112,6 +135,47 @@ func startTemplateDefMockServer(t *testing.T, state *templateDefMockState) *http
 				case tmplAction == "" && r.Method == http.MethodGet:
 					w.WriteHeader(http.StatusOK)
 					json.NewEncoder(w).Encode(tmpl)
+					return
+
+				case tmplAction == "" && r.Method == http.MethodPut:
+					var req types.UpdateTemplateRequest
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						w.WriteHeader(http.StatusBadRequest)
+						json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid body"})
+						return
+					}
+					state.mu.Lock()
+					if req.Name != "" {
+						tmpl.Name = req.Name
+					}
+					if req.Description != "" {
+						tmpl.Description = req.Description
+					}
+					state.mu.Unlock()
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(tmpl)
+					return
+
+				case tmplAction == "clone" && r.Method == http.MethodPost:
+					var req types.CloneTemplateRequest
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						w.WriteHeader(http.StatusBadRequest)
+						json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid body"})
+						return
+					}
+					state.mu.Lock()
+					cloned := types.StackTemplate{
+						Base:        types.Base{ID: fmt.Sprintf("%d", len(state.templates)+10), Version: "1"},
+						Name:        req.Name,
+						Description: tmpl.Description,
+						Published:   false,
+						Owner:       tmpl.Owner,
+						Charts:      tmpl.Charts,
+					}
+					state.templates = append(state.templates, cloned)
+					state.mu.Unlock()
+					w.WriteHeader(http.StatusCreated)
+					json.NewEncoder(w).Encode(cloned)
 					return
 
 				case tmplAction == "instantiate" && r.Method == http.MethodPost:
@@ -570,4 +634,133 @@ func TestDefinitionWorkflow_MultipleDefinitions(t *testing.T) {
 	resp, err = c.ListDefinitions(nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, resp.Total)
+}
+
+// ---------- Template create/update/clone integration tests ----------
+
+func TestTemplateCreate_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	tmpl, err := c.CreateTemplate(&types.CreateTemplateRequest{
+		Name:        "my-new-template",
+		Description: "Created via API",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "my-new-template", tmpl.Name)
+	assert.Equal(t, "Created via API", tmpl.Description)
+	assert.False(t, tmpl.Published)
+	assert.NotEmpty(t, tmpl.ID)
+
+	// Verify it appears in list
+	resp, err := c.ListTemplates(nil)
+	require.NoError(t, err)
+	assert.Equal(t, 3, resp.Total)
+}
+
+func TestTemplateCreate_InvalidBody(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	// Sending empty name — mock returns 400
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "name is required"})
+	}))
+	defer server2.Close()
+
+	c2 := client.New(server2.URL)
+	_, err := c2.CreateTemplate(&types.CreateTemplateRequest{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "name is required")
+}
+
+func TestTemplateUpdate_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	// Update first template (ID "1")
+	tmpl, err := c.UpdateTemplate("1", &types.UpdateTemplateRequest{
+		Name:        "renamed-template",
+		Description: "Updated description",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "1", tmpl.ID)
+	assert.Equal(t, "renamed-template", tmpl.Name)
+	assert.Equal(t, "Updated description", tmpl.Description)
+}
+
+func TestTemplateUpdate_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	_, err := c.UpdateTemplate("999", &types.UpdateTemplateRequest{Name: "new-name"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template not found")
+}
+
+func TestTemplateClone_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	cloned, err := c.CloneTemplate("1", &types.CloneTemplateRequest{Name: "cloned-template"})
+	require.NoError(t, err)
+	assert.Equal(t, "cloned-template", cloned.Name)
+	assert.False(t, cloned.Published)
+	assert.NotEmpty(t, cloned.ID)
+
+	// Verify clone appears in list
+	resp, err := c.ListTemplates(nil)
+	require.NoError(t, err)
+	assert.Equal(t, 3, resp.Total)
+}
+
+func TestTemplateClone_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	_, err := c.CloneTemplate("999", &types.CloneTemplateRequest{Name: "clone"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template not found")
 }

@@ -760,6 +760,61 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(exportData)
 
+		// Create template
+		case r.URL.Path == "/api/v1/templates" && r.Method == http.MethodPost:
+			var req map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+				return
+			}
+			name, _ := req["name"].(string)
+			description, _ := req["description"].(string)
+			resp := map[string]interface{}{
+				"id": "99", "name": name, "description": description,
+				"published": false, "owner": "admin", "charts": []interface{}{},
+				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(resp)
+
+		// Update template
+		case r.URL.Path == "/api/v1/templates/1" && r.Method == http.MethodPut:
+			var req map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+				return
+			}
+			name := "web-template"
+			if n, ok := req["name"].(string); ok && n != "" {
+				name = n
+			}
+			resp := map[string]interface{}{
+				"id": "1", "name": name, "description": "Updated",
+				"published": true, "owner": "admin", "charts": []interface{}{},
+				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "2",
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// Clone template
+		case r.URL.Path == "/api/v1/templates/1/clone" && r.Method == http.MethodPost:
+			var req map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+				return
+			}
+			cloneName, _ := req["name"].(string)
+			resp := map[string]interface{}{
+				"id": "100", "name": cloneName, "description": "Web app stack",
+				"published": false, "owner": "admin", "charts": []interface{}{},
+				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(resp)
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
@@ -1180,4 +1235,123 @@ func TestE2E_QuietOutputFormat(t *testing.T) {
 	// Verify no table headers or extra output
 	assert.NotContains(t, stdout, "ID")
 	assert.NotContains(t, stdout, "NAME")
+}
+
+func TestE2E_TemplateCreateFromFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Write template JSON to temp file
+	tmplFile := dir + "/template.json"
+	payload := `{"name":"my-new-template","description":"Created from file"}`
+	require.NoError(t, os.WriteFile(tmplFile, []byte(payload), 0o600))
+
+	stdout, _, err := runStackctl(t, dir, "template", "create", "--from-file", tmplFile)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "my-new-template")
+	assert.Contains(t, stdout, "99")
+}
+
+func TestE2E_TemplateCreateWithFlags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "create", "--name", "flag-template", "--description", "via flags")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "flag-template")
+}
+
+func TestE2E_TemplateCreateMissingName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	_, stderr, err := runStackctl(t, dir, "template", "create")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "--name is required")
+}
+
+func TestE2E_TemplateUpdate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "update", "1", "--name", "renamed-template")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "renamed-template")
+}
+
+func TestE2E_TemplateUpdateMissingFlags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	_, stderr, err := runStackctl(t, dir, "template", "update", "1")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "at least one of")
+}
+
+func TestE2E_TemplateClone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "clone", "1", "--name", "my-clone")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "my-clone")
+	assert.Contains(t, stdout, "100")
+}
+
+func TestE2E_TemplateClone_QuietOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "clone", "1", "--name", "my-clone", "--quiet")
+	require.NoError(t, err)
+	assert.Equal(t, "100\n", stdout)
 }
