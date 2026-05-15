@@ -819,8 +819,8 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/api/v1/templates/1/publish" && r.Method == http.MethodPost:
 			resp := map[string]interface{}{
 				"id": "1", "name": "web-template", "description": "Web app stack",
-				"published": true, "owner": "admin", "charts": []map[string]interface{}{
-					{"id": "1", "name": "frontend", "repo_url": "https://charts.example.com", "chart_version": "1.0.0"},
+				"is_published": true, "owner_id": "admin", "charts": []map[string]interface{}{
+					{"id": "1", "chart_name": "frontend", "repository_url": "https://charts.example.com", "chart_version": "1.0.0"},
 				},
 				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 			}
@@ -831,8 +831,8 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/api/v1/templates/1/unpublish" && r.Method == http.MethodPost:
 			resp := map[string]interface{}{
 				"id": "1", "name": "web-template", "description": "Web app stack",
-				"published": false, "owner": "admin", "charts": []map[string]interface{}{
-					{"id": "1", "name": "frontend", "repo_url": "https://charts.example.com", "chart_version": "1.0.0"},
+				"is_published": false, "owner_id": "admin", "charts": []map[string]interface{}{
+					{"id": "1", "chart_name": "frontend", "repository_url": "https://charts.example.com", "chart_version": "1.0.0"},
 				},
 				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
 			}
