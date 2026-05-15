@@ -210,10 +210,10 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 }
 
 var retryableStatuses = map[int]bool{
-	http.StatusTooManyRequests:     true,
-	http.StatusBadGateway:          true,
-	http.StatusServiceUnavailable:  true,
-	http.StatusGatewayTimeout:      true,
+	http.StatusTooManyRequests:    true,
+	http.StatusBadGateway:         true,
+	http.StatusServiceUnavailable: true,
+	http.StatusGatewayTimeout:     true,
 }
 
 var idempotentMethods = map[string]bool{
@@ -606,6 +606,36 @@ func (c *Client) QuickDeployTemplate(id string, req *types.QuickDeployRequest) (
 // DeleteTemplate deletes a stack template by ID.
 func (c *Client) DeleteTemplate(id string) error {
 	return c.Delete(fmt.Sprintf(pathTemplate, id))
+}
+
+// CreateTemplate creates a new stack template.
+func (c *Client) CreateTemplate(req *types.CreateTemplateRequest) (*types.StackTemplate, error) {
+	var tmpl types.StackTemplate
+	err := c.Post("/api/v1/templates", req, &tmpl)
+	if err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
+}
+
+// UpdateTemplate updates an existing stack template by ID.
+func (c *Client) UpdateTemplate(id string, req *types.UpdateTemplateRequest) (*types.StackTemplate, error) {
+	var tmpl types.StackTemplate
+	err := c.Put(fmt.Sprintf(pathTemplate, id), req, &tmpl)
+	if err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
+}
+
+// CloneTemplate clones a stack template by ID.
+func (c *Client) CloneTemplate(id string, req *types.CloneTemplateRequest) (*types.StackTemplate, error) {
+	var tmpl types.StackTemplate
+	err := c.Post(fmt.Sprintf(pathTemplate+"/clone", id), req, &tmpl)
+	if err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
 }
 
 // ListOrphanedNamespaces returns namespaces that have the stack-manager label but no matching DB record.

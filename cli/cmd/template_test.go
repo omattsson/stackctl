@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -646,4 +647,535 @@ func TestTemplateDeleteCmd_QuietOutput(t *testing.T) {
 	err := templateDeleteCmd.RunE(templateDeleteCmd, []string{"10"})
 	require.NoError(t, err)
 	assert.Equal(t, "10\n", buf.String())
+}
+
+// ---------- template create ----------
+
+func TestTemplateCreateCmd_WithNameFlag(t *testing.T) {
+	created := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+
+		var body types.CreateTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "my-template", body.Name)
+		assert.Equal(t, "A template", body.Description)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(created)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	templateCreateCmd.Flags().Set("name", "my-template")
+	templateCreateCmd.Flags().Set("description", "A template")
+	t.Cleanup(func() {
+		templateCreateCmd.Flags().Set("name", "")
+		templateCreateCmd.Flags().Set("description", "")
+		templateCreateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateCreateCmd.RunE(templateCreateCmd, []string{})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "10")
+	assert.Contains(t, out, "web-app-template")
+}
+
+func TestTemplateCreateCmd_JSONOutput(t *testing.T) {
+	created := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(created)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	templateCreateCmd.Flags().Set("name", "my-template")
+	t.Cleanup(func() {
+		templateCreateCmd.Flags().Set("name", "")
+		templateCreateCmd.Flags().Set("description", "")
+		templateCreateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateCreateCmd.RunE(templateCreateCmd, []string{})
+	require.NoError(t, err)
+
+	var result types.StackTemplate
+	require.NoError(t, json.Unmarshal([]byte(buf.String()), &result))
+	assert.Equal(t, "10", result.ID)
+	assert.Equal(t, "web-app-template", result.Name)
+}
+
+func TestTemplateCreateCmd_YAMLOutput(t *testing.T) {
+	created := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(created)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	templateCreateCmd.Flags().Set("name", "my-template")
+	t.Cleanup(func() {
+		templateCreateCmd.Flags().Set("name", "")
+		templateCreateCmd.Flags().Set("description", "")
+		templateCreateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateCreateCmd.RunE(templateCreateCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "web-app-template")
+}
+
+func TestTemplateCreateCmd_QuietOutput(t *testing.T) {
+	created := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(created)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	templateCreateCmd.Flags().Set("name", "my-template")
+	t.Cleanup(func() {
+		templateCreateCmd.Flags().Set("name", "")
+		templateCreateCmd.Flags().Set("description", "")
+		templateCreateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateCreateCmd.RunE(templateCreateCmd, []string{})
+	require.NoError(t, err)
+	assert.Equal(t, "10\n", buf.String())
+}
+
+func TestTemplateCreateCmd_FromFile(t *testing.T) {
+	tmpFile := t.TempDir() + "/template.json"
+	payload := `{"name":"file-template","description":"from file"}`
+	require.NoError(t, os.WriteFile(tmpFile, []byte(payload), 0o600))
+
+	created := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body types.CreateTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "file-template", body.Name)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(created)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	templateCreateCmd.Flags().Set("from-file", tmpFile)
+	t.Cleanup(func() {
+		templateCreateCmd.Flags().Set("name", "")
+		templateCreateCmd.Flags().Set("description", "")
+		templateCreateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateCreateCmd.RunE(templateCreateCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "10")
+}
+
+func TestTemplateCreateCmd_MissingName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called when --name is missing")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	templateCreateCmd.Flags().Set("name", "")
+	templateCreateCmd.Flags().Set("from-file", "")
+	t.Cleanup(func() {
+		templateCreateCmd.Flags().Set("name", "")
+		templateCreateCmd.Flags().Set("description", "")
+		templateCreateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateCreateCmd.RunE(templateCreateCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--name is required")
+}
+
+func TestTemplateCreateCmd_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "internal server error"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	templateCreateCmd.Flags().Set("name", "my-template")
+	t.Cleanup(func() {
+		templateCreateCmd.Flags().Set("name", "")
+		templateCreateCmd.Flags().Set("description", "")
+		templateCreateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateCreateCmd.RunE(templateCreateCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "internal server error")
+}
+
+// ---------- template update ----------
+
+func TestTemplateUpdateCmd_WithNameFlag(t *testing.T) {
+	updated := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates/10", r.URL.Path)
+		require.Equal(t, http.MethodPut, r.Method)
+
+		var body types.UpdateTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "new-name", body.Name)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(updated)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	templateUpdateCmd.Flags().Set("name", "new-name")
+	t.Cleanup(func() {
+		templateUpdateCmd.Flags().Set("name", "")
+		templateUpdateCmd.Flags().Set("description", "")
+		templateUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "10")
+	assert.Contains(t, out, "web-app-template")
+}
+
+func TestTemplateUpdateCmd_JSONOutput(t *testing.T) {
+	updated := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(updated)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	templateUpdateCmd.Flags().Set("name", "new-name")
+	t.Cleanup(func() {
+		templateUpdateCmd.Flags().Set("name", "")
+		templateUpdateCmd.Flags().Set("description", "")
+		templateUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
+	require.NoError(t, err)
+
+	var result types.StackTemplate
+	require.NoError(t, json.Unmarshal([]byte(buf.String()), &result))
+	assert.Equal(t, "10", result.ID)
+}
+
+func TestTemplateUpdateCmd_QuietOutput(t *testing.T) {
+	updated := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(updated)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	templateUpdateCmd.Flags().Set("name", "new-name")
+	t.Cleanup(func() {
+		templateUpdateCmd.Flags().Set("name", "")
+		templateUpdateCmd.Flags().Set("description", "")
+		templateUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Equal(t, "10\n", buf.String())
+}
+
+func TestTemplateUpdateCmd_MissingFlags(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called when no update flags provided")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	templateUpdateCmd.Flags().Set("name", "")
+	templateUpdateCmd.Flags().Set("description", "")
+	templateUpdateCmd.Flags().Set("from-file", "")
+	t.Cleanup(func() {
+		templateUpdateCmd.Flags().Set("name", "")
+		templateUpdateCmd.Flags().Set("description", "")
+		templateUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one of")
+}
+
+func TestTemplateUpdateCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	templateUpdateCmd.Flags().Set("name", "new-name")
+	t.Cleanup(func() {
+		templateUpdateCmd.Flags().Set("name", "")
+		templateUpdateCmd.Flags().Set("description", "")
+		templateUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template not found")
+}
+
+// ---------- template clone ----------
+
+func TestTemplateCloneCmd_Success(t *testing.T) {
+	cloned := sampleTemplate()
+	cloned.ID = "20"
+	cloned.Name = "my-clone"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates/10/clone", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+
+		var body types.CloneTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "my-clone", body.Name)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cloned)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	templateCloneCmd.Flags().Set("name", "my-clone")
+	t.Cleanup(func() {
+		templateCloneCmd.Flags().Set("name", "")
+	})
+
+	err := templateCloneCmd.RunE(templateCloneCmd, []string{"10"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "20")
+	assert.Contains(t, out, "my-clone")
+}
+
+func TestTemplateCloneCmd_JSONOutput(t *testing.T) {
+	cloned := sampleTemplate()
+	cloned.ID = "20"
+	cloned.Name = "my-clone"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cloned)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	templateCloneCmd.Flags().Set("name", "my-clone")
+	t.Cleanup(func() {
+		templateCloneCmd.Flags().Set("name", "")
+	})
+
+	err := templateCloneCmd.RunE(templateCloneCmd, []string{"10"})
+	require.NoError(t, err)
+
+	var result types.StackTemplate
+	require.NoError(t, json.Unmarshal([]byte(buf.String()), &result))
+	assert.Equal(t, "20", result.ID)
+	assert.Equal(t, "my-clone", result.Name)
+}
+
+func TestTemplateCloneCmd_QuietOutput(t *testing.T) {
+	cloned := sampleTemplate()
+	cloned.ID = "20"
+	cloned.Name = "my-clone"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cloned)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	templateCloneCmd.Flags().Set("name", "my-clone")
+	t.Cleanup(func() {
+		templateCloneCmd.Flags().Set("name", "")
+	})
+
+	err := templateCloneCmd.RunE(templateCloneCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Equal(t, "20\n", buf.String())
+}
+
+func TestTemplateCloneCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	templateCloneCmd.Flags().Set("name", "my-clone")
+	t.Cleanup(func() {
+		templateCloneCmd.Flags().Set("name", "")
+	})
+
+	err := templateCloneCmd.RunE(templateCloneCmd, []string{"999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template not found")
+}
+
+// ---------- template create – path traversal ----------
+
+func TestTemplateCreateCmd_FromFilePathTraversal(t *testing.T) {
+	_ = setupStackTestCmd(t, "http://127.0.0.1:1") // no server needed
+	templateCreateCmd.Flags().Set("from-file", "../../etc/passwd")
+	t.Cleanup(func() {
+		templateCreateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateCreateCmd.RunE(templateCreateCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "..")
+}
+
+func TestTemplateUpdateCmd_FromFilePathTraversal(t *testing.T) {
+	_ = setupStackTestCmd(t, "http://127.0.0.1:1")
+	templateUpdateCmd.Flags().Set("from-file", "../../etc/passwd")
+	t.Cleanup(func() {
+		templateUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "..")
+}
+
+// ---------- template update – from-file ----------
+
+func TestTemplateUpdateCmd_FromFile(t *testing.T) {
+	updated := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates/10", r.URL.Path)
+		require.Equal(t, http.MethodPut, r.Method)
+
+		var body types.UpdateTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "from-file-name", body.Name)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(updated)
+	}))
+	defer server.Close()
+
+	tmpFile, err := os.CreateTemp(t.TempDir(), "tmpl-*.json")
+	require.NoError(t, err)
+	_, err = tmpFile.WriteString(`{"name":"from-file-name"}`)
+	require.NoError(t, err)
+	require.NoError(t, tmpFile.Close())
+
+	buf := setupStackTestCmd(t, server.URL)
+	templateUpdateCmd.Flags().Set("from-file", tmpFile.Name())
+	t.Cleanup(func() {
+		templateUpdateCmd.Flags().Set("name", "")
+		templateUpdateCmd.Flags().Set("description", "")
+		templateUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err = templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "web-app-template")
+}
+
+// ---------- template update – YAML output ----------
+
+func TestTemplateUpdateCmd_YAMLOutput(t *testing.T) {
+	updated := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(updated)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	templateUpdateCmd.Flags().Set("name", "updated-name")
+	t.Cleanup(func() {
+		templateUpdateCmd.Flags().Set("name", "")
+		templateUpdateCmd.Flags().Set("description", "")
+		templateUpdateCmd.Flags().Set("from-file", "")
+	})
+
+	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "web-app-template")
+}
+
+// ---------- template clone – YAML output ----------
+
+func TestTemplateCloneCmd_YAMLOutput(t *testing.T) {
+	cloned := sampleTemplate()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cloned)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	templateCloneCmd.Flags().Set("name", "my-clone")
+	t.Cleanup(func() {
+		templateCloneCmd.Flags().Set("name", "")
+	})
+
+	err := templateCloneCmd.RunE(templateCloneCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "web-app-template")
+}
+
+// ---------- template clone – empty name guard ----------
+
+func TestTemplateCloneCmd_EmptyName(t *testing.T) {
+	_ = setupStackTestCmd(t, "http://127.0.0.1:1")
+	// --name set to empty string to bypass Cobra's required check
+	templateCloneCmd.Flags().Set("name", "")
+	t.Cleanup(func() {
+		templateCloneCmd.Flags().Set("name", "")
+	})
+
+	err := templateCloneCmd.RunE(templateCloneCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--name must not be empty")
 }

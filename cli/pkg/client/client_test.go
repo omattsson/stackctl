@@ -2679,3 +2679,140 @@ func TestCLIToken_Completed(t *testing.T) {
 	assert.Equal(t, "sso-user", resp.Username)
 	assert.Equal(t, "42", resp.UserID)
 }
+
+func TestCreateTemplate_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/templates", r.URL.Path)
+
+		var body types.CreateTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "new-template", body.Name)
+		assert.Equal(t, "My new template", body.Description)
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.StackTemplate{
+			Base:        types.Base{ID: "55"},
+			Name:        "new-template",
+			Description: "My new template",
+			Owner:       "admin",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	tmpl, err := c.CreateTemplate(&types.CreateTemplateRequest{
+		Name:        "new-template",
+		Description: "My new template",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "55", tmpl.ID)
+	assert.Equal(t, "new-template", tmpl.Name)
+}
+
+func TestCreateTemplate_ServerError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "internal server error"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	tmpl, err := c.CreateTemplate(&types.CreateTemplateRequest{Name: "x"})
+	require.Error(t, err)
+	assert.Nil(t, tmpl)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
+}
+
+func TestUpdateTemplate_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/templates/10", r.URL.Path)
+
+		var body types.UpdateTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "updated-name", body.Name)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.StackTemplate{
+			Base:  types.Base{ID: "10"},
+			Name:  "updated-name",
+			Owner: "admin",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	tmpl, err := c.UpdateTemplate("10", &types.UpdateTemplateRequest{Name: "updated-name"})
+	require.NoError(t, err)
+	assert.Equal(t, "10", tmpl.ID)
+	assert.Equal(t, "updated-name", tmpl.Name)
+}
+
+func TestUpdateTemplate_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	tmpl, err := c.UpdateTemplate("999", &types.UpdateTemplateRequest{Name: "x"})
+	require.Error(t, err)
+	assert.Nil(t, tmpl)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+func TestCloneTemplate_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/templates/10/clone", r.URL.Path)
+
+		var body types.CloneTemplateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "cloned-template", body.Name)
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.StackTemplate{
+			Base:  types.Base{ID: "20"},
+			Name:  "cloned-template",
+			Owner: "admin",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	tmpl, err := c.CloneTemplate("10", &types.CloneTemplateRequest{Name: "cloned-template"})
+	require.NoError(t, err)
+	assert.Equal(t, "20", tmpl.ID)
+	assert.Equal(t, "cloned-template", tmpl.Name)
+}
+
+func TestCloneTemplate_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	tmpl, err := c.CloneTemplate("999", &types.CloneTemplateRequest{Name: "x"})
+	require.Error(t, err)
+	assert.Nil(t, tmpl)
+
+	apiErr, ok := err.(*APIError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}

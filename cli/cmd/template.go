@@ -1,8 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
@@ -117,36 +122,7 @@ Examples:
 			return err
 		}
 
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, tmpl.ID)
-			return nil
-		}
-
-		switch printer.Format {
-		case output.FormatJSON:
-			return printer.PrintJSON(tmpl)
-		case output.FormatYAML:
-			return printer.PrintYAML(tmpl)
-		default:
-			published := "false"
-			if tmpl.Published {
-				published = "true"
-			}
-			fields := []output.KeyValue{
-				{Key: "ID", Value: tmpl.ID},
-				{Key: "Name", Value: tmpl.Name},
-				{Key: "Description", Value: tmpl.Description},
-				{Key: "Published", Value: published},
-				{Key: "Owner", Value: tmpl.Owner},
-			}
-			for _, ch := range tmpl.Charts {
-				fields = append(fields, output.KeyValue{
-					Key:   "Chart",
-					Value: fmt.Sprintf("%s (%s@%s)", ch.ChartName, ch.RepoURL, ch.ChartVersion),
-				})
-			}
-			return printer.PrintSingle(tmpl, fields)
-		}
+		return printTemplate(tmpl)
 	},
 }
 
@@ -253,6 +229,194 @@ Examples:
 	},
 }
 
+var templateCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new stack template",
+	Long: `Create a new stack template from flags or a JSON file.
+
+Examples:
+  stackctl template create --name my-template --description "My template"
+  stackctl template create --from-file template.json`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fromFile, _ := cmd.Flags().GetString(flagFromFile)
+
+		var req types.CreateTemplateRequest
+		if fromFile != "" {
+			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
+				if segment == ".." {
+					return errors.New(msgPathTraversal)
+				}
+			}
+			fromFile = filepath.Clean(fromFile)
+			data, err := os.ReadFile(fromFile)
+			if err != nil {
+				return readFileErr(fromFile, err)
+			}
+			if err := json.Unmarshal(data, &req); err != nil {
+				return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
+			}
+			if req.Name == "" {
+				return fmt.Errorf("'name' field is required in the template file")
+			}
+		} else {
+			name, _ := cmd.Flags().GetString("name")
+			if name == "" {
+				return fmt.Errorf("--name is required (or use --from-file)")
+			}
+			description, _ := cmd.Flags().GetString("description")
+			req = types.CreateTemplateRequest{
+				Name:        name,
+				Description: description,
+			}
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		tmpl, err := c.CreateTemplate(&req)
+		if err != nil {
+			return err
+		}
+
+		return printTemplate(tmpl)
+	},
+}
+
+var templateUpdateCmd = &cobra.Command{
+	Use:   "update <id>",
+	Short: "Update a stack template",
+	Long: `Update an existing stack template from flags or a JSON file.
+
+Examples:
+  stackctl template update 1 --name new-name
+  stackctl template update 1 --description "Updated description"
+  stackctl template update 1 --from-file template.json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		fromFile, _ := cmd.Flags().GetString(flagFromFile)
+		name, _ := cmd.Flags().GetString("name")
+		description, _ := cmd.Flags().GetString("description")
+
+		if fromFile == "" && name == "" && description == "" {
+			return fmt.Errorf("at least one of --name, --description, or --from-file must be specified")
+		}
+
+		var req types.UpdateTemplateRequest
+		if fromFile != "" {
+			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
+				if segment == ".." {
+					return errors.New(msgPathTraversal)
+				}
+			}
+			fromFile = filepath.Clean(fromFile)
+			data, err := os.ReadFile(fromFile)
+			if err != nil {
+				return readFileErr(fromFile, err)
+			}
+			if err := json.Unmarshal(data, &req); err != nil {
+				return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
+			}
+		} else {
+			if name != "" {
+				req.Name = name
+			}
+			if description != "" {
+				req.Description = description
+			}
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		tmpl, err := c.UpdateTemplate(id, &req)
+		if err != nil {
+			return err
+		}
+
+		return printTemplate(tmpl)
+	},
+}
+
+var templateCloneCmd = &cobra.Command{
+	Use:   "clone <id>",
+	Short: "Clone a stack template",
+	Long: `Clone an existing stack template with a new name.
+
+Examples:
+  stackctl template clone 1 --name my-clone
+  stackctl template clone 1 --name my-clone -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		name, _ := cmd.Flags().GetString("name")
+		if name == "" {
+			return fmt.Errorf("--name must not be empty")
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		tmpl, err := c.CloneTemplate(id, &types.CloneTemplateRequest{Name: name})
+		if err != nil {
+			return err
+		}
+
+		return printTemplate(tmpl)
+	},
+}
+
+// printTemplate outputs a StackTemplate in the active format.
+func printTemplate(tmpl *types.StackTemplate) error {
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, tmpl.ID)
+		return nil
+	}
+
+	switch printer.Format {
+	case output.FormatJSON:
+		return printer.PrintJSON(tmpl)
+	case output.FormatYAML:
+		return printer.PrintYAML(tmpl)
+	default:
+		published := "false"
+		if tmpl.Published {
+			published = "true"
+		}
+		fields := []output.KeyValue{
+			{Key: "ID", Value: tmpl.ID},
+			{Key: "Name", Value: tmpl.Name},
+			{Key: "Description", Value: tmpl.Description},
+			{Key: "Published", Value: published},
+			{Key: "Owner", Value: tmpl.Owner},
+		}
+		for _, ch := range tmpl.Charts {
+			fields = append(fields, output.KeyValue{
+				Key:   "Chart",
+				Value: fmt.Sprintf("%s (%s@%s)", ch.ChartName, ch.RepoURL, ch.ChartVersion),
+			})
+		}
+		return printer.PrintSingle(tmpl, fields)
+	}
+}
+
 func init() {
 	// template list flags
 	templateListCmd.Flags().Bool("published", false, "Show only published templates")
@@ -275,11 +439,28 @@ func init() {
 	templateDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	templateDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
+	// template create flags
+	templateCreateCmd.Flags().String("name", "", "Template name (required unless --from-file is used)")
+	templateCreateCmd.Flags().String("description", "", "Template description")
+	templateCreateCmd.Flags().String(flagFromFile, "", "Path to a JSON file containing the template definition")
+
+	// template update flags
+	templateUpdateCmd.Flags().String("name", "", "New template name")
+	templateUpdateCmd.Flags().String("description", "", "New template description")
+	templateUpdateCmd.Flags().String(flagFromFile, "", "Path to a JSON file with updated template fields")
+
+	// template clone flags
+	templateCloneCmd.Flags().String("name", "", "Name for the cloned template (required)")
+	_ = templateCloneCmd.MarkFlagRequired("name")
+
 	// Wire up subcommands
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateGetCmd)
 	templateCmd.AddCommand(templateInstantiateCmd)
 	templateCmd.AddCommand(templateQuickDeployCmd)
 	templateCmd.AddCommand(templateDeleteCmd)
+	templateCmd.AddCommand(templateCreateCmd)
+	templateCmd.AddCommand(templateUpdateCmd)
+	templateCmd.AddCommand(templateCloneCmd)
 	rootCmd.AddCommand(templateCmd)
 }
