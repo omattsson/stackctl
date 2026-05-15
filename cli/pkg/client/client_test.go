@@ -2922,3 +2922,181 @@ func TestUnpublishTemplate(t *testing.T) {
 		})
 	}
 }
+
+func TestListTemplateVersions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		statusCode int
+		body       interface{}
+		wantErr    bool
+		wantStatus int
+	}{
+		{
+			name:       "Success",
+			statusCode: http.StatusOK,
+			body:       []types.TemplateVersion{{ID: "1", TemplateID: "1", Version: "v1", ChangeSummary: "Initial", CreatedBy: "admin"}},
+			wantErr:    false,
+		},
+		{
+			name:       "NotFound",
+			statusCode: http.StatusNotFound,
+			body:       types.ErrorResponse{Error: "not found"},
+			wantErr:    true,
+			wantStatus: http.StatusNotFound,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/api/v1/templates/1/versions", r.URL.Path)
+				w.WriteHeader(tt.statusCode)
+				json.NewEncoder(w).Encode(tt.body)
+			}))
+			defer server.Close()
+
+			c := New(server.URL)
+			versions, err := c.ListTemplateVersions("1")
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, versions)
+				apiErr, ok := err.(*APIError)
+				require.True(t, ok)
+				assert.Equal(t, tt.wantStatus, apiErr.StatusCode)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, versions, 1)
+				assert.Equal(t, "1", versions[0].ID)
+				assert.Equal(t, "v1", versions[0].Version)
+			}
+		})
+	}
+}
+
+func TestGetTemplateVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		statusCode int
+		body       interface{}
+		wantErr    bool
+		wantStatus int
+	}{
+		{
+			name:       "Success",
+			statusCode: http.StatusOK,
+			body: types.TemplateVersionDetail{
+				TemplateVersion: types.TemplateVersion{ID: "1", Version: "v1"},
+				Snapshot: types.TemplateSnapshot{
+					Template: types.TemplateSnapshotData{Name: "web-app"},
+					Charts:   []types.TemplateChartSnapshotData{{ChartName: "frontend"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "NotFound",
+			statusCode: http.StatusNotFound,
+			body:       types.ErrorResponse{Error: "not found"},
+			wantErr:    true,
+			wantStatus: http.StatusNotFound,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/api/v1/templates/1/versions/v1", r.URL.Path)
+				w.WriteHeader(tt.statusCode)
+				json.NewEncoder(w).Encode(tt.body)
+			}))
+			defer server.Close()
+
+			c := New(server.URL)
+			v, err := c.GetTemplateVersion("1", "v1")
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, v)
+				apiErr, ok := err.(*APIError)
+				require.True(t, ok)
+				assert.Equal(t, tt.wantStatus, apiErr.StatusCode)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, v)
+				assert.Equal(t, "1", v.ID)
+				assert.Equal(t, "v1", v.Version)
+				assert.Equal(t, "web-app", v.Snapshot.Template.Name)
+			}
+		})
+	}
+}
+
+func TestDiffTemplateVersions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		statusCode int
+		body       interface{}
+		wantErr    bool
+		wantStatus int
+	}{
+		{
+			name:       "Success",
+			statusCode: http.StatusOK,
+			body: types.TemplateVersionDiff{
+				Left:  types.TemplateVersionSide{Version: "v1"},
+				Right: types.TemplateVersionSide{Version: "v2"},
+				ChartDiffs: []types.ChartDiffEntry{
+					{ChartName: "frontend", ChangeType: "modified", HasDifferences: true},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "NotFound",
+			statusCode: http.StatusNotFound,
+			body:       types.ErrorResponse{Error: "not found"},
+			wantErr:    true,
+			wantStatus: http.StatusNotFound,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/api/v1/templates/1/versions/diff", r.URL.Path)
+				assert.Equal(t, "v1", r.URL.Query().Get("left"))
+				assert.Equal(t, "v2", r.URL.Query().Get("right"))
+				w.WriteHeader(tt.statusCode)
+				json.NewEncoder(w).Encode(tt.body)
+			}))
+			defer server.Close()
+
+			c := New(server.URL)
+			diff, err := c.DiffTemplateVersions("1", "v1", "v2")
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, diff)
+				apiErr, ok := err.(*APIError)
+				require.True(t, ok)
+				assert.Equal(t, tt.wantStatus, apiErr.StatusCode)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, diff)
+				assert.Equal(t, "v1", diff.Left.Version)
+				assert.Equal(t, "v2", diff.Right.Version)
+				require.Len(t, diff.ChartDiffs, 1)
+				assert.Equal(t, "frontend", diff.ChartDiffs[0].ChartName)
+				assert.Equal(t, "modified", diff.ChartDiffs[0].ChangeType)
+				assert.True(t, diff.ChartDiffs[0].HasDifferences)
+			}
+		})
+	}
+}

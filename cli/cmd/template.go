@@ -443,6 +443,192 @@ Examples:
 	},
 }
 
+var templateVersionsCmd = &cobra.Command{
+	Use:   "versions",
+	Short: "Manage template version history",
+	Long:  "List, inspect, and compare versioned snapshots of a stack template.",
+}
+
+var templateVersionsListCmd = &cobra.Command{
+	Use:   "list <id>",
+	Short: "List version history for a template",
+	Long: `List all published versions of a stack template, newest first.
+
+Examples:
+  stackctl template versions list 1
+  stackctl template versions list 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		versions, err := c.ListTemplateVersions(id)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			ids := make([]string, len(versions))
+			for i, v := range versions {
+				ids[i] = v.ID
+			}
+			printer.PrintIDs(ids)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(versions)
+		case output.FormatYAML:
+			return printer.PrintYAML(versions)
+		default:
+			headers := []string{"ID", "VERSION", "CHANGE SUMMARY", "CREATED BY", "CREATED AT"}
+			rows := make([][]string, len(versions))
+			for i, v := range versions {
+				rows[i] = []string{
+					v.ID,
+					v.Version,
+					v.ChangeSummary,
+					v.CreatedBy,
+					v.CreatedAt.Format("2006-01-02 15:04"),
+				}
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
+}
+
+var templateVersionsGetCmd = &cobra.Command{
+	Use:   "get <id> <version>",
+	Short: "Show a specific template version",
+	Long: `Show details of a specific template version snapshot.
+
+Examples:
+  stackctl template versions get 1 v1
+  stackctl template versions get 1 v1 -o json`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		templateID, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+		versionID := args[1]
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		v, err := c.GetTemplateVersion(templateID, versionID)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, v.ID)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(v)
+		case output.FormatYAML:
+			return printer.PrintYAML(v)
+		default:
+			headers := []string{"FIELD", "VALUE"}
+			rows := [][]string{
+				{"ID", v.ID},
+				{"Template ID", v.TemplateID},
+				{"Version", v.Version},
+				{"Change Summary", v.ChangeSummary},
+				{"Created By", v.CreatedBy},
+				{"Created At", v.CreatedAt.Format("2006-01-02 15:04")},
+				{"Charts", strconv.Itoa(len(v.Snapshot.Charts))},
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
+}
+
+var templateVersionsDiffCmd = &cobra.Command{
+	Use:   "diff <id> <left> <right>",
+	Short: "Compare two template versions",
+	Long: `Compare two template version snapshots side by side.
+
+In table mode, shows a chart-level diff summary.
+In JSON or YAML mode, returns the full structured diff.
+
+Examples:
+  stackctl template versions diff 1 v1 v2
+  stackctl template versions diff 1 v1 v2 -o json`,
+	Args:         cobra.ExactArgs(3),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		templateID, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+		leftID := args[1]
+		rightID := args[2]
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		diff, err := c.DiffTemplateVersions(templateID, leftID, rightID)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			for _, ch := range diff.ChartDiffs {
+				if ch.HasDifferences {
+					fmt.Fprintln(printer.Writer, ch.ChartName)
+				}
+			}
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(diff)
+		case output.FormatYAML:
+			return printer.PrintYAML(diff)
+		default:
+			fmt.Fprintf(printer.Writer, "Comparing %s → %s\n\n", diff.Left.Version, diff.Right.Version)
+			headers := []string{"CHART", "CHANGE", "REPO URL CHANGED", "VALUES CHANGED"}
+			rows := make([][]string, len(diff.ChartDiffs))
+			for i, ch := range diff.ChartDiffs {
+				repoChanged := "no"
+				if ch.LeftRepoURL != ch.RightRepoURL {
+					repoChanged = "yes"
+				}
+				valuesChanged := "no"
+				if ch.LeftValues != ch.RightValues {
+					valuesChanged = "yes"
+				}
+				rows[i] = []string{
+					ch.ChartName,
+					printer.StatusColor(ch.ChangeType),
+					repoChanged,
+					valuesChanged,
+				}
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
+}
+
 // printTemplate outputs a StackTemplate in the active format.
 func printTemplate(tmpl *types.StackTemplate) error {
 	if printer.Quiet {
@@ -524,5 +710,9 @@ func init() {
 	templateCmd.AddCommand(templateCloneCmd)
 	templateCmd.AddCommand(templatePublishCmd)
 	templateCmd.AddCommand(templateUnpublishCmd)
+	templateVersionsCmd.AddCommand(templateVersionsListCmd)
+	templateVersionsCmd.AddCommand(templateVersionsGetCmd)
+	templateVersionsCmd.AddCommand(templateVersionsDiffCmd)
+	templateCmd.AddCommand(templateVersionsCmd)
 	rootCmd.AddCommand(templateCmd)
 }

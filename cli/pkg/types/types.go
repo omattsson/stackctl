@@ -416,3 +416,68 @@ type UpdateTemplateRequest struct {
 type CloneTemplateRequest struct {
 	Name string `json:"name" yaml:"name"`
 }
+
+// TemplateVersion represents a version snapshot entry in the template history.
+type TemplateVersion struct {
+	ID            string    `json:"id" yaml:"id"`
+	TemplateID    string    `json:"template_id" yaml:"template_id"`
+	Version       string    `json:"version" yaml:"version"`
+	ChangeSummary string    `json:"change_summary" yaml:"change_summary"`
+	CreatedBy     string    `json:"created_by" yaml:"created_by"`
+	CreatedAt     time.Time `json:"created_at" yaml:"created_at"`
+}
+
+// TemplateVersionDetail is the full version response including the parsed snapshot.
+type TemplateVersionDetail struct {
+	TemplateVersion
+	Snapshot TemplateSnapshot `json:"snapshot" yaml:"snapshot"`
+}
+
+// TemplateSnapshot is the state of a template captured at publish time.
+type TemplateSnapshot struct {
+	Template TemplateSnapshotData        `json:"template" yaml:"template"`
+	Charts   []TemplateChartSnapshotData `json:"charts" yaml:"charts"`
+}
+
+// TemplateSnapshotData holds the template fields in a snapshot.
+type TemplateSnapshotData struct {
+	Name          string `json:"name" yaml:"name"`
+	Description   string `json:"description,omitempty" yaml:"description,omitempty"`
+	DefaultBranch string `json:"default_branch" yaml:"default_branch"`
+	IsPublished   bool   `json:"is_published" yaml:"is_published"`
+	Version       string `json:"version" yaml:"version"`
+}
+
+// TemplateChartSnapshotData holds chart config fields in a snapshot.
+type TemplateChartSnapshotData struct {
+	ChartName     string `json:"chart_name" yaml:"chart_name"`
+	RepoURL       string `json:"repo_url" yaml:"repo_url"`
+	DefaultValues string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
+	LockedValues  string `json:"locked_values,omitempty" yaml:"locked_values,omitempty"`
+	IsRequired    bool   `json:"is_required" yaml:"is_required"`
+	SortOrder     int    `json:"sort_order" yaml:"sort_order"`
+}
+
+// TemplateVersionDiff is the response from the version diff endpoint.
+type TemplateVersionDiff struct {
+	Left       TemplateVersionSide `json:"left" yaml:"left"`
+	Right      TemplateVersionSide `json:"right" yaml:"right"`
+	ChartDiffs []ChartDiffEntry    `json:"chart_diffs" yaml:"chart_diffs"`
+}
+
+// TemplateVersionSide is one side of a version diff.
+type TemplateVersionSide struct {
+	Version  string           `json:"version" yaml:"version"`
+	Snapshot TemplateSnapshot `json:"snapshot" yaml:"snapshot"`
+}
+
+// ChartDiffEntry describes chart-level differences between two template versions.
+type ChartDiffEntry struct {
+	ChartName      string `json:"chart_name" yaml:"chart_name"`
+	ChangeType     string `json:"change_type" yaml:"change_type"`
+	HasDifferences bool   `json:"has_differences" yaml:"has_differences"`
+	LeftValues     string `json:"left_values,omitempty" yaml:"left_values,omitempty"`
+	RightValues    string `json:"right_values,omitempty" yaml:"right_values,omitempty"`
+	LeftRepoURL    string `json:"left_repo_url,omitempty" yaml:"left_repo_url,omitempty"`
+	RightRepoURL   string `json:"right_repo_url,omitempty" yaml:"right_repo_url,omitempty"`
+}

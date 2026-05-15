@@ -104,19 +104,53 @@ func startTemplateDefMockServer(t *testing.T, state *templateDefMockState) *http
 			return
 		}
 
-		// Template get/instantiate/quick-deploy
+		// Template get/instantiate/quick-deploy/versions
 		if tmplTrim := strings.TrimPrefix(r.URL.Path, "/api/v1/templates/"); tmplTrim != r.URL.Path {
 			parts := strings.Split(tmplTrim, "/")
 			var tmplID string
 			var tmplAction string
+			var tmplSubAction string
 			switch len(parts) {
 			case 1:
 				tmplID = parts[0]
 			case 2:
 				tmplID = parts[0]
 				tmplAction = parts[1]
+			case 3:
+				tmplID = parts[0]
+				tmplAction = parts[1]
+				tmplSubAction = parts[2]
 			}
 			if tmplID != "" {
+				// Handle version routes before template lookup for diff (no template lookup needed)
+				if tmplAction == "versions" && tmplSubAction == "diff" && r.Method == http.MethodGet {
+					leftID := r.URL.Query().Get("left")
+					rightID := r.URL.Query().Get("right")
+					diff := types.TemplateVersionDiff{
+						Left:  types.TemplateVersionSide{Version: leftID},
+						Right: types.TemplateVersionSide{Version: rightID},
+						ChartDiffs: []types.ChartDiffEntry{
+							{ChartName: "frontend", ChangeType: "modified", HasDifferences: true},
+						},
+					}
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(diff)
+					return
+				}
+
+				if tmplAction == "versions" && tmplSubAction != "" && r.Method == http.MethodGet {
+					// Get specific version by version ID
+					detail := types.TemplateVersionDetail{
+						TemplateVersion: types.TemplateVersion{ID: tmplSubAction, TemplateID: tmplID, Version: tmplSubAction},
+						Snapshot: types.TemplateSnapshot{
+							Template: types.TemplateSnapshotData{Name: "web-app"},
+						},
+					}
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(detail)
+					return
+				}
+
 				// Find template
 				var tmpl *types.StackTemplate
 				for i := range state.templates {
@@ -128,6 +162,15 @@ func startTemplateDefMockServer(t *testing.T, state *templateDefMockState) *http
 				if tmpl == nil {
 					w.WriteHeader(http.StatusNotFound)
 					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+					return
+				}
+
+				if tmplAction == "versions" && tmplSubAction == "" && r.Method == http.MethodGet {
+					versions := []types.TemplateVersion{
+						{ID: "1", TemplateID: tmplID, Version: "v1", ChangeSummary: "Initial", CreatedBy: "admin"},
+					}
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(versions)
 					return
 				}
 
@@ -839,4 +882,57 @@ func TestTemplatePublish_NotFound(t *testing.T) {
 	_, err := c.PublishTemplate("999")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "template not found")
+}
+
+func TestTemplateVersionsList_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	versions, err := c.ListTemplateVersions("1")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(versions), 1)
+	assert.Equal(t, "v1", versions[0].Version)
+}
+
+func TestTemplateVersionsGet_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	v, err := c.GetTemplateVersion("1", "v1")
+	require.NoError(t, err)
+	require.NotNil(t, v)
+	assert.Equal(t, "v1", v.Version)
+	assert.Equal(t, "web-app", v.Snapshot.Template.Name)
+}
+
+func TestTemplateVersionsDiff_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newTemplateDefMockState()
+	server := startTemplateDefMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	diff, err := c.DiffTemplateVersions("1", "v1", "v2")
+	require.NoError(t, err)
+	require.NotNil(t, diff)
+	require.Len(t, diff.ChartDiffs, 1)
+	assert.Equal(t, "frontend", diff.ChartDiffs[0].ChartName)
 }

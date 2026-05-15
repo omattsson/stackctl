@@ -658,6 +658,40 @@ func (c *Client) UnpublishTemplate(id string) (*types.StackTemplate, error) {
 	return &tmpl, nil
 }
 
+// ListTemplateVersions returns all version snapshots for a template.
+func (c *Client) ListTemplateVersions(templateID string) ([]types.TemplateVersion, error) {
+	var versions []types.TemplateVersion
+	err := c.Get(fmt.Sprintf("/api/v1/templates/%s/versions", templateID), &versions)
+	if err != nil {
+		return nil, err
+	}
+	return versions, nil
+}
+
+// GetTemplateVersion returns a specific version snapshot for a template.
+func (c *Client) GetTemplateVersion(templateID, versionID string) (*types.TemplateVersionDetail, error) {
+	var v types.TemplateVersionDetail
+	err := c.Get(fmt.Sprintf("/api/v1/templates/%s/versions/%s", templateID, versionID), &v)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+// DiffTemplateVersions compares two template version snapshots.
+func (c *Client) DiffTemplateVersions(templateID, leftID, rightID string) (*types.TemplateVersionDiff, error) {
+	var diff types.TemplateVersionDiff
+	err := c.GetWithQuery(
+		fmt.Sprintf("/api/v1/templates/%s/versions/diff", templateID),
+		map[string]string{"left": leftID, "right": rightID},
+		&diff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &diff, nil
+}
+
 // ListOrphanedNamespaces returns namespaces that have the stack-manager label but no matching DB record.
 func (c *Client) ListOrphanedNamespaces() ([]types.OrphanedNamespace, error) {
 	var ns []types.OrphanedNamespace
