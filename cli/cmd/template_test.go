@@ -706,7 +706,7 @@ func TestTemplateCreateCmd_JSONOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	var result types.StackTemplate
-	require.NoError(t, json.Unmarshal([]byte(buf.String()), &result))
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.Equal(t, "10", result.ID)
 	assert.Equal(t, "web-app-template", result.Name)
 }
@@ -883,7 +883,7 @@ func TestTemplateUpdateCmd_JSONOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	var result types.StackTemplate
-	require.NoError(t, json.Unmarshal([]byte(buf.String()), &result))
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.Equal(t, "10", result.ID)
 }
 
@@ -1007,7 +1007,7 @@ func TestTemplateCloneCmd_JSONOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	var result types.StackTemplate
-	require.NoError(t, json.Unmarshal([]byte(buf.String()), &result))
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.Equal(t, "20", result.ID)
 	assert.Equal(t, "my-clone", result.Name)
 }
