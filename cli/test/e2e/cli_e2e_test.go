@@ -1411,6 +1411,7 @@ func TestE2E_TemplateUnpublish(t *testing.T) {
 	stdout, _, err := runStackctl(t, dir, "template", "unpublish", "1")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "web-template")
+	assert.Contains(t, stdout, "false")
 }
 
 func TestE2E_TemplatePublish_QuietOutput(t *testing.T) {
@@ -1425,6 +1426,22 @@ func TestE2E_TemplatePublish_QuietOutput(t *testing.T) {
 	setupE2EStackContext(t, dir, server.URL)
 
 	stdout, _, err := runStackctl(t, dir, "template", "publish", "1", "--quiet")
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", stdout)
+}
+
+func TestE2E_TemplateUnpublish_QuietOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "unpublish", "1", "--quiet")
 	require.NoError(t, err)
 	assert.Equal(t, "1\n", stdout)
 }

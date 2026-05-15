@@ -1293,6 +1293,61 @@ func TestTemplateUnpublishCmd_Success(t *testing.T) {
 	assert.Contains(t, out, "web-app-template")
 }
 
+func TestTemplateUnpublishCmd_JSONOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := templateUnpublishCmd.RunE(templateUnpublishCmd, []string{"10"})
+	require.NoError(t, err)
+
+	var result types.StackTemplate
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "10", result.ID)
+	assert.False(t, result.Published)
+}
+
+func TestTemplateUnpublishCmd_YAMLOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templateUnpublishCmd.RunE(templateUnpublishCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "web-app-template")
+}
+
+func TestTemplateUnpublishCmd_QuietOutput(t *testing.T) {
+	tmpl := sampleTemplate()
+	tmpl.Published = false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(tmpl)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := templateUnpublishCmd.RunE(templateUnpublishCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Equal(t, "10\n", buf.String())
+}
+
 func TestTemplateUnpublishCmd_Forbidden(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
