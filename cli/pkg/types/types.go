@@ -74,6 +74,41 @@ type Cluster struct {
 	NodeCount   int    `json:"node_count,omitempty" yaml:"node_count,omitempty"`
 }
 
+// CreateClusterRequest is the request body for POST /api/v1/clusters.
+type CreateClusterRequest struct {
+	Name                string `json:"name" yaml:"name"`
+	Description         string `json:"description,omitempty" yaml:"description,omitempty"`
+	APIServerURL        string `json:"api_server_url,omitempty" yaml:"api_server_url,omitempty"`
+	KubeconfigData      string `json:"kubeconfig_data,omitempty" yaml:"kubeconfig_data,omitempty"`
+	KubeconfigPath      string `json:"kubeconfig_path,omitempty" yaml:"kubeconfig_path,omitempty"`
+	Region              string `json:"region,omitempty" yaml:"region,omitempty"`
+	MaxNamespaces       int    `json:"max_namespaces,omitempty" yaml:"max_namespaces,omitempty"`
+	MaxInstancesPerUser int    `json:"max_instances_per_user,omitempty" yaml:"max_instances_per_user,omitempty"`
+	IsDefault           bool   `json:"is_default,omitempty" yaml:"is_default,omitempty"`
+	UseInCluster        bool   `json:"use_in_cluster,omitempty" yaml:"use_in_cluster,omitempty"`
+	RegistryURL         string `json:"registry_url,omitempty" yaml:"registry_url,omitempty"`
+	RegistryUsername    string `json:"registry_username,omitempty" yaml:"registry_username,omitempty"`
+	ImagePullSecretName string `json:"image_pull_secret_name,omitempty" yaml:"image_pull_secret_name,omitempty"`
+}
+
+// UpdateClusterRequest is the request body for PUT /api/v1/clusters/:id.
+// All fields are optional; only non-nil fields are sent.
+type UpdateClusterRequest struct {
+	Name                *string `json:"name,omitempty" yaml:"name,omitempty"`
+	Description         *string `json:"description,omitempty" yaml:"description,omitempty"`
+	APIServerURL        *string `json:"api_server_url,omitempty" yaml:"api_server_url,omitempty"`
+	KubeconfigData      *string `json:"kubeconfig_data,omitempty" yaml:"kubeconfig_data,omitempty"`
+	KubeconfigPath      *string `json:"kubeconfig_path,omitempty" yaml:"kubeconfig_path,omitempty"`
+	Region              *string `json:"region,omitempty" yaml:"region,omitempty"`
+	MaxNamespaces       *int    `json:"max_namespaces,omitempty" yaml:"max_namespaces,omitempty"`
+	MaxInstancesPerUser *int    `json:"max_instances_per_user,omitempty" yaml:"max_instances_per_user,omitempty"`
+	IsDefault           *bool   `json:"is_default,omitempty" yaml:"is_default,omitempty"`
+	UseInCluster        *bool   `json:"use_in_cluster,omitempty" yaml:"use_in_cluster,omitempty"`
+	RegistryURL         *string `json:"registry_url,omitempty" yaml:"registry_url,omitempty"`
+	RegistryUsername    *string `json:"registry_username,omitempty" yaml:"registry_username,omitempty"`
+	ImagePullSecretName *string `json:"image_pull_secret_name,omitempty" yaml:"image_pull_secret_name,omitempty"`
+}
+
 // User represents a user account.
 type User struct {
 	Base

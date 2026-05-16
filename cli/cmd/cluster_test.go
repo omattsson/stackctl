@@ -762,3 +762,472 @@ func TestClusterSharedValuesDeleteCmd_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "shared values not found")
 }
+
+// ---------- cluster create ----------
+
+func resetClusterCreateFlags(t *testing.T) {
+	t.Helper()
+	clusterCreateCmd.Flags().Set("from-file", "")
+	clusterCreateCmd.Flags().Set("name", "")
+	clusterCreateCmd.Flags().Set("description", "")
+	clusterCreateCmd.Flags().Set("kubeconfig-data", "")
+	clusterCreateCmd.Flags().Set("kubeconfig-path", "")
+}
+
+func TestClusterCreateCmd_TableOutput(t *testing.T) {
+	cl := sampleCluster()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+		var req types.CreateClusterRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.Equal(t, "dev-cluster", req.Name)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterCreateCmd.Flags().Set("name", "dev-cluster")
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "dev-cluster")
+}
+
+func TestClusterCreateCmd_JSONOutput(t *testing.T) {
+	cl := sampleCluster()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	clusterCreateCmd.Flags().Set("name", "dev-cluster")
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.NoError(t, err)
+
+	var result types.Cluster
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "dev-cluster", result.Name)
+}
+
+func TestClusterCreateCmd_YAMLOutput(t *testing.T) {
+	cl := sampleCluster()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	clusterCreateCmd.Flags().Set("name", "dev-cluster")
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "name: dev-cluster")
+}
+
+func TestClusterCreateCmd_QuietOutput(t *testing.T) {
+	cl := sampleCluster()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+	clusterCreateCmd.Flags().Set("name", "dev-cluster")
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", buf.String())
+}
+
+func TestClusterCreateCmd_FromFile(t *testing.T) {
+	cl := sampleCluster()
+	cl.Name = "file-cluster"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		var req types.CreateClusterRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.Equal(t, "file-cluster", req.Name)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	tmpFile := filepath.Join(t.TempDir(), "cluster.json")
+	require.NoError(t, os.WriteFile(tmpFile, []byte(`{"name":"file-cluster"}`), 0600))
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterCreateCmd.Flags().Set("from-file", tmpFile)
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "file-cluster")
+}
+
+func TestClusterCreateCmd_MissingName(t *testing.T) {
+	_ = setupClusterTestCmd(t, "http://unused")
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--name is required")
+}
+
+func TestClusterCreateCmd_PathTraversal(t *testing.T) {
+	_ = setupClusterTestCmd(t, "http://unused")
+	clusterCreateCmd.Flags().Set("from-file", "../etc/passwd")
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "file path must not contain '..'")
+}
+
+func TestClusterCreateCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "forbidden"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterCreateCmd.Flags().Set("name", "dev-cluster")
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}
+
+// ---------- cluster update ----------
+
+func resetClusterUpdateFlags(t *testing.T) {
+	t.Helper()
+	clusterUpdateCmd.Flags().Set("from-file", "")
+	clusterUpdateCmd.Flags().Set("name", "")
+	clusterUpdateCmd.Flags().Set("description", "")
+	clusterUpdateCmd.Flags().Set("kubeconfig-data", "")
+	clusterUpdateCmd.Flags().Set("kubeconfig-path", "")
+	clusterUpdateCmd.Flags().Set("default", "false")
+	// reset changed state
+	clusterUpdateCmd.Flags().Lookup("from-file").Changed = false
+	clusterUpdateCmd.Flags().Lookup("name").Changed = false
+	clusterUpdateCmd.Flags().Lookup("description").Changed = false
+	clusterUpdateCmd.Flags().Lookup("kubeconfig-data").Changed = false
+	clusterUpdateCmd.Flags().Lookup("kubeconfig-path").Changed = false
+	clusterUpdateCmd.Flags().Lookup("default").Changed = false
+}
+
+func TestClusterUpdateCmd_TableOutput(t *testing.T) {
+	cl := sampleCluster()
+	cl.Name = "renamed-cluster"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1", r.URL.Path)
+		require.Equal(t, http.MethodPut, r.Method)
+		var req types.UpdateClusterRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.NotNil(t, req.Name)
+		require.Equal(t, "renamed-cluster", *req.Name)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterUpdateCmd.Flags().Set("name", "renamed-cluster")
+	t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "renamed-cluster")
+}
+
+func TestClusterUpdateCmd_NoFlags(t *testing.T) {
+	_ = setupClusterTestCmd(t, "http://unused")
+	t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one of")
+}
+
+func TestClusterUpdateCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "forbidden"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterUpdateCmd.Flags().Set("name", "x")
+	t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}
+
+func TestClusterUpdateCmd_SetDefault(t *testing.T) {
+	cl := sampleCluster()
+	cl.IsDefault = true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req types.UpdateClusterRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.NotNil(t, req.IsDefault)
+		require.True(t, *req.IsDefault)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterUpdateCmd.Flags().Set("default", "true")
+	t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "true")
+}
+
+func TestClusterUpdateCmd_PathTraversal(t *testing.T) {
+	_ = setupClusterTestCmd(t, "http://unused")
+	clusterUpdateCmd.Flags().Set("from-file", "../../etc/passwd")
+	t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "file path must not contain '..'")
+}
+
+func TestClusterUpdateCmd_JSONOutput(t *testing.T) {
+	cl := sampleCluster()
+	cl.Name = "renamed-cluster"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	clusterUpdateCmd.Flags().Set("name", "renamed-cluster")
+	t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), `"name":`)
+	assert.Contains(t, buf.String(), "renamed-cluster")
+}
+
+func TestClusterUpdateCmd_YAMLOutput(t *testing.T) {
+	cl := sampleCluster()
+	cl.Name = "renamed-cluster"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	clusterUpdateCmd.Flags().Set("name", "renamed-cluster")
+	t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "name:")
+	assert.Contains(t, buf.String(), "renamed-cluster")
+}
+
+func TestClusterUpdateCmd_QuietOutput(t *testing.T) {
+	cl := sampleCluster()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+	clusterUpdateCmd.Flags().Set("name", "x")
+	t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", buf.String())
+}
+
+// ---------- cluster delete ----------
+
+func TestClusterDeleteCmd_WithYesFlag(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, "/api/v1/clusters/1", r.URL.Path)
+		require.Equal(t, http.MethodDelete, r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { clusterDeleteCmd.Flags().Set("yes", "false") })
+
+	err := clusterDeleteCmd.RunE(clusterDeleteCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted cluster 1")
+}
+
+func TestClusterDeleteCmd_ConfirmAccept(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterDeleteCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		clusterDeleteCmd.Flags().Set("yes", "false")
+		clusterDeleteCmd.SetIn(nil)
+		clusterDeleteCmd.SetErr(nil)
+	})
+	clusterDeleteCmd.SetIn(strings.NewReader("y\n"))
+	clusterDeleteCmd.SetErr(&bytes.Buffer{})
+
+	err := clusterDeleteCmd.RunE(clusterDeleteCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted cluster")
+}
+
+func TestClusterDeleteCmd_Declined(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called when user declines")
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterDeleteCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		clusterDeleteCmd.Flags().Set("yes", "false")
+		clusterDeleteCmd.SetIn(nil)
+		clusterDeleteCmd.SetErr(nil)
+	})
+	clusterDeleteCmd.SetIn(strings.NewReader("n\n"))
+	clusterDeleteCmd.SetErr(&bytes.Buffer{})
+
+	err := clusterDeleteCmd.RunE(clusterDeleteCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Aborted")
+}
+
+func TestClusterDeleteCmd_DryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called in dry-run mode")
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterDeleteCmd.Flags().Set("dry-run", "true")
+	t.Cleanup(func() { clusterDeleteCmd.Flags().Set("dry-run", "false") })
+
+	err := clusterDeleteCmd.RunE(clusterDeleteCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Would delete")
+}
+
+func TestClusterDeleteCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { clusterDeleteCmd.Flags().Set("yes", "false") })
+
+	err := clusterDeleteCmd.RunE(clusterDeleteCmd, []string{"999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cluster not found")
+}
+
+// ---------- cluster set-default ----------
+
+func TestClusterSetDefaultCmd_Success(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, "/api/v1/clusters/1/default", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	err := clusterSetDefaultCmd.RunE(clusterSetDefaultCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "set as default")
+}
+
+func TestClusterSetDefaultCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	err := clusterSetDefaultCmd.RunE(clusterSetDefaultCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", buf.String())
+}
+
+func TestClusterSetDefaultCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	err := clusterSetDefaultCmd.RunE(clusterSetDefaultCmd, []string{"999"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cluster not found")
+}

@@ -39,15 +39,25 @@ Commands that delete or clean resources must:
 2. Prompt on stderr: `fmt.Fprintf(cmd.ErrOrStderr(), "prompt: ")`
 3. Read from `cmd.InOrStdin()` using `bufio.NewReader`
 
-## ID Parsing
-Use the `parseID()` helper from root.go for all ID arguments. Do not parse IDs inline.
+## ID & Name Parsing
+- `parseID()` (in `stack.go`) trims whitespace and validates non-empty; returns `string` (no numeric conversion). Use for chart IDs, cluster IDs, version IDs, and other sub-resource identifiers.
+- `resolveStackID()` (in `resolve.go`) accepts a stack name OR a numeric ID OR a UUID and resolves to the canonical ID via the API. Use for ALL stack-instance-scoped commands so users can pass `my-stack` instead of `42`.
+- Never parse IDs inline.
 
 ## API Calls
-All API calls go through `pkg/client` via `newClient()`. Never use `http.Get` directly.
+All API and WebSocket calls go through `pkg/client` via `newClient()` (or `newUnauthenticatedClient()` for login). Never use `http.Get` or `websocket.Dial` directly.
+
+## OIDC / Browser Flow
+For commands that open a browser (OIDC loopback login), call `openBrowser()` from `browser.go`. In tests, override the package-level `browserOpener` variable to capture the URL without spawning a process.
+
+## Plugins
+External `stackctl-<name>` executables on `$PATH` are auto-registered as subcommands by `registerPlugins()` in `Execute()`. Do not add command files that shadow common plugin names; do not call `registerPlugins()` from other code paths.
 
 ## Flag Conventions
 - `--output`, `-o` — output format (table|json|yaml)
 - `--quiet`, `-q` — IDs only, one per line
-- `--yes`, `-y` — skip confirmation
+- `--yes`, `-y` — skip confirmation on destructive operations
 - `--mine` — filter to current user
 - `--ids` — comma-separated IDs for bulk operations
+- `--debug` — log HTTP traffic to stderr (global; also via `STACKCTL_DEBUG=1`)
+- `--insecure` — skip TLS verification (global; prints stderr warning)
