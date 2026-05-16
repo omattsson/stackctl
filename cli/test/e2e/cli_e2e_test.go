@@ -1856,6 +1856,5 @@ func TestE2EClusterSetDefault(t *testing.T) {
 
 	stdout, _, err := runStackctl(t, dir, "cluster", "set-default", "1")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "1")
+	assert.Contains(t, stdout, "set as default")
 }
-
