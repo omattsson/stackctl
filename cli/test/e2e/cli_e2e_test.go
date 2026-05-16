@@ -1487,5 +1487,35 @@ func TestE2E_TemplateVersionsDiff(t *testing.T) {
 	stdout, _, err := runStackctl(t, dir, "template", "versions", "diff", "1", "v1", "v2")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "frontend")
+	assert.Contains(t, stdout, "Comparing v1 ->")
+	assert.Contains(t, stdout, "CHART")
+	assert.Contains(t, stdout, "CHANGE")
+}
+
+func TestE2E_TemplateVersionsList(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Table output — verify headers and data
+	stdout, _, err := runStackctl(t, dir, "template", "versions", "list", "1")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "ID")
+	assert.Contains(t, stdout, "VERSION")
+	assert.Contains(t, stdout, "CHANGE SUMMARY")
 	assert.Contains(t, stdout, "v1")
+	assert.Contains(t, stdout, "Initial publish")
+
+	// Quiet output — IDs only, one per line
+	stdout, _, err = runStackctl(t, dir, "template", "versions", "list", "1", "--quiet")
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 2)
+	assert.NotContains(t, stdout, "VERSION")
 }

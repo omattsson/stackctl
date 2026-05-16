@@ -443,6 +443,7 @@ type TemplateSnapshot struct {
 type TemplateSnapshotData struct {
 	Name          string `json:"name" yaml:"name"`
 	Description   string `json:"description,omitempty" yaml:"description,omitempty"`
+	Category      string `json:"category,omitempty" yaml:"category,omitempty"`
 	DefaultBranch string `json:"default_branch" yaml:"default_branch"`
 	IsPublished   bool   `json:"is_published" yaml:"is_published"`
 	Version       string `json:"version" yaml:"version"`
@@ -480,4 +481,10 @@ type ChartDiffEntry struct {
 	RightValues    string `json:"right_values,omitempty" yaml:"right_values,omitempty"`
 	LeftRepoURL    string `json:"left_repo_url,omitempty" yaml:"left_repo_url,omitempty"`
 	RightRepoURL   string `json:"right_repo_url,omitempty" yaml:"right_repo_url,omitempty"`
+	LeftLocked     string `json:"left_locked,omitempty" yaml:"left_locked,omitempty"`
+	RightLocked    string `json:"right_locked,omitempty" yaml:"right_locked,omitempty"`
+	LeftRequired   bool   `json:"left_required,omitempty" yaml:"left_required,omitempty"`
+	RightRequired  bool   `json:"right_required,omitempty" yaml:"right_required,omitempty"`
+	LeftSortOrder  int    `json:"left_sort_order,omitempty" yaml:"left_sort_order,omitempty"`
+	RightSortOrder int    `json:"right_sort_order,omitempty" yaml:"right_sort_order,omitempty"`
 }

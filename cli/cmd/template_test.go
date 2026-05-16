@@ -1508,6 +1508,20 @@ func TestTemplateVersionsGetCmd_QuietOutput(t *testing.T) {
 	assert.Equal(t, "1\n", buf.String())
 }
 
+func TestTemplateVersionsGetCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "version not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := templateVersionsGetCmd.RunE(templateVersionsGetCmd, []string{"10", "uuid-not-found"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
 // ---------- template versions diff ----------
 
 func sampleTemplateVersionDiff() types.TemplateVersionDiff {
@@ -1537,6 +1551,8 @@ func TestTemplateVersionsDiffCmd_Success(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "frontend")
 	assert.Contains(t, strings.ToLower(out), "modified")
+	assert.Contains(t, out, "Comparing v1 -> v2")
+	assert.Contains(t, out, "CHART")
 }
 
 func TestTemplateVersionsDiffCmd_JSONOutput(t *testing.T) {
@@ -1573,4 +1589,18 @@ func TestTemplateVersionsDiffCmd_QuietOutput(t *testing.T) {
 	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"10", "v1", "v2"})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "frontend")
+}
+
+func TestTemplateVersionsDiffCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"99", "uuid-1", "uuid-2"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }

@@ -507,13 +507,15 @@ Examples:
 }
 
 var templateVersionsGetCmd = &cobra.Command{
-	Use:   "get <id> <version>",
+	Use:   "get <id> <version-id>",
 	Short: "Show a specific template version",
 	Long: `Show details of a specific template version snapshot.
 
+The <version-id> is the UUID shown in the ID column of 'template versions list'.
+
 Examples:
-  stackctl template versions get 1 v1
-  stackctl template versions get 1 v1 -o json`,
+  stackctl template versions get 1 $(stackctl template versions list 1 -q | head -1)
+  stackctl template versions get 1 <version-id> -o json`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -552,7 +554,9 @@ Examples:
 				{"Change Summary", v.ChangeSummary},
 				{"Created By", v.CreatedBy},
 				{"Created At", v.CreatedAt.Format("2006-01-02 15:04")},
-				{"Charts", strconv.Itoa(len(v.Snapshot.Charts))},
+			}
+			for _, ch := range v.Snapshot.Charts {
+				rows = append(rows, []string{"Chart", ch.ChartName})
 			}
 			return printer.PrintTable(headers, rows)
 		}
@@ -560,16 +564,17 @@ Examples:
 }
 
 var templateVersionsDiffCmd = &cobra.Command{
-	Use:   "diff <id> <left> <right>",
+	Use:   "diff <id> <left-version-id> <right-version-id>",
 	Short: "Compare two template versions",
 	Long: `Compare two template version snapshots side by side.
 
+The version IDs are the UUIDs shown in the ID column of 'template versions list'.
 In table mode, shows a chart-level diff summary.
 In JSON or YAML mode, returns the full structured diff.
 
 Examples:
-  stackctl template versions diff 1 v1 v2
-  stackctl template versions diff 1 v1 v2 -o json`,
+  stackctl template versions diff 1 <left-version-id> <right-version-id>
+  stackctl template versions diff 1 <left-version-id> <right-version-id> -o json`,
 	Args:         cobra.ExactArgs(3),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -591,6 +596,8 @@ Examples:
 		}
 
 		if printer.Quiet {
+			// quiet mode prints chart names with differences, one per line.
+			// For diff, chart names are the stable identifiers in this context.
 			for _, ch := range diff.ChartDiffs {
 				if ch.HasDifferences {
 					fmt.Fprintln(printer.Writer, ch.ChartName)
@@ -605,7 +612,7 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(diff)
 		default:
-			fmt.Fprintf(printer.Writer, "Comparing %s → %s\n\n", diff.Left.Version, diff.Right.Version)
+			fmt.Fprintf(printer.Writer, "Comparing %s -> %s\n\n", diff.Left.Version, diff.Right.Version)
 			headers := []string{"CHART", "CHANGE", "REPO URL CHANGED", "VALUES CHANGED"}
 			rows := make([][]string, len(diff.ChartDiffs))
 			for i, ch := range diff.ChartDiffs {
