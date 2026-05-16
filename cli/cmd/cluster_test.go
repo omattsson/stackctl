@@ -860,6 +860,7 @@ func TestClusterCreateCmd_QuietOutput(t *testing.T) {
 
 func TestClusterCreateCmd_FromFile(t *testing.T) {
 	cl := sampleCluster()
+	cl.Name = "file-cluster"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
 		var req types.CreateClusterRequest
@@ -880,7 +881,7 @@ func TestClusterCreateCmd_FromFile(t *testing.T) {
 
 	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "dev-cluster")
+	assert.Contains(t, buf.String(), "file-cluster")
 }
 
 func TestClusterCreateCmd_MissingName(t *testing.T) {

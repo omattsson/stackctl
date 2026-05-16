@@ -459,6 +459,9 @@ Examples:
 			if req.Name == "" {
 				return fmt.Errorf("name is required in the cluster file")
 			}
+			if req.KubeconfigData != "" && req.KubeconfigPath != "" {
+				return fmt.Errorf("file %s must not specify both kubeconfig_data and kubeconfig_path", fromFile)
+			}
 			// Resolve kubeconfig_path in the file to kubeconfig_data client-side.
 			// Relative paths are resolved relative to the directory of fromFile.
 			if req.KubeconfigPath != "" {
@@ -561,6 +564,13 @@ var clusterUpdateCmd = &cobra.Command{
 			}
 			// Resolve kubeconfig_path in the file to kubeconfig_data client-side.
 			// Relative paths are resolved relative to the directory of fromFile.
+			if req.KubeconfigData != nil && *req.KubeconfigData != "" && req.KubeconfigPath != nil && *req.KubeconfigPath != "" {
+				return fmt.Errorf("file %s must not specify both kubeconfig_data and kubeconfig_path", fromFile)
+			}
+			// Normalize kubeconfig_path: "" to nil so the empty-payload check below is accurate.
+			if req.KubeconfigPath != nil && *req.KubeconfigPath == "" {
+				req.KubeconfigPath = nil
+			}
 			if req.KubeconfigPath != nil && *req.KubeconfigPath != "" {
 				for _, segment := range strings.Split(filepath.ToSlash(*req.KubeconfigPath), "/") {
 					if segment == ".." {

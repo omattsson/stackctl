@@ -5,7 +5,7 @@ applyTo: "cli/pkg/config/**"
 # Config Package Conventions
 
 ## Storage Layout
-- Config file: `~/.stackmanager/config.yaml` (XDG-aware via `os.UserConfigDir()` fallback).
+- Config file: `~/.stackmanager/config.yaml`. Directory resolved by `ConfigDir()`: checks `STACKCTL_CONFIG_DIR` env first, then `XDG_CONFIG_HOME` (appending `/stackmanager`), then falls back to `~/.stackmanager` via `os.UserHomeDir()`.
 - Tokens: `~/.stackmanager/tokens/<context>.json` — one file per context. File mode MUST be `0600`; the directory MUST be `0700`. Verify mode after every write.
 - Never store secrets (`api-key`, password) in process env beyond the lifetime of the command unless explicitly set by the user.
 
