@@ -1659,3 +1659,38 @@ func TestTemplateVersionsDiffCmd_YAMLOutput(t *testing.T) {
 	assert.Contains(t, out, "frontend")
 	assert.Contains(t, out, "change_type:")
 }
+
+func TestTemplateVersionsDiffCmd_UnifiedDiffOutput(t *testing.T) {
+	diff := types.TemplateVersionDiff{
+		Left:  types.TemplateVersionSide{Version: "v1"},
+		Right: types.TemplateVersionSide{Version: "v2"},
+		ChartDiffs: []types.ChartDiffEntry{
+			{
+				ChartName:      "backend",
+				ChangeType:     "modified",
+				HasDifferences: true,
+				LeftValues:     "replicaCount: 1\nimage:\n  tag: v1.0\n",
+				RightValues:    "replicaCount: 2\nimage:\n  tag: v2.0\n",
+			},
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(diff)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"10", "uuid-v1", "uuid-v2"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "backend")
+	// unified diff markers must be present
+	assert.Contains(t, out, "---")
+	assert.Contains(t, out, "+++")
+	assert.Contains(t, out, "@@")
+	// changed lines must appear
+	assert.Contains(t, out, "-replicaCount: 1")
+	assert.Contains(t, out, "+replicaCount: 2")
+}
