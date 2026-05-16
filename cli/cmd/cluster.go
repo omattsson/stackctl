@@ -460,13 +460,18 @@ Examples:
 				return fmt.Errorf("name is required in the cluster file")
 			}
 			// Resolve kubeconfig_path in the file to kubeconfig_data client-side.
+			// Relative paths are resolved relative to the directory of fromFile.
 			if req.KubeconfigPath != "" {
 				for _, segment := range strings.Split(filepath.ToSlash(req.KubeconfigPath), "/") {
 					if segment == ".." {
 						return fmt.Errorf("kubeconfig_path in file must not contain '..' segments")
 					}
 				}
-				content, err := os.ReadFile(filepath.Clean(req.KubeconfigPath))
+				kpPath := req.KubeconfigPath
+				if !filepath.IsAbs(kpPath) {
+					kpPath = filepath.Join(filepath.Dir(fromFile), kpPath)
+				}
+				content, err := os.ReadFile(filepath.Clean(kpPath))
 				if err != nil {
 					return fmt.Errorf("reading kubeconfig file %s: %w", req.KubeconfigPath, err)
 				}
@@ -555,13 +560,18 @@ var clusterUpdateCmd = &cobra.Command{
 				}
 			}
 			// Resolve kubeconfig_path in the file to kubeconfig_data client-side.
+			// Relative paths are resolved relative to the directory of fromFile.
 			if req.KubeconfigPath != nil && *req.KubeconfigPath != "" {
 				for _, segment := range strings.Split(filepath.ToSlash(*req.KubeconfigPath), "/") {
 					if segment == ".." {
 						return fmt.Errorf("kubeconfig_path in file must not contain '..' segments")
 					}
 				}
-				content, err := os.ReadFile(filepath.Clean(*req.KubeconfigPath))
+				kpPath := *req.KubeconfigPath
+				if !filepath.IsAbs(kpPath) {
+					kpPath = filepath.Join(filepath.Dir(fromFile), kpPath)
+				}
+				content, err := os.ReadFile(filepath.Clean(kpPath))
 				if err != nil {
 					return fmt.Errorf("reading kubeconfig file %s: %w", *req.KubeconfigPath, err)
 				}

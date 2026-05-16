@@ -40,11 +40,15 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 		switch {
 		// POST /api/v1/clusters — create
 		case r.URL.Path == "/api/v1/clusters" && r.Method == http.MethodPost:
-			var cluster types.Cluster
-			if err := json.NewDecoder(r.Body).Decode(&cluster); err != nil {
+			var createReq types.CreateClusterRequest
+			if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid body"})
 				return
+			}
+			cluster := types.Cluster{
+				Name:        createReq.Name,
+				Description: createReq.Description,
 			}
 			state.mu.Lock()
 			cluster.ID = fmt.Sprintf("%d", state.nextID)

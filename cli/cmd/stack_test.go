@@ -30,17 +30,23 @@ func setupStackTestCmd(t *testing.T, apiURL string) *bytes.Buffer {
 	// Snapshot all mutated globals so t.Cleanup can restore them.
 	prevCfg := cfg
 	prevPrinter := printer
+	prevFlagOutput := flagOutput
+	prevFlagQuiet := flagQuiet
+	prevFlagNoColor := flagNoColor
 	prevFlagAPIURL := flagAPIURL
 	prevFlagAPIKey := flagAPIKey
 	prevFlagInsecure := flagInsecure
-	prevFlagQuiet := flagQuiet
+	prevFlagDebug := flagDebug
 	t.Cleanup(func() {
 		cfg = prevCfg
 		printer = prevPrinter
+		flagOutput = prevFlagOutput
+		flagQuiet = prevFlagQuiet
+		flagNoColor = prevFlagNoColor
 		flagAPIURL = prevFlagAPIURL
 		flagAPIKey = prevFlagAPIKey
 		flagInsecure = prevFlagInsecure
-		flagQuiet = prevFlagQuiet
+		flagDebug = prevFlagDebug
 	})
 
 	cfg = &config.Config{
