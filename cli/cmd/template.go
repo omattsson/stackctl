@@ -12,6 +12,7 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
+	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 )
 
@@ -631,7 +632,28 @@ Examples:
 					valuesChanged,
 				}
 			}
-			return printer.PrintTable(headers, rows)
+			if err := printer.PrintTable(headers, rows); err != nil {
+				return err
+			}
+			// Render per-chart unified text diff for charts with values changes.
+			for _, ch := range diff.ChartDiffs {
+				if ch.LeftValues == ch.RightValues {
+					continue
+				}
+				ud := difflib.UnifiedDiff{
+					A:        difflib.SplitLines(ch.LeftValues),
+					B:        difflib.SplitLines(ch.RightValues),
+					FromFile: fmt.Sprintf("%s (%s)", ch.ChartName, diff.Left.Version),
+					ToFile:   fmt.Sprintf("%s (%s)", ch.ChartName, diff.Right.Version),
+					Context:  3,
+				}
+				text, err := difflib.GetUnifiedDiffString(ud)
+				if err != nil || text == "" {
+					continue
+				}
+				fmt.Fprintf(printer.Writer, "\n%s", text)
+			}
+			return nil
 		}
 	},
 }

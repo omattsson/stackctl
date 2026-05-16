@@ -1454,6 +1454,24 @@ func TestTemplateVersionsListCmd_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
+func TestTemplateVersionsListCmd_YAMLOutput(t *testing.T) {
+	v := sampleTemplateVersion()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.TemplateVersion{v})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templateVersionsListCmd.RunE(templateVersionsListCmd, []string{"10"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "version:")
+	assert.Contains(t, out, "v1")
+}
+
 // ---------- template versions get ----------
 
 func TestTemplateVersionsGetCmd_Success(t *testing.T) {
@@ -1520,6 +1538,24 @@ func TestTemplateVersionsGetCmd_NotFound(t *testing.T) {
 	err := templateVersionsGetCmd.RunE(templateVersionsGetCmd, []string{"10", "uuid-not-found"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestTemplateVersionsGetCmd_YAMLOutput(t *testing.T) {
+	v := sampleTemplateVersionDetail()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(v)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templateVersionsGetCmd.RunE(templateVersionsGetCmd, []string{"10", "uuid-v1"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "version:")
+	assert.Contains(t, out, "change_summary:")
 }
 
 // ---------- template versions diff ----------
@@ -1603,4 +1639,23 @@ func TestTemplateVersionsDiffCmd_NotFound(t *testing.T) {
 	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"99", "uuid-1", "uuid-2"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestTemplateVersionsDiffCmd_YAMLOutput(t *testing.T) {
+	diff := sampleTemplateVersionDiff()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(diff)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"10", "uuid-v1", "uuid-v2"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "chart_name:")
+	assert.Contains(t, out, "frontend")
+	assert.Contains(t, out, "change_type:")
 }
