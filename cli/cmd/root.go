@@ -96,6 +96,19 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+// SetArgs overrides the command-line arguments for the next Execute call.
+// Intended for integration tests.
+func SetArgs(args []string) {
+	rootCmd.SetArgs(args)
+}
+
+// SetOut redirects the root command output writer.
+// PersistentPreRunE passes this through to printer.Writer, so all command
+// output is captured. Intended for integration tests.
+func SetOut(w io.Writer) {
+	rootCmd.SetOut(w)
+}
+
 // newClient creates an API client from the current config and flags.
 func newClient() (*client.Client, error) {
 	apiURL := resolveAPIURL()

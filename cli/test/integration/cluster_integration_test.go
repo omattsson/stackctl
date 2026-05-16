@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/omattsson/stackctl/cli/cmd"
 	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -313,4 +315,69 @@ func TestClusterWorkflow_MultipleSetDefault(t *testing.T) {
 	gotA, err = c.GetCluster(idA)
 	require.NoError(t, err)
 	assert.False(t, gotA.IsDefault)
+}
+
+// TestClusterCobra_CreateListSetDefaultDelete drives the actual Cobra commands
+// in-process to validate flag parsing, output formatting, and confirmation
+// behavior across the full create → list → set-default → delete lifecycle.
+// NOT parallel: drives cmd package globals (rootCmd, printer).
+func TestClusterCobra_CreateListSetDefaultDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newClusterMockState()
+	server := startClusterMockServer(t, state)
+	defer server.Close()
+
+	t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
+	t.Setenv("STACKCTL_API_URL", server.URL)
+
+	var buf bytes.Buffer
+
+	// ── create ──────────────────────────────────────────────────────────────
+	buf.Reset()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cluster", "create", "--name", "cobra-prod"})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, buf.String(), "cobra-prod")
+
+	// ── list ─────────────────────────────────────────────────────────────────
+	buf.Reset()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cluster", "list"})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, buf.String(), "cobra-prod")
+
+	// determine the created cluster's ID from server state
+	state.mu.Lock()
+	var createdID string
+	for id := range state.clusters {
+		createdID = id
+	}
+	state.mu.Unlock()
+	require.NotEmpty(t, createdID)
+
+	// ── set-default ──────────────────────────────────────────────────────────
+	buf.Reset()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cluster", "set-default", createdID})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, buf.String(), "set as default")
+
+	state.mu.Lock()
+	isDefault := state.clusters[createdID].IsDefault
+	state.mu.Unlock()
+	assert.True(t, isDefault)
+
+	// ── delete (--yes skips confirmation prompt) ─────────────────────────────
+	buf.Reset()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cluster", "delete", createdID, "--yes"})
+	require.NoError(t, cmd.Execute())
+
+	state.mu.Lock()
+	_, exists := state.clusters[createdID]
+	state.mu.Unlock()
+	assert.False(t, exists)
 }

@@ -27,6 +27,22 @@ func setupStackTestCmd(t *testing.T, apiURL string) *bytes.Buffer {
 	dir := t.TempDir()
 	t.Setenv("STACKCTL_CONFIG_DIR", dir)
 
+	// Snapshot all mutated globals so t.Cleanup can restore them.
+	prevCfg := cfg
+	prevPrinter := printer
+	prevFlagAPIURL := flagAPIURL
+	prevFlagAPIKey := flagAPIKey
+	prevFlagInsecure := flagInsecure
+	prevFlagQuiet := flagQuiet
+	t.Cleanup(func() {
+		cfg = prevCfg
+		printer = prevPrinter
+		flagAPIURL = prevFlagAPIURL
+		flagAPIKey = prevFlagAPIKey
+		flagInsecure = prevFlagInsecure
+		flagQuiet = prevFlagQuiet
+	})
+
 	cfg = &config.Config{
 		CurrentContext: "test",
 		Contexts: map[string]*config.Context{

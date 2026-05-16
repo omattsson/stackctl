@@ -535,6 +535,10 @@ var clusterUpdateCmd = &cobra.Command{
 					return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
 				}
 			}
+			// Ensure the file contained at least one update field.
+			if b, _ := json.Marshal(req); string(b) == "{}" {
+				return fmt.Errorf("file %s specifies no update fields: at least one field must be provided", fromFile)
+			}
 		} else {
 			if nameChanged {
 				v, _ := cmd.Flags().GetString("name")
