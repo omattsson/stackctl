@@ -70,6 +70,20 @@ func runStackctl(t *testing.T, configDir string, args ...string) (string, string
 	return stdout.String(), stderr.String(), err
 }
 
+func runStackctlWithStdin(t *testing.T, configDir, stdin string, args ...string) (string, string, error) {
+	t.Helper()
+	cmd := exec.Command(binaryPath, args...)
+	cmd.Env = append(os.Environ(), "STACKCTL_CONFIG_DIR="+configDir)
+	cmd.Stdin = strings.NewReader(stdin)
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
 func TestE2E_Version(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping e2e test in short mode")
@@ -866,6 +880,57 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(resp)
 
+		// Bulk publish templates
+		case r.URL.Path == "/api/v1/templates/bulk/publish" && r.Method == http.MethodPost:
+			var req struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+
+		// Bulk unpublish templates
+		case r.URL.Path == "/api/v1/templates/bulk/unpublish" && r.Method == http.MethodPost:
+			var req struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+
+		// Bulk delete templates
+		case r.URL.Path == "/api/v1/templates/bulk/delete" && r.Method == http.MethodPost:
+			var req struct {
+				IDs []string `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+				return
+			}
+			var results []map[string]interface{}
+			for _, id := range req.IDs {
+				results = append(results, map[string]interface{}{"id": id, "success": true})
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
@@ -1519,3 +1584,115 @@ func TestE2E_TemplateVersionsList(t *testing.T) {
 	require.Len(t, lines, 2)
 	assert.NotContains(t, stdout, "VERSION")
 }
+
+// ---------- Bulk template operations E2E ----------
+
+func TestE2E_BulkTemplatePublish(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Positional IDs
+	stdout, _, err := runStackctl(t, dir, "bulk", "template", "publish", "1", "2")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "1")
+	assert.Contains(t, stdout, "2")
+	assert.Contains(t, stdout, "success")
+}
+
+func TestE2E_BulkTemplatePublish_IdsFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// --ids flag
+	stdout, _, err := runStackctl(t, dir, "bulk", "template", "publish", "--ids", "1,2")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "1")
+	assert.Contains(t, stdout, "success")
+}
+
+func TestE2E_BulkTemplateUnpublish(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "bulk", "template", "unpublish", "--ids", "1,2")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "1")
+	assert.Contains(t, stdout, "success")
+}
+
+func TestE2E_BulkTemplateDelete_WithYes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "bulk", "template", "delete", "--ids", "1,2", "--yes")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "1")
+	assert.Contains(t, stdout, "success")
+}
+
+func TestE2E_BulkTemplatePublish_JSONOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "bulk", "template", "publish", "--ids", "1,2", "--output", "json")
+	require.NoError(t, err)
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+	results, ok := result["results"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, results, 2)
+}
+
+func TestE2E_BulkTemplateDelete_NoConfirmation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Without --yes, provide "n" on stdin — should abort
+	stdout, _, err := runStackctlWithStdin(t, dir, "n\n", "bulk", "template", "delete", "--ids", "1,2")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Aborted")
+}
+

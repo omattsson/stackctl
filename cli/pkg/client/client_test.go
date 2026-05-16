@@ -3100,3 +3100,127 @@ func TestDiffTemplateVersions(t *testing.T) {
 		})
 	}
 }
+
+// ---------- bulk template operations ----------
+
+func TestBulkPublishTemplates_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/templates/bulk/publish", r.URL.Path)
+		var body types.BulkRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BulkResponse{
+			Results: []types.BulkOperationResult{
+				{ID: "1", Success: true},
+				{ID: "2", Success: true},
+				{ID: "3", Success: false, Error: "not found"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkPublishTemplates([]string{"1", "2", "3"})
+	require.NoError(t, err)
+	assert.Len(t, resp.Results, 3)
+	assert.True(t, resp.Results[0].Success)
+	assert.False(t, resp.Results[2].Success)
+	assert.Equal(t, "not found", resp.Results[2].Error)
+}
+
+func TestBulkPublishTemplates_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "unauthorized"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkPublishTemplates([]string{"1", "2"})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestBulkUnpublishTemplates_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/templates/bulk/unpublish", r.URL.Path)
+		var body types.BulkRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, []string{"a", "b"}, body.IDs)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BulkResponse{
+			Results: []types.BulkOperationResult{
+				{ID: "a", Success: true},
+				{ID: "b", Success: true},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkUnpublishTemplates([]string{"a", "b"})
+	require.NoError(t, err)
+	assert.Len(t, resp.Results, 2)
+	assert.True(t, resp.Results[0].Success)
+}
+
+func TestBulkUnpublishTemplates_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "permission denied"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkUnpublishTemplates([]string{"1"})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestBulkDeleteTemplates_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/templates/bulk/delete", r.URL.Path)
+		var body types.BulkRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, []string{"10", "20"}, body.IDs)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.BulkResponse{
+			Results: []types.BulkOperationResult{
+				{ID: "10", Success: true},
+				{ID: "20", Success: false, Error: "in use"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkDeleteTemplates([]string{"10", "20"})
+	require.NoError(t, err)
+	assert.Len(t, resp.Results, 2)
+	assert.True(t, resp.Results[0].Success)
+	assert.False(t, resp.Results[1].Success)
+	assert.Equal(t, "in use", resp.Results[1].Error)
+}
+
+func TestBulkDeleteTemplates_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "internal error"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.BulkDeleteTemplates([]string{"1"})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+}
