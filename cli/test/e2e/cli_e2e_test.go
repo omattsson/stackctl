@@ -839,6 +839,33 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(resp)
 
+		// Template versions list
+		case r.URL.Path == "/api/v1/templates/1/versions" && r.Method == http.MethodGet:
+			resp := []map[string]interface{}{
+				{"id": "1", "template_id": "1", "version": "v1", "change_summary": "Initial publish", "created_by": "admin", "created_at": "2025-01-01T00:00:00Z"},
+				{"id": "2", "template_id": "1", "version": "v2", "change_summary": "Updated charts", "created_by": "admin", "created_at": "2025-06-01T00:00:00Z"},
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// Template versions diff
+		case r.URL.Path == "/api/v1/templates/1/versions/diff" && r.Method == http.MethodGet:
+			resp := map[string]interface{}{
+				"left": map[string]interface{}{"version": "v1", "snapshot": map[string]interface{}{
+					"template": map[string]interface{}{"name": "web-template", "is_published": true, "default_branch": "master", "version": "v1"},
+					"charts":   []map[string]interface{}{{"chart_name": "frontend", "repo_url": "https://charts.example.com"}},
+				}},
+				"right": map[string]interface{}{"version": "v2", "snapshot": map[string]interface{}{
+					"template": map[string]interface{}{"name": "web-template", "is_published": true, "default_branch": "master", "version": "v2"},
+					"charts":   []map[string]interface{}{{"chart_name": "frontend", "repo_url": "https://charts2.example.com"}},
+				}},
+				"chart_diffs": []map[string]interface{}{
+					{"chart_name": "frontend", "change_type": "modified", "has_differences": true, "left_repo_url": "https://charts.example.com", "right_repo_url": "https://charts2.example.com"},
+				},
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
@@ -1444,4 +1471,51 @@ func TestE2E_TemplateUnpublish_QuietOutput(t *testing.T) {
 	stdout, _, err := runStackctl(t, dir, "template", "unpublish", "1", "--quiet")
 	require.NoError(t, err)
 	assert.Equal(t, "1\n", stdout)
+}
+
+func TestE2E_TemplateVersionsDiff(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "template", "versions", "diff", "1", "v1", "v2")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "frontend")
+	assert.Contains(t, stdout, "Comparing v1 ->")
+	assert.Contains(t, stdout, "CHART")
+	assert.Contains(t, stdout, "CHANGE")
+}
+
+func TestE2E_TemplateVersionsList(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ETemplateDefMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Table output — verify headers and data
+	stdout, _, err := runStackctl(t, dir, "template", "versions", "list", "1")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "ID")
+	assert.Contains(t, stdout, "VERSION")
+	assert.Contains(t, stdout, "CHANGE SUMMARY")
+	assert.Contains(t, stdout, "v1")
+	assert.Contains(t, stdout, "Initial publish")
+
+	// Quiet output — IDs only, one per line
+	stdout, _, err = runStackctl(t, dir, "template", "versions", "list", "1", "--quiet")
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 2)
+	assert.NotContains(t, stdout, "VERSION")
 }

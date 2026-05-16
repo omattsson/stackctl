@@ -1361,3 +1361,336 @@ func TestTemplateUnpublishCmd_Forbidden(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Permission denied")
 }
+
+// ---------- template versions list ----------
+
+func sampleTemplateVersion() types.TemplateVersion {
+	return types.TemplateVersion{
+		ID:            "1",
+		TemplateID:    "10",
+		Version:       "v1",
+		ChangeSummary: "Initial publish",
+		CreatedBy:     "admin",
+		CreatedAt:     time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+}
+
+func sampleTemplateVersionDetail() types.TemplateVersionDetail {
+	return types.TemplateVersionDetail{
+		TemplateVersion: sampleTemplateVersion(),
+		Snapshot: types.TemplateSnapshot{
+			Template: types.TemplateSnapshotData{Name: "web-app", DefaultBranch: "master", IsPublished: true, Version: "v1"},
+			Charts:   []types.TemplateChartSnapshotData{{ChartName: "frontend", RepoURL: "https://charts.example.com"}},
+		},
+	}
+}
+
+func TestTemplateVersionsListCmd_Success(t *testing.T) {
+	v := sampleTemplateVersion()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates/10/versions", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.TemplateVersion{v})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := templateVersionsListCmd.RunE(templateVersionsListCmd, []string{"10"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "1")
+	assert.Contains(t, out, "v1")
+}
+
+func TestTemplateVersionsListCmd_JSONOutput(t *testing.T) {
+	v := sampleTemplateVersion()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.TemplateVersion{v})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := templateVersionsListCmd.RunE(templateVersionsListCmd, []string{"10"})
+	require.NoError(t, err)
+
+	var result []types.TemplateVersion
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result, 1)
+	assert.Equal(t, "1", result[0].ID)
+}
+
+func TestTemplateVersionsListCmd_QuietOutput(t *testing.T) {
+	v := sampleTemplateVersion()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.TemplateVersion{v})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := templateVersionsListCmd.RunE(templateVersionsListCmd, []string{"10"})
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", buf.String())
+}
+
+func TestTemplateVersionsListCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := templateVersionsListCmd.RunE(templateVersionsListCmd, []string{"10"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestTemplateVersionsListCmd_YAMLOutput(t *testing.T) {
+	v := sampleTemplateVersion()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.TemplateVersion{v})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templateVersionsListCmd.RunE(templateVersionsListCmd, []string{"10"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "version:")
+	assert.Contains(t, out, "v1")
+}
+
+// ---------- template versions get ----------
+
+func TestTemplateVersionsGetCmd_Success(t *testing.T) {
+	v := sampleTemplateVersionDetail()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates/10/versions/v1", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(v)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := templateVersionsGetCmd.RunE(templateVersionsGetCmd, []string{"10", "v1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "v1")
+}
+
+func TestTemplateVersionsGetCmd_JSONOutput(t *testing.T) {
+	v := sampleTemplateVersionDetail()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(v)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := templateVersionsGetCmd.RunE(templateVersionsGetCmd, []string{"10", "v1"})
+	require.NoError(t, err)
+
+	var result types.TemplateVersionDetail
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "v1", result.Version)
+}
+
+func TestTemplateVersionsGetCmd_QuietOutput(t *testing.T) {
+	v := sampleTemplateVersionDetail()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(v)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := templateVersionsGetCmd.RunE(templateVersionsGetCmd, []string{"10", "v1"})
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", buf.String())
+}
+
+func TestTemplateVersionsGetCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "version not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := templateVersionsGetCmd.RunE(templateVersionsGetCmd, []string{"10", "uuid-not-found"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestTemplateVersionsGetCmd_YAMLOutput(t *testing.T) {
+	v := sampleTemplateVersionDetail()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(v)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templateVersionsGetCmd.RunE(templateVersionsGetCmd, []string{"10", "uuid-v1"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "version:")
+	assert.Contains(t, out, "change_summary:")
+}
+
+// ---------- template versions diff ----------
+
+func sampleTemplateVersionDiff() types.TemplateVersionDiff {
+	return types.TemplateVersionDiff{
+		Left:  types.TemplateVersionSide{Version: "v1"},
+		Right: types.TemplateVersionSide{Version: "v2"},
+		ChartDiffs: []types.ChartDiffEntry{
+			{ChartName: "frontend", ChangeType: "modified", HasDifferences: true, LeftRepoURL: "https://charts.example.com", RightRepoURL: "https://charts2.example.com"},
+		},
+	}
+}
+
+func TestTemplateVersionsDiffCmd_Success(t *testing.T) {
+	diff := sampleTemplateVersionDiff()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/templates/10/versions/diff", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(diff)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"10", "v1", "v2"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "frontend")
+	assert.Contains(t, strings.ToLower(out), "modified")
+	assert.Contains(t, out, "Comparing v1 -> v2")
+	assert.Contains(t, out, "CHART")
+}
+
+func TestTemplateVersionsDiffCmd_JSONOutput(t *testing.T) {
+	diff := sampleTemplateVersionDiff()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(diff)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"10", "v1", "v2"})
+	require.NoError(t, err)
+
+	var result types.TemplateVersionDiff
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result.ChartDiffs, 1)
+	assert.Equal(t, "frontend", result.ChartDiffs[0].ChartName)
+}
+
+func TestTemplateVersionsDiffCmd_QuietOutput(t *testing.T) {
+	diff := sampleTemplateVersionDiff()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(diff)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"10", "v1", "v2"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "frontend")
+}
+
+func TestTemplateVersionsDiffCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "template not found"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"99", "uuid-1", "uuid-2"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestTemplateVersionsDiffCmd_YAMLOutput(t *testing.T) {
+	diff := sampleTemplateVersionDiff()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(diff)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"10", "uuid-v1", "uuid-v2"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "chart_name:")
+	assert.Contains(t, out, "frontend")
+	assert.Contains(t, out, "change_type:")
+}
+
+func TestTemplateVersionsDiffCmd_UnifiedDiffOutput(t *testing.T) {
+	diff := types.TemplateVersionDiff{
+		Left:  types.TemplateVersionSide{Version: "v1"},
+		Right: types.TemplateVersionSide{Version: "v2"},
+		ChartDiffs: []types.ChartDiffEntry{
+			{
+				ChartName:      "backend",
+				ChangeType:     "modified",
+				HasDifferences: true,
+				LeftValues:     "replicaCount: 1\nimage:\n  tag: v1.0\n",
+				RightValues:    "replicaCount: 2\nimage:\n  tag: v2.0\n",
+			},
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(diff)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	err := templateVersionsDiffCmd.RunE(templateVersionsDiffCmd, []string{"10", "uuid-v1", "uuid-v2"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "backend")
+	// unified diff markers must be present
+	assert.Contains(t, out, "---")
+	assert.Contains(t, out, "+++")
+	assert.Contains(t, out, "@@")
+	// changed lines must appear
+	assert.Contains(t, out, "-replicaCount: 1")
+	assert.Contains(t, out, "+replicaCount: 2")
+}
