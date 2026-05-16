@@ -459,15 +459,34 @@ Examples:
 			if req.Name == "" {
 				return fmt.Errorf("name is required in the cluster file")
 			}
+			// Resolve kubeconfig_path in the file to kubeconfig_data client-side.
+			if req.KubeconfigPath != "" {
+				for _, segment := range strings.Split(filepath.ToSlash(req.KubeconfigPath), "/") {
+					if segment == ".." {
+						return fmt.Errorf("kubeconfig_path in file must not contain '..' segments")
+					}
+				}
+				content, err := os.ReadFile(filepath.Clean(req.KubeconfigPath))
+				if err != nil {
+					return fmt.Errorf("reading kubeconfig file %s: %w", req.KubeconfigPath, err)
+				}
+				req.KubeconfigData = string(content)
+				req.KubeconfigPath = ""
+			}
 		} else {
 			name, _ := cmd.Flags().GetString("name")
 			if name == "" {
 				return fmt.Errorf("--name is required (or use --from-file)")
 			}
+			kubeconfigData, _ := cmd.Flags().GetString("kubeconfig-data")
+			kubeconfigPath, _ := cmd.Flags().GetString("kubeconfig-path")
+			if kubeconfigData != "" && kubeconfigPath != "" {
+				return fmt.Errorf("--kubeconfig-data and --kubeconfig-path are mutually exclusive")
+			}
 			req.Name = name
 			req.Description, _ = cmd.Flags().GetString("description")
-			req.KubeconfigData, _ = cmd.Flags().GetString("kubeconfig-data")
-			if kubeconfigPath, _ := cmd.Flags().GetString("kubeconfig-path"); kubeconfigPath != "" {
+			req.KubeconfigData = kubeconfigData
+			if kubeconfigPath != "" {
 				content, err := os.ReadFile(kubeconfigPath)
 				if err != nil {
 					return fmt.Errorf("reading kubeconfig file %s: %w", kubeconfigPath, err)
@@ -535,11 +554,29 @@ var clusterUpdateCmd = &cobra.Command{
 					return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
 				}
 			}
+			// Resolve kubeconfig_path in the file to kubeconfig_data client-side.
+			if req.KubeconfigPath != nil && *req.KubeconfigPath != "" {
+				for _, segment := range strings.Split(filepath.ToSlash(*req.KubeconfigPath), "/") {
+					if segment == ".." {
+						return fmt.Errorf("kubeconfig_path in file must not contain '..' segments")
+					}
+				}
+				content, err := os.ReadFile(filepath.Clean(*req.KubeconfigPath))
+				if err != nil {
+					return fmt.Errorf("reading kubeconfig file %s: %w", *req.KubeconfigPath, err)
+				}
+				s := string(content)
+				req.KubeconfigData = &s
+				req.KubeconfigPath = nil
+			}
 			// Ensure the file contained at least one update field.
 			if b, _ := json.Marshal(req); string(b) == "{}" {
 				return fmt.Errorf("file %s specifies no update fields: at least one field must be provided", fromFile)
 			}
 		} else {
+			if kubeconfigDataChanged && kubeconfigPathChanged {
+				return fmt.Errorf("--kubeconfig-data and --kubeconfig-path are mutually exclusive")
+			}
 			if nameChanged {
 				v, _ := cmd.Flags().GetString("name")
 				req.Name = &v

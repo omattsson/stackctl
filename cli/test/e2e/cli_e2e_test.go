@@ -1720,7 +1720,11 @@ func startE2EClusterMockServer(t *testing.T) *httptest.Server {
 		// POST /api/v1/clusters — create
 		case r.URL.Path == "/api/v1/clusters" && r.Method == http.MethodPost:
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+				return
+			}
 			name, _ := body["name"].(string)
 			resp := map[string]interface{}{
 				"id": "42", "name": name, "status": "active",
@@ -1748,7 +1752,11 @@ func startE2EClusterMockServer(t *testing.T) *httptest.Server {
 		// PUT /api/v1/clusters/1 — update
 		case r.URL.Path == "/api/v1/clusters/1" && r.Method == http.MethodPut:
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+				return
+			}
 			name := "updated-cluster"
 			if v, ok := body["name"].(string); ok && v != "" {
 				name = v
