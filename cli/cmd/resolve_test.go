@@ -314,3 +314,121 @@ func TestResolveDefinitionID_APIError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "resolving definition name")
 }
+
+// ---------- resolveTemplateID ----------
+
+func TestResolveTemplateID_UUID(t *testing.T) {
+	t.Parallel()
+	c := client.New("http://unused")
+	id, err := resolveTemplateID(c, "550e8400-e29b-41d4-a716-446655440000")
+	require.NoError(t, err)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", id)
+}
+
+func TestResolveTemplateID_NumericID(t *testing.T) {
+	t.Parallel()
+	c := client.New("http://unused")
+	id, err := resolveTemplateID(c, "42")
+	require.NoError(t, err)
+	assert.Equal(t, "42", id)
+}
+
+func TestResolveTemplateID_Empty(t *testing.T) {
+	t.Parallel()
+	c := client.New("http://unused")
+	_, err := resolveTemplateID(c, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
+
+func TestResolveTemplateID_Whitespace(t *testing.T) {
+	t.Parallel()
+	c := client.New("http://unused")
+	_, err := resolveTemplateID(c, "   ")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must not be empty")
+}
+
+func TestResolveTemplateID_NameSingleMatch(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/templates", r.URL.Path)
+		assert.Equal(t, "my-template", r.URL.Query().Get("name"))
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
+			Data:  []types.StackTemplate{{Base: types.Base{ID: "tmpl-123"}, Name: "my-template", Owner: "alice"}},
+			Total: 1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	id, err := resolveTemplateID(c, "my-template")
+	require.NoError(t, err)
+	assert.Equal(t, "tmpl-123", id)
+}
+
+func TestResolveTemplateID_NameNoMatch(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
+			Data: []types.StackTemplate{}, Total: 0, Page: 1, PageSize: 0,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	_, err := resolveTemplateID(c, "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `no template found with name "nonexistent"`)
+}
+
+func TestResolveTemplateID_NameMultipleMatches(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
+			Data: []types.StackTemplate{
+				{Base: types.Base{ID: "tmpl-1"}, Name: "my-template", Owner: "alice"},
+				{Base: types.Base{ID: "tmpl-2"}, Name: "my-template", Owner: "bob"},
+			},
+			Total: 2, Page: 1, PageSize: 2,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	_, err := resolveTemplateID(c, "my-template")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple templates match")
+	assert.Contains(t, err.Error(), "tmpl-1")
+	assert.Contains(t, err.Error(), "tmpl-2")
+}
+
+func TestResolveTemplateID_NameMismatch(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
+			Data:  []types.StackTemplate{{Base: types.Base{ID: "tmpl-123"}, Name: "other-template", Owner: "alice"}},
+			Total: 1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	_, err := resolveTemplateID(c, "my-template")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `no template found with name "my-template"`)
+}
+
+func TestResolveTemplateID_APIError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"internal server error"}`))
+	}))
+	defer server.Close()
+
+	c := client.New(server.URL)
+	_, err := resolveTemplateID(c, "my-template")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving template name")
+}

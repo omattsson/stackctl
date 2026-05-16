@@ -1001,6 +1001,74 @@ func TestBulkTemplateUnpublishCmd_QuietOutput(t *testing.T) {
 	assert.Equal(t, "1\n2", lines)
 }
 
+func TestBulkTemplateUnpublishCmd_YAMLOutput(t *testing.T) {
+	resp := sampleBulkResponse()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	bulkTemplateUnpublishCmd.Flags().Set("ids", "1,2,3")
+	t.Cleanup(func() { bulkTemplateUnpublishCmd.Flags().Set("ids", "") })
+
+	err := bulkTemplateUnpublishCmd.RunE(bulkTemplateUnpublishCmd, []string{})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "id: \"1\"")
+	assert.Contains(t, out, "success: true")
+}
+
+func TestBulkTemplateUnpublishCmd_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "permission denied"})
+	}))
+	defer server.Close()
+
+	_ = setupBulkTestCmd(t, server.URL)
+
+	bulkTemplateUnpublishCmd.Flags().Set("ids", "1,2")
+	t.Cleanup(func() { bulkTemplateUnpublishCmd.Flags().Set("ids", "") })
+
+	err := bulkTemplateUnpublishCmd.RunE(bulkTemplateUnpublishCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "permission denied")
+}
+
+func TestBulkTemplateUnpublishCmd_PositionalArgs(t *testing.T) {
+	resp := sampleBulkResponse()
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if r.URL.Path == "/api/v1/templates/bulk/unpublish" {
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		// name→ID resolution: return numeric ID for the name
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
+			Data:     []types.StackTemplate{{Base: types.Base{ID: "1"}, Name: r.URL.Query().Get("name"), Owner: "admin"}},
+			Total:    1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	err := bulkTemplateUnpublishCmd.RunE(bulkTemplateUnpublishCmd, []string{"my-template"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "ID")
+	// resolution + bulk call were made
+	assert.GreaterOrEqual(t, callCount, 2)
+}
+
 // ---------- bulk template delete (destructive) ----------
 
 func TestBulkTemplateDeleteCmd_WithConfirmation(t *testing.T) {
@@ -1133,6 +1201,87 @@ func TestBulkTemplateDeleteCmd_APIError(t *testing.T) {
 	err := bulkTemplateDeleteCmd.RunE(bulkTemplateDeleteCmd, []string{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "permission denied")
+}
+
+func TestBulkTemplateDeleteCmd_YAMLOutput(t *testing.T) {
+	resp := sampleBulkResponse()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	bulkTemplateDeleteCmd.Flags().Set("ids", "1,2,3")
+	bulkTemplateDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() {
+		bulkTemplateDeleteCmd.Flags().Set("ids", "")
+		bulkTemplateDeleteCmd.Flags().Set("yes", "false")
+	})
+
+	err := bulkTemplateDeleteCmd.RunE(bulkTemplateDeleteCmd, []string{})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "id: \"1\"")
+	assert.Contains(t, out, "success: true")
+}
+
+func TestBulkTemplateDeleteCmd_QuietOutput(t *testing.T) {
+	resp := sampleBulkResponse()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	bulkTemplateDeleteCmd.Flags().Set("ids", "1,2,3")
+	bulkTemplateDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() {
+		bulkTemplateDeleteCmd.Flags().Set("ids", "")
+		bulkTemplateDeleteCmd.Flags().Set("yes", "false")
+	})
+
+	err := bulkTemplateDeleteCmd.RunE(bulkTemplateDeleteCmd, []string{})
+	require.NoError(t, err)
+	lines := strings.TrimSpace(buf.String())
+	assert.Equal(t, "1\n2", lines)
+}
+
+func TestBulkTemplateDeleteCmd_PositionalArgs(t *testing.T) {
+	resp := sampleBulkResponse()
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if r.URL.Path == "/api/v1/templates/bulk/delete" {
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		// name→ID resolution
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
+			Data:     []types.StackTemplate{{Base: types.Base{ID: "1"}, Name: r.URL.Query().Get("name"), Owner: "admin"}},
+			Total:    1, Page: 1, PageSize: 1,
+		})
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	bulkTemplateDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { bulkTemplateDeleteCmd.Flags().Set("yes", "false") })
+
+	err := bulkTemplateDeleteCmd.RunE(bulkTemplateDeleteCmd, []string{"my-template"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "ID")
+	assert.GreaterOrEqual(t, callCount, 2)
 }
 
 // ---------- resolveBulkTemplateIDs ----------
