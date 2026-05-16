@@ -1696,3 +1696,166 @@ func TestE2E_BulkTemplateDelete_NoConfirmation(t *testing.T) {
 	assert.Contains(t, stdout, "Aborted")
 }
 
+// ---------- Cluster E2E Mock Server ----------
+
+// startE2EClusterMockServer starts a mock API with cluster lifecycle endpoints for e2e tests.
+func startE2EClusterMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		// GET /api/v1/clusters — list
+		case r.URL.Path == "/api/v1/clusters" && r.Method == http.MethodGet:
+			resp := []map[string]interface{}{
+				{
+					"id": "1", "name": "prod-cluster", "status": "active",
+					"is_default": true, "node_count": 3,
+					"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
+				},
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// POST /api/v1/clusters — create
+		case r.URL.Path == "/api/v1/clusters" && r.Method == http.MethodPost:
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			name, _ := body["name"].(string)
+			resp := map[string]interface{}{
+				"id": "42", "name": name, "status": "active",
+				"is_default": false, "node_count": 0,
+				"created_at": "2025-06-01T00:00:00Z", "updated_at": "2025-06-01T00:00:00Z", "version": "1",
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(resp)
+
+		// GET /api/v1/clusters/1 — get
+		case r.URL.Path == "/api/v1/clusters/1" && r.Method == http.MethodGet:
+			resp := map[string]interface{}{
+				"id": "1", "name": "prod-cluster", "status": "active",
+				"is_default": true, "node_count": 3,
+				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1",
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// GET /api/v1/clusters/1/health/summary — return 404 so get degrades gracefully
+		case r.URL.Path == "/api/v1/clusters/1/health/summary" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "health not available"})
+
+		// PUT /api/v1/clusters/1 — update
+		case r.URL.Path == "/api/v1/clusters/1" && r.Method == http.MethodPut:
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			name := "updated-cluster"
+			if v, ok := body["name"].(string); ok && v != "" {
+				name = v
+			}
+			resp := map[string]interface{}{
+				"id": "1", "name": name, "status": "active",
+				"is_default": false, "node_count": 3,
+				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-06-01T00:00:00Z", "version": "2",
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
+		// DELETE /api/v1/clusters/1
+		case r.URL.Path == "/api/v1/clusters/1" && r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+
+		// POST /api/v1/clusters/1/default
+		case r.URL.Path == "/api/v1/clusters/1/default" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
+}
+
+func TestE2EClusterCreate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EClusterMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "cluster", "create", "--name", "prod")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "prod")
+}
+
+func TestE2EClusterCreateFromFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EClusterMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	clusterFile := filepath.Join(dir, "cluster.json")
+	require.NoError(t, os.WriteFile(clusterFile, []byte(`{"name":"from-file-cluster"}`), 0o600))
+
+	stdout, _, err := runStackctl(t, dir, "cluster", "create", "--from-file", clusterFile)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "from-file-cluster")
+}
+
+func TestE2EClusterUpdate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EClusterMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "cluster", "update", "1", "--name", "updated")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "updated")
+}
+
+func TestE2EClusterDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EClusterMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "cluster", "delete", "1", "--yes")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "1")
+}
+
+func TestE2EClusterSetDefault(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EClusterMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "cluster", "set-default", "1")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "1")
+}
+
