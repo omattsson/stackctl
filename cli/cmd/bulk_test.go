@@ -1261,3 +1261,66 @@ func TestResolveBulkTemplateIDs_Empty(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one template name or ID")
 }
+
+// ---------- bulk template dry-run ----------
+
+func TestBulkTemplatePublishCmd_DryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called in dry-run mode")
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	bulkTemplatePublishCmd.Flags().Set("ids", "10,20,30")
+	bulkTemplatePublishCmd.Flags().Set("dry-run", "true")
+	t.Cleanup(func() {
+		bulkTemplatePublishCmd.Flags().Set("ids", "")
+		bulkTemplatePublishCmd.Flags().Set("dry-run", "false")
+	})
+
+	err := bulkTemplatePublishCmd.RunE(bulkTemplatePublishCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Would publish 3 templates")
+	assert.Contains(t, buf.String(), "10, 20, 30")
+}
+
+func TestBulkTemplateUnpublishCmd_DryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called in dry-run mode")
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	bulkTemplateUnpublishCmd.Flags().Set("ids", "5,6")
+	bulkTemplateUnpublishCmd.Flags().Set("dry-run", "true")
+	t.Cleanup(func() {
+		bulkTemplateUnpublishCmd.Flags().Set("ids", "")
+		bulkTemplateUnpublishCmd.Flags().Set("dry-run", "false")
+	})
+
+	err := bulkTemplateUnpublishCmd.RunE(bulkTemplateUnpublishCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Would unpublish 2 templates")
+}
+
+func TestBulkTemplateDeleteCmd_DryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called in dry-run mode")
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+
+	bulkTemplateDeleteCmd.Flags().Set("ids", "1,2")
+	bulkTemplateDeleteCmd.Flags().Set("dry-run", "true")
+	t.Cleanup(func() {
+		bulkTemplateDeleteCmd.Flags().Set("ids", "")
+		bulkTemplateDeleteCmd.Flags().Set("dry-run", "false")
+	})
+
+	err := bulkTemplateDeleteCmd.RunE(bulkTemplateDeleteCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Would delete 2 templates")
+}

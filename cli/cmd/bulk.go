@@ -11,6 +11,7 @@ import (
 )
 
 const flagDescIDs = "Comma-separated list of stack names or IDs"
+const flagDescTemplateIDs = "Comma-separated list of template names or IDs"
 
 var bulkCmd = &cobra.Command{
 	Use:   "bulk",
@@ -188,39 +189,6 @@ Examples:
 	},
 }
 
-func init() {
-	bulkDeployCmd.Flags().String("ids", "", flagDescIDs)
-	bulkDeployCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
-
-	bulkStopCmd.Flags().String("ids", "", flagDescIDs)
-	bulkStopCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
-
-	bulkCleanCmd.Flags().String("ids", "", flagDescIDs)
-	bulkCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	bulkCleanCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
-
-	bulkDeleteCmd.Flags().String("ids", "", flagDescIDs)
-	bulkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	bulkDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
-
-	bulkCmd.AddCommand(bulkDeployCmd)
-	bulkCmd.AddCommand(bulkStopCmd)
-	bulkCmd.AddCommand(bulkCleanCmd)
-	bulkCmd.AddCommand(bulkDeleteCmd)
-
-	bulkTemplatePublishCmd.Flags().String("ids", "", "Comma-separated list of template names or IDs")
-	bulkTemplateUnpublishCmd.Flags().String("ids", "", "Comma-separated list of template names or IDs")
-	bulkTemplateDeleteCmd.Flags().String("ids", "", "Comma-separated list of template names or IDs")
-	bulkTemplateDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-
-	bulkTemplateCmd.AddCommand(bulkTemplatePublishCmd)
-	bulkTemplateCmd.AddCommand(bulkTemplateUnpublishCmd)
-	bulkTemplateCmd.AddCommand(bulkTemplateDeleteCmd)
-	bulkCmd.AddCommand(bulkTemplateCmd)
-
-	rootCmd.AddCommand(bulkCmd)
-}
-
 var bulkTemplateCmd = &cobra.Command{
 	Use:   "template",
 	Short: "Bulk operations on stack templates",
@@ -240,6 +208,10 @@ Examples:
   stackctl bulk template publish --ids my-template,2 3`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would publish %d templates: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -271,6 +243,10 @@ Examples:
   stackctl bulk template unpublish my-template other-template`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would unpublish %d templates: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -306,6 +282,10 @@ Examples:
   stackctl bulk template delete --ids 1,2,3 --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would delete %d templates: %s", len(raw), strings.Join(raw, ", ")) {
+			return nil
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -332,6 +312,42 @@ Examples:
 
 		return printBulkResults(resp)
 	},
+}
+
+func init() {
+	bulkDeployCmd.Flags().String("ids", "", flagDescIDs)
+	bulkDeployCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+
+	bulkStopCmd.Flags().String("ids", "", flagDescIDs)
+	bulkStopCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+
+	bulkCleanCmd.Flags().String("ids", "", flagDescIDs)
+	bulkCleanCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	bulkCleanCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+
+	bulkDeleteCmd.Flags().String("ids", "", flagDescIDs)
+	bulkDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	bulkDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+
+	bulkCmd.AddCommand(bulkDeployCmd)
+	bulkCmd.AddCommand(bulkStopCmd)
+	bulkCmd.AddCommand(bulkCleanCmd)
+	bulkCmd.AddCommand(bulkDeleteCmd)
+
+	bulkTemplatePublishCmd.Flags().String("ids", "", flagDescTemplateIDs)
+	bulkTemplatePublishCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+	bulkTemplateUnpublishCmd.Flags().String("ids", "", flagDescTemplateIDs)
+	bulkTemplateUnpublishCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+	bulkTemplateDeleteCmd.Flags().String("ids", "", flagDescTemplateIDs)
+	bulkTemplateDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+	bulkTemplateDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+
+	bulkTemplateCmd.AddCommand(bulkTemplatePublishCmd)
+	bulkTemplateCmd.AddCommand(bulkTemplateUnpublishCmd)
+	bulkTemplateCmd.AddCommand(bulkTemplateDeleteCmd)
+	bulkCmd.AddCommand(bulkTemplateCmd)
+
+	rootCmd.AddCommand(bulkCmd)
 }
 
 func rawBulkArgs(cmd *cobra.Command, args []string) []string {
@@ -385,10 +401,6 @@ func resolveBulkTemplateIDs(c *client.Client, cmd *cobra.Command, args []string)
 		return nil, fmt.Errorf("at least one template name or ID is required (use --ids or positional arguments)")
 	}
 
-	if len(ids) > 50 {
-		return nil, fmt.Errorf("maximum 50 templates allowed, got %d", len(ids))
-	}
-
 	return ids, nil
 }
 
@@ -425,10 +437,6 @@ func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]stri
 
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("at least one stack name or ID is required (use --ids or positional arguments)")
-	}
-
-	if len(ids) > 50 {
-		return nil, fmt.Errorf("maximum 50 stacks allowed, got %d", len(ids))
 	}
 
 	return ids, nil
