@@ -1202,6 +1202,20 @@ func TestClusterSetDefaultCmd_Success(t *testing.T) {
 	assert.Contains(t, buf.String(), "set as default")
 }
 
+func TestClusterSetDefaultCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	err := clusterSetDefaultCmd.RunE(clusterSetDefaultCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", buf.String())
+}
+
 func TestClusterSetDefaultCmd_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

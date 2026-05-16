@@ -467,7 +467,13 @@ Examples:
 			req.Name = name
 			req.Description, _ = cmd.Flags().GetString("description")
 			req.KubeconfigData, _ = cmd.Flags().GetString("kubeconfig-data")
-			req.KubeconfigPath, _ = cmd.Flags().GetString("kubeconfig-path")
+			if kubeconfigPath, _ := cmd.Flags().GetString("kubeconfig-path"); kubeconfigPath != "" {
+				content, err := os.ReadFile(kubeconfigPath)
+				if err != nil {
+					return fmt.Errorf("reading kubeconfig file %s: %w", kubeconfigPath, err)
+				}
+				req.KubeconfigData = string(content)
+			}
 		}
 
 		c, err := newClient()
@@ -544,7 +550,12 @@ var clusterUpdateCmd = &cobra.Command{
 			}
 			if kubeconfigPathChanged {
 				v, _ := cmd.Flags().GetString("kubeconfig-path")
-				req.KubeconfigPath = &v
+				content, err := os.ReadFile(v)
+				if err != nil {
+					return fmt.Errorf("reading kubeconfig file %s: %w", v, err)
+				}
+				s := string(content)
+				req.KubeconfigData = &s
 			}
 			if defaultChanged {
 				v, _ := cmd.Flags().GetBool("default")
@@ -609,6 +620,10 @@ var clusterSetDefaultCmd = &cobra.Command{
 			return err
 		}
 
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, id)
+			return nil
+		}
 		printer.PrintMessage("Cluster %s set as default", id)
 		return nil
 	},
