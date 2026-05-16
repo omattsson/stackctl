@@ -969,6 +969,36 @@ func (c *Client) BulkDelete(ids []string) (*types.BulkResponse, error) {
 	return &resp, nil
 }
 
+// BulkDeleteTemplates deletes multiple stack templates.
+func (c *Client) BulkDeleteTemplates(ids []string) (*types.BulkResponse, error) {
+	var resp types.BulkResponse
+	err := c.Post("/api/v1/templates/bulk/delete", types.BulkRequest{IDs: ids}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// BulkPublishTemplates publishes multiple stack templates.
+func (c *Client) BulkPublishTemplates(ids []string) (*types.BulkResponse, error) {
+	var resp types.BulkResponse
+	err := c.Post("/api/v1/templates/bulk/publish", types.BulkRequest{IDs: ids}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// BulkUnpublishTemplates unpublishes multiple stack templates.
+func (c *Client) BulkUnpublishTemplates(ids []string) (*types.BulkResponse, error) {
+	var resp types.BulkResponse
+	err := c.Post("/api/v1/templates/bulk/unpublish", types.BulkRequest{IDs: ids}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ListGitBranches returns branches for a git repository.
 func (c *Client) ListGitBranches(repo string) ([]types.GitBranch, error) {
 	var branches []types.GitBranch

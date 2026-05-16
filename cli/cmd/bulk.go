@@ -207,7 +207,131 @@ func init() {
 	bulkCmd.AddCommand(bulkStopCmd)
 	bulkCmd.AddCommand(bulkCleanCmd)
 	bulkCmd.AddCommand(bulkDeleteCmd)
+
+	bulkTemplatePublishCmd.Flags().String("ids", "", "Comma-separated list of template names or IDs")
+	bulkTemplateUnpublishCmd.Flags().String("ids", "", "Comma-separated list of template names or IDs")
+	bulkTemplateDeleteCmd.Flags().String("ids", "", "Comma-separated list of template names or IDs")
+	bulkTemplateDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+
+	bulkTemplateCmd.AddCommand(bulkTemplatePublishCmd)
+	bulkTemplateCmd.AddCommand(bulkTemplateUnpublishCmd)
+	bulkTemplateCmd.AddCommand(bulkTemplateDeleteCmd)
+	bulkCmd.AddCommand(bulkTemplateCmd)
+
 	rootCmd.AddCommand(bulkCmd)
+}
+
+var bulkTemplateCmd = &cobra.Command{
+	Use:   "template",
+	Short: "Bulk operations on stack templates",
+	Long:  "Publish, unpublish, or delete multiple stack templates at once.",
+}
+
+var bulkTemplatePublishCmd = &cobra.Command{
+	Use:   "publish [name|ID...]",
+	Short: "Publish multiple stack templates",
+	Long: `Publish multiple stack templates at once.
+
+Templates can be specified by name or ID via --ids flag, positional arguments, or both.
+
+Examples:
+  stackctl bulk template publish --ids 1,2,3
+  stackctl bulk template publish my-template other-template
+  stackctl bulk template publish --ids my-template,2 3`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		ids, err := resolveBulkTemplateIDs(c, cmd, args)
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.BulkPublishTemplates(ids)
+		if err != nil {
+			return err
+		}
+
+		return printBulkResults(resp)
+	},
+}
+
+var bulkTemplateUnpublishCmd = &cobra.Command{
+	Use:   "unpublish [name|ID...]",
+	Short: "Unpublish multiple stack templates",
+	Long: `Unpublish multiple stack templates at once.
+
+Templates can be specified by name or ID via --ids flag, positional arguments, or both.
+
+Examples:
+  stackctl bulk template unpublish --ids 1,2,3
+  stackctl bulk template unpublish my-template other-template`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		ids, err := resolveBulkTemplateIDs(c, cmd, args)
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.BulkUnpublishTemplates(ids)
+		if err != nil {
+			return err
+		}
+
+		return printBulkResults(resp)
+	},
+}
+
+var bulkTemplateDeleteCmd = &cobra.Command{
+	Use:   "delete [name|ID...]",
+	Short: "Delete multiple stack templates",
+	Long: `Permanently delete multiple stack templates.
+
+This is a destructive operation. You will be prompted for confirmation
+unless --yes is specified.
+
+Templates can be specified by name or ID via --ids flag, positional arguments, or both.
+
+Examples:
+  stackctl bulk template delete --ids 1,2,3
+  stackctl bulk template delete my-template other-template
+  stackctl bulk template delete --ids 1,2,3 --yes`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		ids, err := resolveBulkTemplateIDs(c, cmd, args)
+		if err != nil {
+			return err
+		}
+
+		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d template(s). Continue? (y/n): ", len(ids)))
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			printer.PrintMessage("Aborted.")
+			return nil
+		}
+
+		resp, err := c.BulkDeleteTemplates(ids)
+		if err != nil {
+			return err
+		}
+
+		return printBulkResults(resp)
+	},
 }
 
 func rawBulkArgs(cmd *cobra.Command, args []string) []string {
@@ -224,6 +348,48 @@ func rawBulkArgs(cmd *cobra.Command, args []string) []string {
 		}
 	}
 	return out
+}
+
+func resolveBulkTemplateIDs(c *client.Client, cmd *cobra.Command, args []string) ([]string, error) {
+	var rawParts []string
+
+	idsStr, _ := cmd.Flags().GetString("ids")
+	if idsStr != "" {
+		rawParts = append(rawParts, strings.Split(idsStr, ",")...)
+	}
+	rawParts = append(rawParts, args...)
+
+	if len(rawParts) > 50 {
+		return nil, fmt.Errorf("maximum 50 templates allowed, got %d", len(rawParts))
+	}
+
+	seen := make(map[string]bool)
+	ids := make([]string, 0, len(rawParts))
+	for _, p := range rawParts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		resolved, err := resolveTemplateID(c, p)
+		if err != nil {
+			return nil, err
+		}
+		if seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
+		ids = append(ids, resolved)
+	}
+
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("at least one template name or ID is required (use --ids or positional arguments)")
+	}
+
+	if len(ids) > 50 {
+		return nil, fmt.Errorf("maximum 50 templates allowed, got %d", len(ids))
+	}
+
+	return ids, nil
 }
 
 func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]string, error) {

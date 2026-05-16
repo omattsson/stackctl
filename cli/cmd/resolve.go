@@ -84,3 +84,35 @@ func resolveDefinitionID(c *client.Client, nameOrID string) (string, error) {
 		return "", fmt.Errorf("%s", msg)
 	}
 }
+
+func resolveTemplateID(c *client.Client, nameOrID string) (string, error) {
+	nameOrID = strings.TrimSpace(nameOrID)
+	if nameOrID == "" {
+		return "", fmt.Errorf("template name or ID must not be empty")
+	}
+
+	if looksLikeID(nameOrID) {
+		return nameOrID, nil
+	}
+
+	resp, err := c.ListTemplates(map[string]string{"name": nameOrID})
+	if err != nil {
+		return "", fmt.Errorf("resolving template name %q: %w", nameOrID, err)
+	}
+
+	switch len(resp.Data) {
+	case 0:
+		return "", fmt.Errorf("no template found with name %q", nameOrID)
+	case 1:
+		if !strings.EqualFold(resp.Data[0].Name, nameOrID) {
+			return "", fmt.Errorf("no template found with name %q", nameOrID)
+		}
+		return resp.Data[0].ID, nil
+	default:
+		msg := fmt.Sprintf("multiple templates match name %q — use the ID instead:\n", nameOrID)
+		for _, tmpl := range resp.Data {
+			msg += fmt.Sprintf("  %s  (owner: %s)\n", tmpl.ID, tmpl.Owner)
+		}
+		return "", fmt.Errorf("%s", msg)
+	}
+}
