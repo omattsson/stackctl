@@ -318,7 +318,6 @@ func TestResolveDefinitionID_APIError(t *testing.T) {
 // ---------- resolveTemplateID ----------
 
 func TestResolveTemplateID_UUID(t *testing.T) {
-	t.Parallel()
 	c := client.New("http://unused")
 	id, err := resolveTemplateID(c, "550e8400-e29b-41d4-a716-446655440000")
 	require.NoError(t, err)
@@ -326,7 +325,6 @@ func TestResolveTemplateID_UUID(t *testing.T) {
 }
 
 func TestResolveTemplateID_NumericID(t *testing.T) {
-	t.Parallel()
 	c := client.New("http://unused")
 	id, err := resolveTemplateID(c, "42")
 	require.NoError(t, err)
@@ -334,7 +332,6 @@ func TestResolveTemplateID_NumericID(t *testing.T) {
 }
 
 func TestResolveTemplateID_Empty(t *testing.T) {
-	t.Parallel()
 	c := client.New("http://unused")
 	_, err := resolveTemplateID(c, "")
 	require.Error(t, err)
@@ -342,7 +339,6 @@ func TestResolveTemplateID_Empty(t *testing.T) {
 }
 
 func TestResolveTemplateID_Whitespace(t *testing.T) {
-	t.Parallel()
 	c := client.New("http://unused")
 	_, err := resolveTemplateID(c, "   ")
 	require.Error(t, err)
@@ -350,7 +346,6 @@ func TestResolveTemplateID_Whitespace(t *testing.T) {
 }
 
 func TestResolveTemplateID_NameSingleMatch(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v1/templates", r.URL.Path)
 		assert.Equal(t, "my-template", r.URL.Query().Get("name"))
@@ -368,7 +363,6 @@ func TestResolveTemplateID_NameSingleMatch(t *testing.T) {
 }
 
 func TestResolveTemplateID_NameNoMatch(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
 			Data: []types.StackTemplate{}, Total: 0, Page: 1, PageSize: 0,
@@ -383,7 +377,6 @@ func TestResolveTemplateID_NameNoMatch(t *testing.T) {
 }
 
 func TestResolveTemplateID_NameMultipleMatches(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
 			Data: []types.StackTemplate{
@@ -404,7 +397,6 @@ func TestResolveTemplateID_NameMultipleMatches(t *testing.T) {
 }
 
 func TestResolveTemplateID_NameMismatch(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
 			Data:  []types.StackTemplate{{Base: types.Base{ID: "tmpl-123"}, Name: "other-template", Owner: "alice"}},
@@ -420,7 +412,6 @@ func TestResolveTemplateID_NameMismatch(t *testing.T) {
 }
 
 func TestResolveTemplateID_APIError(t *testing.T) {
-	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error":"internal server error"}`))
