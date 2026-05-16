@@ -446,14 +446,9 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", fromFile, err)
 			}
-			ext := strings.ToLower(filepath.Ext(fromFile))
-			if ext == ".yaml" || ext == ".yml" {
-				if err := yaml.Unmarshal(data, &req); err != nil {
-					return fmt.Errorf("invalid YAML in file %s: %w", fromFile, err)
-				}
-			} else {
-				if err := json.Unmarshal(data, &req); err != nil {
-					return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
+			if err := json.Unmarshal(data, &req); err != nil {
+				if yamlErr := yaml.Unmarshal(data, &req); yamlErr != nil {
+					return fmt.Errorf("invalid JSON/YAML in file %s (json: %v): %w", fromFile, err, yamlErr)
 				}
 			}
 			if req.Name == "" {
@@ -552,14 +547,9 @@ var clusterUpdateCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", fromFile, err)
 			}
-			ext := strings.ToLower(filepath.Ext(fromFile))
-			if ext == ".yaml" || ext == ".yml" {
-				if err := yaml.Unmarshal(data, &req); err != nil {
-					return fmt.Errorf("invalid YAML in file %s: %w", fromFile, err)
-				}
-			} else {
-				if err := json.Unmarshal(data, &req); err != nil {
-					return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
+			if err := json.Unmarshal(data, &req); err != nil {
+				if yamlErr := yaml.Unmarshal(data, &req); yamlErr != nil {
+					return fmt.Errorf("invalid JSON/YAML in file %s (json: %v): %w", fromFile, err, yamlErr)
 				}
 			}
 			// Resolve kubeconfig_path in the file to kubeconfig_data client-side.
