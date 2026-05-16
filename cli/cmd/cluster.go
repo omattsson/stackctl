@@ -390,6 +390,230 @@ Examples:
 	},
 }
 
+// printCluster renders a single cluster in the configured output format.
+func printCluster(cluster *types.Cluster) error {
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, cluster.ID)
+		return nil
+	}
+
+	switch printer.Format {
+	case output.FormatJSON:
+		return printer.PrintJSON(cluster)
+	case output.FormatYAML:
+		return printer.PrintYAML(cluster)
+	default:
+		isDefault := "false"
+		if cluster.IsDefault {
+			isDefault = "true"
+		}
+		fields := []output.KeyValue{
+			{Key: "ID", Value: cluster.ID},
+			{Key: "Name", Value: cluster.Name},
+			{Key: "Description", Value: cluster.Description},
+			{Key: "Status", Value: printer.StatusColor(cluster.Status)},
+			{Key: "Default", Value: isDefault},
+			{Key: "Nodes", Value: strconv.Itoa(cluster.NodeCount)},
+		}
+		return printer.PrintSingle(cluster, fields)
+	}
+}
+
+var clusterCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Register a new cluster",
+	Long: `Register a new Kubernetes cluster.
+
+Provide either --from-file with a JSON/YAML file, or use --name and --kubeconfig-data / --kubeconfig-path.
+
+Examples:
+  stackctl cluster create --from-file cluster.json
+  stackctl cluster create --name prod --kubeconfig-path ~/.kube/config`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fromFile, _ := cmd.Flags().GetString("from-file")
+
+		var req types.CreateClusterRequest
+
+		if fromFile != "" {
+			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
+				if segment == ".." {
+					return fmt.Errorf("file path must not contain '..' segments")
+				}
+			}
+			fromFile = filepath.Clean(fromFile)
+			data, err := os.ReadFile(fromFile)
+			if err != nil {
+				return fmt.Errorf("reading file %s: %w", fromFile, err)
+			}
+			ext := strings.ToLower(filepath.Ext(fromFile))
+			if ext == ".yaml" || ext == ".yml" {
+				if err := yaml.Unmarshal(data, &req); err != nil {
+					return fmt.Errorf("invalid YAML in file %s: %w", fromFile, err)
+				}
+			} else {
+				if err := json.Unmarshal(data, &req); err != nil {
+					return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
+				}
+			}
+			if req.Name == "" {
+				return fmt.Errorf("name is required in the cluster file")
+			}
+		} else {
+			name, _ := cmd.Flags().GetString("name")
+			if name == "" {
+				return fmt.Errorf("--name is required (or use --from-file)")
+			}
+			req.Name = name
+			req.Description, _ = cmd.Flags().GetString("description")
+			req.KubeconfigData, _ = cmd.Flags().GetString("kubeconfig-data")
+			req.KubeconfigPath, _ = cmd.Flags().GetString("kubeconfig-path")
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		cluster, err := c.CreateCluster(&req)
+		if err != nil {
+			return err
+		}
+
+		return printCluster(cluster)
+	},
+}
+
+var clusterUpdateCmd = &cobra.Command{
+	Use:          "update <id>",
+	Short:        "Update cluster configuration",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		fromFile, _ := cmd.Flags().GetString("from-file")
+		nameChanged := cmd.Flags().Changed("name")
+		descChanged := cmd.Flags().Changed("description")
+		kubeconfigDataChanged := cmd.Flags().Changed("kubeconfig-data")
+		kubeconfigPathChanged := cmd.Flags().Changed("kubeconfig-path")
+		defaultChanged := cmd.Flags().Changed("default")
+
+		if fromFile == "" && !nameChanged && !descChanged && !kubeconfigDataChanged && !kubeconfigPathChanged && !defaultChanged {
+			return fmt.Errorf("at least one of --name, --description, --kubeconfig-data, --kubeconfig-path, --default, or --from-file must be specified")
+		}
+
+		var req types.UpdateClusterRequest
+
+		if fromFile != "" {
+			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
+				if segment == ".." {
+					return fmt.Errorf("file path must not contain '..' segments")
+				}
+			}
+			fromFile = filepath.Clean(fromFile)
+			data, err := os.ReadFile(fromFile)
+			if err != nil {
+				return fmt.Errorf("reading file %s: %w", fromFile, err)
+			}
+			ext := strings.ToLower(filepath.Ext(fromFile))
+			if ext == ".yaml" || ext == ".yml" {
+				if err := yaml.Unmarshal(data, &req); err != nil {
+					return fmt.Errorf("invalid YAML in file %s: %w", fromFile, err)
+				}
+			} else {
+				if err := json.Unmarshal(data, &req); err != nil {
+					return fmt.Errorf("invalid JSON in file %s: %w", fromFile, err)
+				}
+			}
+		} else {
+			if nameChanged {
+				v, _ := cmd.Flags().GetString("name")
+				req.Name = &v
+			}
+			if descChanged {
+				v, _ := cmd.Flags().GetString("description")
+				req.Description = &v
+			}
+			if kubeconfigDataChanged {
+				v, _ := cmd.Flags().GetString("kubeconfig-data")
+				req.KubeconfigData = &v
+			}
+			if kubeconfigPathChanged {
+				v, _ := cmd.Flags().GetString("kubeconfig-path")
+				req.KubeconfigPath = &v
+			}
+			if defaultChanged {
+				v, _ := cmd.Flags().GetBool("default")
+				req.IsDefault = &v
+			}
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		cluster, err := c.UpdateCluster(id, &req)
+		if err != nil {
+			return err
+		}
+
+		return printCluster(cluster)
+	},
+}
+
+var clusterDeleteCmd = &cobra.Command{
+	Use:   "delete <id>",
+	Short: "Delete a registered cluster",
+	Long: `Permanently delete a registered cluster.
+
+This is a destructive operation. You will be prompted for confirmation
+unless --yes is specified.
+
+Examples:
+  stackctl cluster delete 1
+  stackctl cluster delete 1 --yes`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return deleteByID(cmd, args,
+			"This will permanently delete cluster %s. Continue? (y/n): ",
+			passthroughID,
+			func(c *client.Client, id string) error { return c.DeleteCluster(id) },
+			"Deleted cluster %s",
+		)
+	},
+}
+
+var clusterSetDefaultCmd = &cobra.Command{
+	Use:          "set-default <id>",
+	Short:        "Mark a cluster as the default",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		if err := c.SetDefaultCluster(id); err != nil {
+			return err
+		}
+
+		printer.PrintMessage("Cluster %s set as default", id)
+		return nil
+	},
+}
+
 func init() {
 	// shared-values set flags
 	clusterSharedValuesSetCmd.Flags().String("name", "", "Name for the shared values entry (required)")
@@ -402,6 +626,25 @@ func init() {
 	clusterSharedValuesDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
 	clusterSharedValuesDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
+	// cluster create flags
+	clusterCreateCmd.Flags().String("from-file", "", "JSON or YAML file with cluster registration payload")
+	clusterCreateCmd.Flags().String("name", "", "Cluster name")
+	clusterCreateCmd.Flags().String("description", "", "Cluster description")
+	clusterCreateCmd.Flags().String("kubeconfig-data", "", "Raw kubeconfig data (base64 or YAML string)")
+	clusterCreateCmd.Flags().String("kubeconfig-path", "", "Path to kubeconfig file")
+
+	// cluster update flags
+	clusterUpdateCmd.Flags().String("from-file", "", "JSON or YAML file with update payload")
+	clusterUpdateCmd.Flags().String("name", "", "New cluster name")
+	clusterUpdateCmd.Flags().String("description", "", "New cluster description")
+	clusterUpdateCmd.Flags().String("kubeconfig-data", "", "New kubeconfig data")
+	clusterUpdateCmd.Flags().String("kubeconfig-path", "", "New path to kubeconfig file")
+	clusterUpdateCmd.Flags().Bool("default", false, "Mark cluster as default")
+
+	// cluster delete flags
+	clusterDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
+	clusterDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+
 	// Wire up shared-values subcommands
 	clusterSharedValuesCmd.AddCommand(clusterSharedValuesListCmd)
 	clusterSharedValuesCmd.AddCommand(clusterSharedValuesSetCmd)
@@ -410,5 +653,9 @@ func init() {
 	clusterCmd.AddCommand(clusterListCmd)
 	clusterCmd.AddCommand(clusterGetCmd)
 	clusterCmd.AddCommand(clusterSharedValuesCmd)
+	clusterCmd.AddCommand(clusterCreateCmd)
+	clusterCmd.AddCommand(clusterUpdateCmd)
+	clusterCmd.AddCommand(clusterDeleteCmd)
+	clusterCmd.AddCommand(clusterSetDefaultCmd)
 	rootCmd.AddCommand(clusterCmd)
 }

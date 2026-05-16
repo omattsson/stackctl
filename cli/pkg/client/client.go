@@ -1074,3 +1074,33 @@ func (c *Client) SetSharedValues(clusterID string, req *types.SetSharedValuesReq
 func (c *Client) DeleteSharedValues(clusterID, sharedValuesID string) error {
 	return c.Delete(fmt.Sprintf(pathSharedValuesID, clusterID, sharedValuesID))
 }
+
+// CreateCluster registers a new Kubernetes cluster.
+func (c *Client) CreateCluster(req *types.CreateClusterRequest) (*types.Cluster, error) {
+	var cluster types.Cluster
+	err := c.Post("/api/v1/clusters", req, &cluster)
+	if err != nil {
+		return nil, err
+	}
+	return &cluster, nil
+}
+
+// UpdateCluster updates cluster metadata and/or kubeconfig.
+func (c *Client) UpdateCluster(id string, req *types.UpdateClusterRequest) (*types.Cluster, error) {
+	var cluster types.Cluster
+	err := c.Put(fmt.Sprintf("/api/v1/clusters/%s", id), req, &cluster)
+	if err != nil {
+		return nil, err
+	}
+	return &cluster, nil
+}
+
+// DeleteCluster permanently removes a registered cluster.
+func (c *Client) DeleteCluster(id string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/clusters/%s", id))
+}
+
+// SetDefaultCluster marks a cluster as the default for new deployments.
+func (c *Client) SetDefaultCluster(id string) error {
+	return c.Post(fmt.Sprintf("/api/v1/clusters/%s/default", id), nil, nil)
+}

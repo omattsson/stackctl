@@ -3224,3 +3224,128 @@ func TestBulkDeleteTemplates_Error(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, resp)
 }
+
+// ---------- cluster write operations ----------
+
+func TestCreateCluster_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/clusters", r.URL.Path)
+		var body types.CreateClusterRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "prod", body.Name)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.Cluster{Base: types.Base{ID: "5"}, Name: "prod", Status: "online"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	cluster, err := c.CreateCluster(&types.CreateClusterRequest{Name: "prod"})
+	require.NoError(t, err)
+	assert.Equal(t, "5", cluster.ID)
+	assert.Equal(t, "prod", cluster.Name)
+}
+
+func TestCreateCluster_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "name is required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	cluster, err := c.CreateCluster(&types.CreateClusterRequest{})
+	require.Error(t, err)
+	assert.Nil(t, cluster)
+}
+
+func TestUpdateCluster_Success(t *testing.T) {
+	t.Parallel()
+	newName := "updated"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/clusters/3", r.URL.Path)
+		var body types.UpdateClusterRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.NotNil(t, body.Name)
+		assert.Equal(t, "updated", *body.Name)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.Cluster{Base: types.Base{ID: "3"}, Name: "updated", Status: "online"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	cluster, err := c.UpdateCluster("3", &types.UpdateClusterRequest{Name: &newName})
+	require.NoError(t, err)
+	assert.Equal(t, "updated", cluster.Name)
+}
+
+func TestUpdateCluster_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	cluster, err := c.UpdateCluster("99", &types.UpdateClusterRequest{})
+	require.Error(t, err)
+	assert.Nil(t, cluster)
+}
+
+func TestDeleteCluster_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/clusters/7", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteCluster("7")
+	require.NoError(t, err)
+}
+
+func TestDeleteCluster_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteCluster("99")
+	require.Error(t, err)
+}
+
+func TestSetDefaultCluster_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/clusters/2/default", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.SetDefaultCluster("2")
+	require.NoError(t, err)
+}
+
+func TestSetDefaultCluster_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.SetDefaultCluster("99")
+	require.Error(t, err)
+}
