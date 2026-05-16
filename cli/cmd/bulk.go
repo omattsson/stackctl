@@ -375,6 +375,15 @@ func resolveBulkTemplateIDs(c *client.Client, cmd *cobra.Command, args []string)
 	}
 	rawParts = append(rawParts, args...)
 
+	// Normalize: trim whitespace and drop empty tokens before enforcing the cap.
+	norm := rawParts[:0]
+	for _, p := range rawParts {
+		if t := strings.TrimSpace(p); t != "" {
+			norm = append(norm, t)
+		}
+	}
+	rawParts = norm
+
 	if len(rawParts) > 50 {
 		return nil, fmt.Errorf("maximum 50 templates allowed, got %d", len(rawParts))
 	}
@@ -382,10 +391,6 @@ func resolveBulkTemplateIDs(c *client.Client, cmd *cobra.Command, args []string)
 	seen := make(map[string]bool)
 	ids := make([]string, 0, len(rawParts))
 	for _, p := range rawParts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
 		resolved, err := resolveTemplateID(c, p)
 		if err != nil {
 			return nil, err
@@ -413,6 +418,15 @@ func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]stri
 	}
 	rawParts = append(rawParts, args...)
 
+	// Normalize: trim whitespace and drop empty tokens before enforcing the cap.
+	norm := rawParts[:0]
+	for _, p := range rawParts {
+		if t := strings.TrimSpace(p); t != "" {
+			norm = append(norm, t)
+		}
+	}
+	rawParts = norm
+
 	if len(rawParts) > 50 {
 		return nil, fmt.Errorf("maximum 50 stacks allowed, got %d", len(rawParts))
 	}
@@ -420,10 +434,6 @@ func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]stri
 	seen := make(map[string]bool)
 	ids := make([]string, 0, len(rawParts))
 	for _, p := range rawParts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
 		resolved, err := resolveStackID(c, p)
 		if err != nil {
 			return nil, err
