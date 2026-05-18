@@ -2158,7 +2158,7 @@ func TestTestClusterConnection_Unreachable(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Cluster is unreachable"})
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Cluster is unreachable"})
 	}))
 	defer server.Close()
 
@@ -2166,6 +2166,9 @@ func TestTestClusterConnection_Unreachable(t *testing.T) {
 	result, err := c.TestClusterConnection("1")
 	require.Error(t, err)
 	assert.Nil(t, result)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Contains(t, apiErr.UserFacingError(), "Cluster is unreachable")
 }
 
 func TestGetClusterNodes_Success(t *testing.T) {

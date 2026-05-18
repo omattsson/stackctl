@@ -392,7 +392,6 @@ Examples:
 	},
 }
 
-// printCluster renders a single cluster in the configured output format.
 // deriveHealthStatus collapses the cluster health summary into a single status
 // label suitable for the table/quiet output modes. `unknown` covers the case
 // where no nodes were reported (registry hasn't seen any, or the cluster is
@@ -408,6 +407,7 @@ func deriveHealthStatus(h *types.ClusterHealthSummary) string {
 	}
 }
 
+// printCluster renders a single cluster in the configured output format.
 func printCluster(cluster *types.Cluster) error {
 	if printer.Quiet {
 		fmt.Fprintln(printer.Writer, cluster.ID)
