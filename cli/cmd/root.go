@@ -109,6 +109,20 @@ func SetOut(w io.Writer) {
 	rootCmd.SetOut(w)
 }
 
+// ResetFlagsForTest resets all persistent flag variables to their default
+// values. Cobra does not reset flags between in-process Execute calls, so
+// integration tests that mix flag values across subtests must call this
+// before each invocation to prevent flag leakage.
+func ResetFlagsForTest() {
+	flagOutput = "table"
+	flagQuiet = false
+	flagNoColor = false
+	flagAPIURL = ""
+	flagAPIKey = ""
+	flagInsecure = false
+	flagDebug = false
+}
+
 // newClient creates an API client from the current config and flags.
 func newClient() (*client.Client, error) {
 	apiURL := resolveAPIURL()
