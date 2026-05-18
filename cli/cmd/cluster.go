@@ -803,6 +803,15 @@ var clusterNodesCmd = &cobra.Command{
 			return err
 		}
 
+		if printer.Quiet {
+			names := make([]string, len(nodes))
+			for i, n := range nodes {
+				names[i] = n.Name
+			}
+			printer.PrintIDs(names)
+			return nil
+		}
+
 		switch printer.Format {
 		case output.FormatJSON:
 			return printer.PrintJSON(nodes)
@@ -845,6 +854,15 @@ var clusterNamespacesCmd = &cobra.Command{
 			return err
 		}
 
+		if printer.Quiet {
+			names := make([]string, len(namespaces))
+			for i, n := range namespaces {
+				names[i] = n.Name
+			}
+			printer.PrintIDs(names)
+			return nil
+		}
+
 		switch printer.Format {
 		case output.FormatJSON:
 			return printer.PrintJSON(namespaces)
@@ -883,6 +901,15 @@ var clusterUtilizationCmd = &cobra.Command{
 		util, err := c.GetClusterUtilization(id)
 		if err != nil {
 			return err
+		}
+
+		if printer.Quiet {
+			names := make([]string, len(util.Namespaces))
+			for i, ns := range util.Namespaces {
+				names[i] = ns.Namespace
+			}
+			printer.PrintIDs(names)
+			return nil
 		}
 
 		switch printer.Format {

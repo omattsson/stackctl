@@ -32,6 +32,13 @@ default:
 
 - `--quiet` must output only numeric IDs, one per line
 - Commands without numeric IDs (like `git branches`) should skip quiet mode handling
+- **Documented exceptions** (print stable identifiers other than numeric IDs):
+  - `orphaned list` → prints namespace names
+  - `cluster nodes <id>` → prints node names via `printer.PrintIDs`
+  - `cluster namespaces <id>` → prints namespace names via `printer.PrintIDs`
+  - `cluster utilization <id>` → prints namespace names via `printer.PrintIDs`
+  - `cluster health <id>` → prints the derived status label (`healthy`/`degraded`/`unknown`) via `fmt.Fprintln(printer.Writer, deriveHealthStatus(health))`
+  - `cluster test-connection <id>` → prints the connection status string (`success`/`error`) via `fmt.Fprintln(printer.Writer, result.Status)`
 
 ## Destructive Operations
 Commands that delete or clean resources must:

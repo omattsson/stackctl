@@ -1,0 +1,80 @@
+# CodeRabbit configuration for stackctl
+# Docs: https://docs.coderabbit.ai/reference/yaml-config
+
+language: en-US
+
+reviews:
+  # Require review on every push (not just the first commit)
+  request_changes_workflow: false
+
+  # Pull in the project instruction files so CodeRabbit understands
+  # project-specific conventions before commenting.
+  path_instructions:
+    - path: "cli/cmd/**"
+      instructions: |
+        Follow the rules in .github/instructions/commands.instructions.md.
+        Key points:
+        - All commands use RunE + SilenceUsage: true
+        - --quiet outputs identifiers one per line via printer.PrintIDs or fmt.Fprintln(printer.Writer, ...)
+          before the format switch. Documented quiet-mode exceptions (not numeric IDs):
+            orphaned list → namespace names
+            cluster nodes → node names
+            cluster namespaces → namespace names
+            cluster utilization → namespace names
+            cluster health → derived status label (healthy/degraded/unknown)
+            cluster test-connection → connection status string (success/error)
+        - Destructive commands require --yes flag and stderr confirmation prompt
+        - All API calls go through pkg/client via newClient()
+        - parseID() for sub-resource IDs; resolveStackID() for stack-instance commands
+
+    - path: "cli/pkg/client/**"
+      instructions: |
+        Follow the rules in .github/instructions/client.instructions.md.
+        Key points:
+        - Every public method has a TSDoc-style Go doc comment with @see HTTP verb + route
+        - Non-2xx responses are returned as *APIError (decoded from {"error":"..."} body)
+        - The do() method handles all non-2xx uniformly; endpoint-specific structs are
+          only populated on 200 responses
+
+    - path: "cli/pkg/output/**"
+      instructions: |
+        Follow the rules in .github/instructions/output.instructions.md.
+        Key points:
+        - printer.Quiet is a package-level var reset by ResetFlagsForTest() in tests
+        - PrintIDs outputs identifiers one per line with no headers
+        - Table output uses tabwriter; JSON/YAML use encoding/json and gopkg.in/yaml.v3
+
+    - path: "cli/pkg/config/**"
+      instructions: |
+        Follow the rules in .github/instructions/config.instructions.md.
+
+    - path: "cli/**_test.go"
+      instructions: |
+        Follow the rules in .github/instructions/tests.instructions.md.
+        Key points:
+        - cmd/ tests must NOT use t.Parallel() (mutate package-level globals like printer.Quiet)
+        - pkg/ tests should use t.Parallel() on both parent and subtests
+        - Use httptest.NewServer for API mocking — never call real APIs in unit tests
+        - Quiet-mode tests must assert names/identifiers only and assert.NotContains for
+          table headers (NAME, STATUS, etc.)
+        - Table-output tests assert header presence; JSON/YAML tests unmarshal and check fields
+
+  # Enable all severity levels
+  high_level_summary: true
+  poem: false
+  review_status: true
+
+  # Auto-summarise what changed
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+
+  # Instruct CodeRabbit to check against the project's coding conventions
+  finishing_touches:
+    docstrings:
+      enabled: true
+
+chat:
+  auto_reply: true

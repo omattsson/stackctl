@@ -1497,7 +1497,7 @@ func TestClusterNodesCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "3800m")
 }
 
-func TestClusterNodesCmd_TableOutputIgnoresQuiet(t *testing.T) {
+func TestClusterNodesCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1511,9 +1511,9 @@ func TestClusterNodesCmd_TableOutputIgnoresQuiet(t *testing.T) {
 	err := clusterNodesCmd.RunE(clusterNodesCmd, []string{"1"})
 	require.NoError(t, err)
 	out := buf.String()
-	assert.Contains(t, out, "node-a")
-	assert.Contains(t, out, "node-b")
-	assert.Contains(t, out, "NAME")
+	assert.Contains(t, out, "node-a\n")
+	assert.Contains(t, out, "node-b\n")
+	assert.NotContains(t, out, "NAME")
 }
 
 func TestClusterNodesCmd_JSONOutput(t *testing.T) {
@@ -1587,7 +1587,7 @@ func TestClusterNamespacesCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "2026-01-10 14:30:00")
 }
 
-func TestClusterNamespacesCmd_TableOutputIgnoresQuiet(t *testing.T) {
+func TestClusterNamespacesCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1601,9 +1601,9 @@ func TestClusterNamespacesCmd_TableOutputIgnoresQuiet(t *testing.T) {
 	err := clusterNamespacesCmd.RunE(clusterNamespacesCmd, []string{"1"})
 	require.NoError(t, err)
 	out := buf.String()
-	assert.Contains(t, out, "stack-prod-web")
-	assert.Contains(t, out, "stack-dev-api")
-	assert.Contains(t, out, "NAME")
+	assert.Contains(t, out, "stack-prod-web\n")
+	assert.Contains(t, out, "stack-dev-api\n")
+	assert.NotContains(t, out, "NAME")
 }
 
 func TestClusterNamespacesCmd_JSONOutput(t *testing.T) {
@@ -1681,7 +1681,7 @@ func TestClusterUtilizationCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "stack-dev")
 }
 
-func TestClusterUtilizationCmd_TableOutputIgnoresQuiet(t *testing.T) {
+func TestClusterUtilizationCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1695,9 +1695,9 @@ func TestClusterUtilizationCmd_TableOutputIgnoresQuiet(t *testing.T) {
 	err := clusterUtilizationCmd.RunE(clusterUtilizationCmd, []string{"1"})
 	require.NoError(t, err)
 	out := buf.String()
-	assert.Contains(t, out, "stack-prod")
-	assert.Contains(t, out, "stack-dev")
-	assert.Contains(t, out, "NAMESPACE")
+	assert.Contains(t, out, "stack-prod\n")
+	assert.Contains(t, out, "stack-dev\n")
+	assert.NotContains(t, out, "NAMESPACE")
 }
 
 func TestClusterUtilizationCmd_JSONOutput(t *testing.T) {
