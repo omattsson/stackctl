@@ -222,9 +222,12 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
 					return
 				}
-				if state.unreachable[id] {
+				state.mu.Lock()
+				unreachable := state.unreachable[id]
+				state.mu.Unlock()
+				if unreachable {
 					w.WriteHeader(http.StatusBadGateway)
-					json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Cluster is unreachable"})
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Cluster is unreachable"})
 					return
 				}
 				w.WriteHeader(http.StatusOK)
