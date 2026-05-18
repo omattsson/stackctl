@@ -2100,11 +2100,11 @@ func TestGetClusterHealth_Success(t *testing.T) {
 		json.NewEncoder(w).Encode(types.ClusterHealthSummary{
 			NodeCount:         3,
 			ReadyNodeCount:    3,
-			TotalCPU:          "12",
-			TotalMemory:       "48Gi",
-			AllocatableCPU:    "11.7",
-			AllocatableMemory: "45Gi",
-			NamespaceCount:    7,
+			TotalCPU:          "8",
+			TotalMemory:       "16Gi",
+			AllocatableCPU:    "7",
+			AllocatableMemory: "14Gi",
+			NamespaceCount:    12,
 		})
 	}))
 	defer server.Close()
@@ -2113,8 +2113,10 @@ func TestGetClusterHealth_Success(t *testing.T) {
 	health, err := c.GetClusterHealth("1")
 	require.NoError(t, err)
 	assert.Equal(t, 3, health.NodeCount)
-	assert.Equal(t, "12", health.TotalCPU)
-	assert.Equal(t, "48Gi", health.TotalMemory)
+	assert.Equal(t, 3, health.ReadyNodeCount)
+	assert.Equal(t, "7", health.AllocatableCPU)
+	assert.Equal(t, "16Gi", health.TotalMemory)
+	assert.Equal(t, 12, health.NamespaceCount)
 }
 
 func TestGetClusterHealth_Error(t *testing.T) {
@@ -2129,6 +2131,129 @@ func TestGetClusterHealth_Error(t *testing.T) {
 	health, err := c.GetClusterHealth("1")
 	require.Error(t, err)
 	assert.Nil(t, health)
+}
+
+// ---------- cluster health (additional verbs) ----------
+
+func TestTestClusterConnection_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/test", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ClusterTestConnectionResult{
+			Status: "success", Message: "Connection successful", ServerVersion: "v1.29.4",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	result, err := c.TestClusterConnection("1")
+	require.NoError(t, err)
+	assert.Equal(t, "success", result.Status)
+	assert.Equal(t, "v1.29.4", result.ServerVersion)
+}
+
+func TestTestClusterConnection_Unreachable(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Cluster is unreachable"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	result, err := c.TestClusterConnection("1")
+	require.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestGetClusterNodes_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/health/nodes", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.ClusterNodeStatus{
+			{
+				Name:        "node-a",
+				Status:      "Ready",
+				PodCount:    14,
+				Capacity:    types.ClusterResourceQuantity{CPU: "4", Memory: "8Gi", Pods: "110"},
+				Allocatable: types.ClusterResourceQuantity{CPU: "3800m", Memory: "7Gi"},
+				Conditions:  []types.ClusterNodeCondition{{Type: "Ready", Status: "True"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	nodes, err := c.GetClusterNodes("1")
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	assert.Equal(t, "node-a", nodes[0].Name)
+	assert.Equal(t, "Ready", nodes[0].Status)
+	assert.Equal(t, 14, nodes[0].PodCount)
+	assert.Equal(t, "3800m", nodes[0].Allocatable.CPU)
+}
+
+func TestGetClusterNodes_Error(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	nodes, err := c.GetClusterNodes("missing")
+	require.Error(t, err)
+	assert.Nil(t, nodes)
+}
+
+func TestGetClusterNamespaces_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/namespaces", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]types.ClusterNamespace{
+			{Name: "stack-prod-web", Phase: "Active"},
+			{Name: "stack-dev-api", Phase: "Active"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	ns, err := c.GetClusterNamespaces("1")
+	require.NoError(t, err)
+	require.Len(t, ns, 2)
+	assert.Equal(t, "stack-prod-web", ns[0].Name)
+}
+
+func TestGetClusterUtilization_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/utilization", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ClusterUtilization{
+			ClusterID: "1",
+			Namespaces: []types.NamespaceResourceUsage{
+				{Namespace: "stack-prod", CPUUsed: "1500m", CPULimit: "4", MemoryUsed: "2Gi", MemoryLimit: "8Gi", PodCount: 10, PodLimit: 50},
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	util, err := c.GetClusterUtilization("1")
+	require.NoError(t, err)
+	require.NotNil(t, util)
+	assert.Equal(t, "1", util.ClusterID)
+	require.Len(t, util.Namespaces, 1)
+	assert.Equal(t, "stack-prod", util.Namespaces[0].Namespace)
+	assert.Equal(t, 10, util.Namespaces[0].PodCount)
 }
 
 // ---------- shared values ----------
@@ -3349,173 +3474,4 @@ func TestSetDefaultCluster_Error(t *testing.T) {
 	c := New(server.URL)
 	err := c.SetDefaultCluster("99")
 	require.Error(t, err)
-}
-
-// ---------- new cluster subcommand client methods ----------
-
-func TestTestClusterConnection_Success(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/api/v1/clusters/1/test", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.TestConnectionResponse{
-			Status:        "ok",
-			Message:       "Connected successfully",
-			ServerVersion: "v1.28.0",
-		})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	resp, err := c.TestClusterConnection("1")
-	require.NoError(t, err)
-	assert.Equal(t, "ok", resp.Status)
-	assert.Equal(t, "Connected successfully", resp.Message)
-	assert.Equal(t, "v1.28.0", resp.ServerVersion)
-}
-
-func TestTestClusterConnection_Error(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	resp, err := c.TestClusterConnection("1")
-	require.Error(t, err)
-	assert.Nil(t, resp)
-}
-
-func TestGetClusterNodes_Success(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/clusters/1/health/nodes", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNode{
-			{
-				Name:     "node-1",
-				Status:   "ready",
-				PodCount: 5,
-				Capacity: types.ResourceQuantity{CPU: "4", Memory: "16Gi"},
-			},
-			{
-				Name:     "node-2",
-				Status:   "ready",
-				PodCount: 7,
-				Capacity: types.ResourceQuantity{CPU: "8", Memory: "32Gi"},
-			},
-		})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	nodes, err := c.GetClusterNodes("1")
-	require.NoError(t, err)
-	require.Len(t, nodes, 2)
-	assert.Equal(t, "node-1", nodes[0].Name)
-	assert.Equal(t, "ready", nodes[0].Status)
-	assert.Equal(t, 5, nodes[0].PodCount)
-	assert.Equal(t, "8", nodes[1].Capacity.CPU)
-}
-
-func TestGetClusterNodes_Error(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	nodes, err := c.GetClusterNodes("1")
-	require.Error(t, err)
-	assert.Nil(t, nodes)
-}
-
-func TestGetClusterNamespaces_Success(t *testing.T) {
-	t.Parallel()
-	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/clusters/1/namespaces", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNamespace{
-			{Name: "stack-dev-alice", Phase: "Active", CreatedAt: now},
-			{Name: "stack-prod-bob", Phase: "Active", CreatedAt: now},
-		})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	namespaces, err := c.GetClusterNamespaces("1")
-	require.NoError(t, err)
-	require.Len(t, namespaces, 2)
-	assert.Equal(t, "stack-dev-alice", namespaces[0].Name)
-	assert.Equal(t, "Active", namespaces[0].Phase)
-	assert.Equal(t, "stack-prod-bob", namespaces[1].Name)
-}
-
-func TestGetClusterNamespaces_Error(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	namespaces, err := c.GetClusterNamespaces("1")
-	require.Error(t, err)
-	assert.Nil(t, namespaces)
-}
-
-func TestGetClusterUtilization_Success(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/clusters/1/utilization", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.ClusterUtilization{
-			ClusterID: "1",
-			Namespaces: []types.NamespaceResourceUsage{
-				{
-					Namespace:   "stack-dev-alice",
-					CPUUsed:     "500m",
-					CPULimit:    "2",
-					MemoryUsed:  "256Mi",
-					MemoryLimit: "1Gi",
-					PodCount:    3,
-					PodLimit:    10,
-				},
-			},
-		})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	util, err := c.GetClusterUtilization("1")
-	require.NoError(t, err)
-	assert.Equal(t, "1", util.ClusterID)
-	require.Len(t, util.Namespaces, 1)
-	assert.Equal(t, "stack-dev-alice", util.Namespaces[0].Namespace)
-	assert.Equal(t, "500m", util.Namespaces[0].CPUUsed)
-	assert.Equal(t, 3, util.Namespaces[0].PodCount)
-}
-
-func TestGetClusterUtilization_Error(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	util, err := c.GetClusterUtilization("1")
-	require.Error(t, err)
-	assert.Nil(t, util)
 }

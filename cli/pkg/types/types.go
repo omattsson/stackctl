@@ -285,70 +285,81 @@ type GitValidateResponse struct {
 	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
-// ClusterHealthSummary represents a cluster's health summary from GET /api/v1/clusters/:id/health/summary.
+// ClusterHealthSummary represents a cluster's health summary as returned by
+// GET /api/v1/clusters/:id/health/summary. Field names match the backend
+// k8s.ClusterSummary struct so JSON unmarshaling round-trips correctly.
 type ClusterHealthSummary struct {
-	TotalCPU          string `json:"total_cpu" yaml:"total_cpu"`
-	TotalMemory       string `json:"total_memory" yaml:"total_memory"`
-	AllocatableCPU    string `json:"allocatable_cpu" yaml:"allocatable_cpu"`
-	AllocatableMemory string `json:"allocatable_memory" yaml:"allocatable_memory"`
 	NodeCount         int    `json:"node_count" yaml:"node_count"`
 	ReadyNodeCount    int    `json:"ready_node_count" yaml:"ready_node_count"`
+	TotalCPU          string `json:"total_cpu,omitempty" yaml:"total_cpu,omitempty"`
+	TotalMemory       string `json:"total_memory,omitempty" yaml:"total_memory,omitempty"`
+	AllocatableCPU    string `json:"allocatable_cpu,omitempty" yaml:"allocatable_cpu,omitempty"`
+	AllocatableMemory string `json:"allocatable_memory,omitempty" yaml:"allocatable_memory,omitempty"`
 	NamespaceCount    int    `json:"namespace_count" yaml:"namespace_count"`
 }
 
-// NodeCondition represents a single node condition.
-type NodeCondition struct {
-	Type    string `json:"type" yaml:"type"`
-	Status  string `json:"status" yaml:"status"`
-	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+// ClusterTestConnectionResult is the response shape of
+// POST /api/v1/clusters/:id/test. On success Status == "success"; on a
+// reachable-but-erroring cluster the backend returns 502 with Status == "error".
+type ClusterTestConnectionResult struct {
+	Status        string `json:"status" yaml:"status"`
+	Message       string `json:"message,omitempty" yaml:"message,omitempty"`
+	ServerVersion string `json:"server_version,omitempty" yaml:"server_version,omitempty"`
 }
 
-// ResourceQuantity holds CPU, memory, and optional pod capacity values as strings.
-type ResourceQuantity struct {
+// ClusterResourceQuantity captures CPU/memory/pod capacity strings, mirroring
+// the backend k8s.ResourceQuantity.
+type ClusterResourceQuantity struct {
 	CPU    string `json:"cpu" yaml:"cpu"`
 	Memory string `json:"memory" yaml:"memory"`
 	Pods   string `json:"pods,omitempty" yaml:"pods,omitempty"`
 }
 
-// ClusterNode represents the health and capacity of a single cluster node.
-type ClusterNode struct {
-	Conditions  []NodeCondition  `json:"conditions" yaml:"conditions"`
-	Capacity    ResourceQuantity `json:"capacity" yaml:"capacity"`
-	Allocatable ResourceQuantity `json:"allocatable" yaml:"allocatable"`
-	Name        string           `json:"name" yaml:"name"`
-	Status      string           `json:"status" yaml:"status"`
-	PodCount    int              `json:"pod_count" yaml:"pod_count"`
+// ClusterNodeCondition represents a single node condition (Ready,
+// MemoryPressure, etc.), mirroring backend k8s.NodeCondition.
+type ClusterNodeCondition struct {
+	Type    string `json:"type" yaml:"type"`
+	Status  string `json:"status" yaml:"status"`
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
-// ClusterNamespace represents a Kubernetes namespace in a cluster.
+// ClusterNodeStatus is one node's health snapshot, returned as an element of
+// the array from GET /api/v1/clusters/:id/health/nodes. Mirrors backend
+// k8s.NodeStatus.
+type ClusterNodeStatus struct {
+	Name        string                  `json:"name" yaml:"name"`
+	Status      string                  `json:"status" yaml:"status"`
+	Conditions  []ClusterNodeCondition  `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+	Capacity    ClusterResourceQuantity `json:"capacity" yaml:"capacity"`
+	Allocatable ClusterResourceQuantity `json:"allocatable" yaml:"allocatable"`
+	PodCount    int                     `json:"pod_count" yaml:"pod_count"`
+}
+
+// ClusterNamespace is one namespace entry from
+// GET /api/v1/clusters/:id/namespaces. Mirrors backend k8s.NamespaceInfo.
 type ClusterNamespace struct {
-	CreatedAt time.Time `json:"created_at" yaml:"created_at"`
 	Name      string    `json:"name" yaml:"name"`
 	Phase     string    `json:"phase" yaml:"phase"`
+	CreatedAt time.Time `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
-// NamespaceResourceUsage holds resource usage for a single namespace.
+// NamespaceResourceUsage is the per-namespace utilization entry inside a
+// ClusterUtilization, mirroring backend NamespaceResourceUsage.
 type NamespaceResourceUsage struct {
 	Namespace   string `json:"namespace" yaml:"namespace"`
-	CPUUsed     string `json:"cpu_used" yaml:"cpu_used"`
-	CPULimit    string `json:"cpu_limit" yaml:"cpu_limit"`
-	MemoryUsed  string `json:"memory_used" yaml:"memory_used"`
-	MemoryLimit string `json:"memory_limit" yaml:"memory_limit"`
+	CPUUsed     string `json:"cpu_used,omitempty" yaml:"cpu_used,omitempty"`
+	CPULimit    string `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
+	MemoryUsed  string `json:"memory_used,omitempty" yaml:"memory_used,omitempty"`
+	MemoryLimit string `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
 	PodCount    int    `json:"pod_count" yaml:"pod_count"`
 	PodLimit    int    `json:"pod_limit" yaml:"pod_limit"`
 }
 
-// ClusterUtilization represents per-namespace resource usage for a cluster.
+// ClusterUtilization is the response shape of
+// GET /api/v1/clusters/:id/utilization. Mirrors backend ClusterUtilization.
 type ClusterUtilization struct {
 	ClusterID  string                   `json:"cluster_id" yaml:"cluster_id"`
 	Namespaces []NamespaceResourceUsage `json:"namespaces" yaml:"namespaces"`
-}
-
-// TestConnectionResponse is the response from POST /api/v1/clusters/:id/test.
-type TestConnectionResponse struct {
-	Status        string `json:"status" yaml:"status"`
-	Message       string `json:"message" yaml:"message"`
-	ServerVersion string `json:"server_version,omitempty" yaml:"server_version,omitempty"`
 }
 
 // ErrorResponse represents an API error response.

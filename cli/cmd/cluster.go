@@ -153,20 +153,18 @@ Examples:
 				{Key: "Nodes", Value: strconv.Itoa(cluster.NodeCount)},
 			}
 			if health != nil {
-				readyStatus := "healthy"
-				if health.ReadyNodeCount < health.NodeCount {
-					readyStatus = "degraded"
-				}
 				fields = append(fields,
-					output.KeyValue{Key: "Health", Value: printer.StatusColor(readyStatus)},
+					output.KeyValue{Key: "Health Status", Value: printer.StatusColor(deriveHealthStatus(health))},
 					output.KeyValue{Key: "Ready Nodes", Value: fmt.Sprintf("%d/%d", health.ReadyNodeCount, health.NodeCount)},
-					output.KeyValue{Key: "Total CPU", Value: health.TotalCPU},
-					output.KeyValue{Key: "Total Memory", Value: health.TotalMemory},
+					output.KeyValue{Key: "CPU Allocatable", Value: health.AllocatableCPU},
+					output.KeyValue{Key: "CPU Total", Value: health.TotalCPU},
+					output.KeyValue{Key: "Memory Allocatable", Value: health.AllocatableMemory},
+					output.KeyValue{Key: "Memory Total", Value: health.TotalMemory},
 					output.KeyValue{Key: "Namespaces", Value: strconv.Itoa(health.NamespaceCount)},
 				)
 			} else {
 				fields = append(fields,
-					output.KeyValue{Key: "Health", Value: "unavailable"},
+					output.KeyValue{Key: "Health Status", Value: "unavailable"},
 				)
 			}
 			return printer.PrintSingle(cluster, fields)
@@ -395,6 +393,21 @@ Examples:
 }
 
 // printCluster renders a single cluster in the configured output format.
+// deriveHealthStatus collapses the cluster health summary into a single status
+// label suitable for the table/quiet output modes. `unknown` covers the case
+// where no nodes were reported (registry hasn't seen any, or the cluster is
+// brand new) — distinct from `degraded`, which implies known-but-bad.
+func deriveHealthStatus(h *types.ClusterHealthSummary) string {
+	switch {
+	case h == nil || h.NodeCount == 0:
+		return "unknown"
+	case h.ReadyNodeCount == h.NodeCount:
+		return "healthy"
+	default:
+		return "degraded"
+	}
+}
+
 func printCluster(cluster *types.Cluster) error {
 	if printer.Quiet {
 		fmt.Fprintln(printer.Writer, cluster.ID)
@@ -684,13 +697,12 @@ var clusterSetDefaultCmd = &cobra.Command{
 	},
 }
 
-var clusterTestConnectionCmd = &cobra.Command{
-	Use:   "test-connection <id>",
-	Short: "Test connectivity to a cluster",
-	Long: `Test connectivity to a registered cluster.
+// --- Health & connectivity ---
 
-Examples:
-  stackctl cluster test-connection 1`,
+var clusterTestConnectionCmd = &cobra.Command{
+	Use:          "test-connection <id>",
+	Short:        "Test connectivity to a cluster's API server",
+	Long:         "Issue a lightweight call to the cluster's API server to verify it is reachable.",
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -698,48 +710,39 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-
-		resp, err := c.TestClusterConnection(id)
+		result, err := c.TestClusterConnection(id)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, resp.Status)
+			fmt.Fprintln(printer.Writer, result.Status)
 			return nil
 		}
 
 		switch printer.Format {
 		case output.FormatJSON:
-			return printer.PrintJSON(resp)
+			return printer.PrintJSON(result)
 		case output.FormatYAML:
-			return printer.PrintYAML(resp)
+			return printer.PrintYAML(result)
 		default:
-			fields := []output.KeyValue{
-				{Key: "Status", Value: printer.StatusColor(resp.Status)},
-				{Key: "Message", Value: resp.Message},
-			}
-			if resp.ServerVersion != "" {
-				fields = append(fields, output.KeyValue{Key: "Server Version", Value: resp.ServerVersion})
-			}
-			return printer.PrintSingle(resp, fields)
+			return printer.PrintSingle(result, []output.KeyValue{
+				{Key: "Status", Value: printer.StatusColor(result.Status)},
+				{Key: "Message", Value: result.Message},
+				{Key: "Server Version", Value: result.ServerVersion},
+			})
 		}
 	},
 }
 
 var clusterHealthCmd = &cobra.Command{
-	Use:   "health <id>",
-	Short: "Show health summary for a cluster",
-	Long: `Show health summary (node count, CPU, memory) for a cluster.
-
-Examples:
-  stackctl cluster health 1
-  stackctl cluster health 1 -o json`,
+	Use:          "health <id>",
+	Short:        "Show the cluster health summary",
+	Long:         "Show node counts, ready-node ratio, and aggregate CPU/memory capacity for the cluster.",
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -747,19 +750,17 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-
 		health, err := c.GetClusterHealth(id)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, id)
+			fmt.Fprintln(printer.Writer, deriveHealthStatus(health))
 			return nil
 		}
 
@@ -769,33 +770,23 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(health)
 		default:
-			readyStatus := "healthy"
-			if health.ReadyNodeCount < health.NodeCount {
-				readyStatus = "degraded"
-			}
-			fields := []output.KeyValue{
-				{Key: "Status", Value: printer.StatusColor(readyStatus)},
-				{Key: "Nodes", Value: strconv.Itoa(health.NodeCount)},
-				{Key: "Ready Nodes", Value: strconv.Itoa(health.ReadyNodeCount)},
-				{Key: "Total CPU", Value: health.TotalCPU},
-				{Key: "Allocatable CPU", Value: health.AllocatableCPU},
-				{Key: "Total Memory", Value: health.TotalMemory},
-				{Key: "Allocatable Memory", Value: health.AllocatableMemory},
+			return printer.PrintSingle(health, []output.KeyValue{
+				{Key: "Health Status", Value: printer.StatusColor(deriveHealthStatus(health))},
+				{Key: "Ready Nodes", Value: fmt.Sprintf("%d/%d", health.ReadyNodeCount, health.NodeCount)},
+				{Key: "CPU Allocatable", Value: health.AllocatableCPU},
+				{Key: "CPU Total", Value: health.TotalCPU},
+				{Key: "Memory Allocatable", Value: health.AllocatableMemory},
+				{Key: "Memory Total", Value: health.TotalMemory},
 				{Key: "Namespaces", Value: strconv.Itoa(health.NamespaceCount)},
-			}
-			return printer.PrintSingle(health, fields)
+			})
 		}
 	},
 }
 
 var clusterNodesCmd = &cobra.Command{
-	Use:   "nodes <id>",
-	Short: "List nodes in a cluster",
-	Long: `List all nodes in a cluster with status, capacity, and pod count.
-
-Examples:
-  stackctl cluster nodes 1
-  stackctl cluster nodes 1 -o json`,
+	Use:          "nodes <id>",
+	Short:        "List nodes in a cluster with their status",
+	Long:         "List per-node health, pod count, and allocatable CPU/memory for the cluster.",
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -803,21 +794,21 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-
 		nodes, err := c.GetClusterNodes(id)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			for _, n := range nodes {
-				fmt.Fprintln(printer.Writer, n.Name)
+			names := make([]string, len(nodes))
+			for i, n := range nodes {
+				names[i] = n.Name
 			}
+			printer.PrintIDs(names)
 			return nil
 		}
 
@@ -827,15 +818,15 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(nodes)
 		default:
-			headers := []string{"NAME", "STATUS", "CPU", "MEMORY", "PODS"}
+			headers := []string{"NAME", "STATUS", "PODS", "CPU", "MEMORY"}
 			rows := make([][]string, len(nodes))
 			for i, n := range nodes {
 				rows[i] = []string{
 					n.Name,
 					printer.StatusColor(n.Status),
-					n.Capacity.CPU,
-					n.Capacity.Memory,
 					strconv.Itoa(n.PodCount),
+					n.Allocatable.CPU,
+					n.Allocatable.Memory,
 				}
 			}
 			return printer.PrintTable(headers, rows)
@@ -844,13 +835,9 @@ Examples:
 }
 
 var clusterNamespacesCmd = &cobra.Command{
-	Use:   "namespaces <id>",
-	Short: "List stack namespaces in a cluster",
-	Long: `List all stack-* namespaces in a cluster.
-
-Examples:
-  stackctl cluster namespaces 1
-  stackctl cluster namespaces 1 -o json`,
+	Use:          "namespaces <id>",
+	Short:        "List stack-* namespaces present in a cluster",
+	Long:         "List namespaces whose names start with stack-, along with their phase and creation time.",
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -858,21 +845,21 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-
 		namespaces, err := c.GetClusterNamespaces(id)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			for _, ns := range namespaces {
-				fmt.Fprintln(printer.Writer, ns.Name)
+			names := make([]string, len(namespaces))
+			for i, n := range namespaces {
+				names[i] = n.Name
 			}
+			printer.PrintIDs(names)
 			return nil
 		}
 
@@ -884,12 +871,12 @@ Examples:
 		default:
 			headers := []string{"NAME", "PHASE", "CREATED"}
 			rows := make([][]string, len(namespaces))
-			for i, ns := range namespaces {
-				rows[i] = []string{
-					ns.Name,
-					ns.Phase,
-					ns.CreatedAt.Format("2006-01-02 15:04:05"),
+			for i, n := range namespaces {
+				created := ""
+				if !n.CreatedAt.IsZero() {
+					created = n.CreatedAt.UTC().Format("2006-01-02 15:04:05")
 				}
+				rows[i] = []string{n.Name, printer.StatusColor(n.Phase), created}
 			}
 			return printer.PrintTable(headers, rows)
 		}
@@ -897,13 +884,9 @@ Examples:
 }
 
 var clusterUtilizationCmd = &cobra.Command{
-	Use:   "utilization <id>",
-	Short: "Show per-namespace resource utilization for a cluster",
-	Long: `Show CPU, memory, and pod usage per namespace for a cluster.
-
-Examples:
-  stackctl cluster utilization 1
-  stackctl cluster utilization 1 -o json`,
+	Use:          "utilization <id>",
+	Short:        "Show per-namespace resource utilization",
+	Long:         "Show aggregated CPU/memory/pod usage per stack-* namespace in the cluster.",
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -911,19 +894,21 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-
 		util, err := c.GetClusterUtilization(id)
 		if err != nil {
 			return err
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, id)
+			names := make([]string, len(util.Namespaces))
+			for i, ns := range util.Namespaces {
+				names[i] = ns.Namespace
+			}
+			printer.PrintIDs(names)
 			return nil
 		}
 
@@ -936,13 +921,17 @@ Examples:
 			headers := []string{"NAMESPACE", "CPU USED", "CPU LIMIT", "MEM USED", "MEM LIMIT", "PODS"}
 			rows := make([][]string, len(util.Namespaces))
 			for i, ns := range util.Namespaces {
+				podCol := strconv.Itoa(ns.PodCount)
+				if ns.PodLimit > 0 {
+					podCol = fmt.Sprintf("%d/%d", ns.PodCount, ns.PodLimit)
+				}
 				rows[i] = []string{
 					ns.Namespace,
 					ns.CPUUsed,
 					ns.CPULimit,
 					ns.MemoryUsed,
 					ns.MemoryLimit,
-					fmt.Sprintf("%d/%d", ns.PodCount, ns.PodLimit),
+					podCol,
 				}
 			}
 			return printer.PrintTable(headers, rows)

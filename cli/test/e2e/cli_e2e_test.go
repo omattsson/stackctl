@@ -1744,10 +1744,50 @@ func startE2EClusterMockServer(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(resp)
 
-		// GET /api/v1/clusters/1/health/summary — return 404 so get degrades gracefully
+		// GET /api/v1/clusters/1/health/summary
 		case r.URL.Path == "/api/v1/clusters/1/health/summary" && r.Method == http.MethodGet:
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "health not available"})
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"node_count": 3, "ready_node_count": 3,
+				"total_cpu": "8", "total_memory": "16Gi",
+				"allocatable_cpu": "7", "allocatable_memory": "14Gi",
+				"namespace_count": 12,
+			})
+
+		// GET /api/v1/clusters/1/health/nodes
+		case r.URL.Path == "/api/v1/clusters/1/health/nodes" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"name": "node-a", "status": "Ready", "pod_count": 14,
+					"capacity":    map[string]string{"cpu": "4", "memory": "8Gi", "pods": "110"},
+					"allocatable": map[string]string{"cpu": "3800m", "memory": "7Gi"},
+				},
+			})
+
+		// GET /api/v1/clusters/1/namespaces
+		case r.URL.Path == "/api/v1/clusters/1/namespaces" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"name": "stack-prod-web", "phase": "Active"},
+			})
+
+		// GET /api/v1/clusters/1/utilization
+		case r.URL.Path == "/api/v1/clusters/1/utilization" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"cluster_id": "1",
+				"namespaces": []map[string]interface{}{
+					{"namespace": "stack-prod-web", "cpu_used": "1500m", "cpu_limit": "4", "memory_used": "2Gi", "memory_limit": "8Gi", "pod_count": 10, "pod_limit": 50},
+				},
+			})
+
+		// POST /api/v1/clusters/1/test
+		case r.URL.Path == "/api/v1/clusters/1/test" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "success", "message": "Connection successful", "server_version": "v1.29.4",
+			})
 
 		// PUT /api/v1/clusters/1 — update
 		case r.URL.Path == "/api/v1/clusters/1" && r.Method == http.MethodPut:
@@ -1872,44 +1912,36 @@ func TestE2EClusterHealth(t *testing.T) {
 		t.Skip("skipping e2e test in short mode")
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/api/v1/clusters/1/health/summary" && r.Method == http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			resp := map[string]interface{}{
-				"node_count":          3,
-				"ready_node_count":    3,
-				"total_cpu":           "12",
-				"total_memory":        "48Gi",
-				"allocatable_cpu":     "11.7",
-				"allocatable_memory":  "45Gi",
-				"namespace_count":     7,
-			}
-			json.NewEncoder(w).Encode(resp)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-		}
-	}))
+	server := startE2EClusterMockServer(t)
 	defer server.Close()
 
 	dir := t.TempDir()
 	setupE2EStackContext(t, dir, server.URL)
 
-	// table output
+	// table: humans see the key fields.
 	stdout, _, err := runStackctl(t, dir, "cluster", "health", "1")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "Nodes")
-	assert.Contains(t, stdout, "3")
-	assert.Contains(t, stdout, "48Gi")
-	assert.Contains(t, stdout, "11.7")
+	assert.Contains(t, stdout, "Health Status")
+	assert.Contains(t, stdout, "healthy")
+	assert.Contains(t, stdout, "3/3")
+	assert.Contains(t, stdout, "14Gi")
+	assert.Contains(t, stdout, "12")
 
-	// json output
+	// json: parses back into the documented shape.
 	stdout, _, err = runStackctl(t, dir, "cluster", "health", "1", "--output", "json")
 	require.NoError(t, err)
-	var result map[string]interface{}
-	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
-	assert.Equal(t, float64(3), result["node_count"])
-	assert.Equal(t, "48Gi", result["total_memory"])
+	var got struct {
+		NodeCount      int `json:"node_count"`
+		ReadyNodeCount int `json:"ready_node_count"`
+		NamespaceCount int `json:"namespace_count"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, 3, got.NodeCount)
+	assert.Equal(t, 3, got.ReadyNodeCount)
+	assert.Equal(t, 12, got.NamespaceCount)
+
+	// quiet: single-word health status for shell pipelines.
+	stdout, _, err = runStackctl(t, dir, "cluster", "health", "1", "--quiet")
+	require.NoError(t, err)
+	assert.Equal(t, "healthy\n", stdout)
 }

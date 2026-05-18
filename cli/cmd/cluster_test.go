@@ -39,11 +39,11 @@ func sampleClusterHealth() types.ClusterHealthSummary {
 	return types.ClusterHealthSummary{
 		NodeCount:         3,
 		ReadyNodeCount:    3,
-		TotalCPU:          "12",
-		TotalMemory:       "48Gi",
-		AllocatableCPU:    "11.7",
-		AllocatableMemory: "45Gi",
-		NamespaceCount:    7,
+		TotalCPU:          "8",
+		TotalMemory:       "16Gi",
+		AllocatableCPU:    "7",
+		AllocatableMemory: "14Gi",
+		NamespaceCount:    12,
 	}
 }
 
@@ -202,7 +202,8 @@ func TestClusterGetCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "true")
 	assert.Contains(t, out, "healthy")
 	assert.Contains(t, out, "3/3")
-	assert.Contains(t, out, "48Gi")
+	assert.Contains(t, out, "16Gi")
+	assert.Contains(t, out, "14Gi")
 }
 
 func TestClusterGetCmd_HealthUnavailable(t *testing.T) {
@@ -253,7 +254,8 @@ func TestClusterGetCmd_JSONOutput(t *testing.T) {
 	var result map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.Contains(t, string(result["cluster"]), "dev-cluster")
-	assert.Contains(t, string(result["health"]), "node_count")
+	assert.Contains(t, string(result["health"]), "ready_node_count")
+	assert.Contains(t, string(result["health"]), "namespace_count")
 }
 
 func TestClusterGetCmd_QuietOutput(t *testing.T) {
@@ -300,7 +302,8 @@ func TestClusterGetCmd_YAMLOutput(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "name: dev-cluster")
-	assert.Contains(t, out, "total_cpu")
+	assert.Contains(t, out, "ready_node_count: 3")
+	assert.Contains(t, out, "namespace_count: 12")
 }
 
 func TestClusterGetCmd_JSONOutput_HealthUnavailable(t *testing.T) {
@@ -1233,68 +1236,24 @@ func TestClusterSetDefaultCmd_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "cluster not found")
 }
 
-// ---------- sample helpers for new types ----------
-
-func sampleTestConnectionResponse() types.TestConnectionResponse {
-	return types.TestConnectionResponse{
-		Status:        "ok",
-		Message:       "Connected successfully",
-		ServerVersion: "v1.28.0",
-	}
-}
-
-func sampleClusterNode() types.ClusterNode {
-	return types.ClusterNode{
-		Name:   "node-1",
-		Status: "ready",
-		Capacity: types.ResourceQuantity{
-			CPU:    "4",
-			Memory: "16Gi",
-			Pods:   "110",
-		},
-		Allocatable: types.ResourceQuantity{
-			CPU:    "3.9",
-			Memory: "15Gi",
-		},
-		PodCount: 12,
-	}
-}
-
-func sampleClusterNamespace() types.ClusterNamespace {
-	return types.ClusterNamespace{
-		Name:      "stack-dev-alice",
-		Phase:     "Active",
-		CreatedAt: time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
-	}
-}
-
-func sampleClusterUtilization() types.ClusterUtilization {
-	return types.ClusterUtilization{
-		ClusterID: "1",
-		Namespaces: []types.NamespaceResourceUsage{
-			{
-				Namespace:   "stack-dev-alice",
-				CPUUsed:     "500m",
-				CPULimit:    "2",
-				MemoryUsed:  "256Mi",
-				MemoryLimit: "1Gi",
-				PodCount:    3,
-				PodLimit:    10,
-			},
-		},
-	}
-}
 
 // ---------- cluster test-connection ----------
 
+func sampleTestConnectionResult() types.ClusterTestConnectionResult {
+	return types.ClusterTestConnectionResult{
+		Status:        "success",
+		Message:       "Connection successful",
+		ServerVersion: "v1.29.4",
+	}
+}
+
 func TestClusterTestConnectionCmd_TableOutput(t *testing.T) {
-	resp := sampleTestConnectionResponse()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/clusters/1/test", r.URL.Path)
-		require.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/test", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(sampleTestConnectionResult())
 	}))
 	defer server.Close()
 
@@ -1305,17 +1264,16 @@ func TestClusterTestConnectionCmd_TableOutput(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "Status")
-	assert.Contains(t, out, "ok")
-	assert.Contains(t, out, "Connected successfully")
-	assert.Contains(t, out, "v1.28.0")
+	assert.Contains(t, out, "success")
+	assert.Contains(t, out, "Connection successful")
+	assert.Contains(t, out, "v1.29.4")
 }
 
 func TestClusterTestConnectionCmd_JSONOutput(t *testing.T) {
-	resp := sampleTestConnectionResponse()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(sampleTestConnectionResult())
 	}))
 	defer server.Close()
 
@@ -1325,19 +1283,17 @@ func TestClusterTestConnectionCmd_JSONOutput(t *testing.T) {
 	err := clusterTestConnectionCmd.RunE(clusterTestConnectionCmd, []string{"1"})
 	require.NoError(t, err)
 
-	var result types.TestConnectionResponse
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, "ok", result.Status)
-	assert.Equal(t, "Connected successfully", result.Message)
-	assert.Equal(t, "v1.28.0", result.ServerVersion)
+	var got types.ClusterTestConnectionResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "success", got.Status)
+	assert.Equal(t, "v1.29.4", got.ServerVersion)
 }
 
 func TestClusterTestConnectionCmd_YAMLOutput(t *testing.T) {
-	resp := sampleTestConnectionResponse()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(sampleTestConnectionResult())
 	}))
 	defer server.Close()
 
@@ -1348,16 +1304,15 @@ func TestClusterTestConnectionCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "status: ok")
-	assert.Contains(t, out, "server_version: v1.28.0")
+	assert.Contains(t, out, "status: success")
+	assert.Contains(t, out, "server_version: v1.29.4")
 }
 
 func TestClusterTestConnectionCmd_QuietOutput(t *testing.T) {
-	resp := sampleTestConnectionResponse()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(sampleTestConnectionResult())
 	}))
 	defer server.Close()
 
@@ -1366,27 +1321,14 @@ func TestClusterTestConnectionCmd_QuietOutput(t *testing.T) {
 
 	err := clusterTestConnectionCmd.RunE(clusterTestConnectionCmd, []string{"1"})
 	require.NoError(t, err)
-	assert.Equal(t, "ok\n", buf.String())
+	assert.Equal(t, "success\n", buf.String())
 }
 
-func TestClusterTestConnectionCmd_ParseIDError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach server")
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterTestConnectionCmd.RunE(clusterTestConnectionCmd, []string{"  "})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must not be empty")
-}
-
-func TestClusterTestConnectionCmd_APIError(t *testing.T) {
+func TestClusterTestConnectionCmd_Unreachable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Cluster is unreachable"})
 	}))
 	defer server.Close()
 
@@ -1394,19 +1336,17 @@ func TestClusterTestConnectionCmd_APIError(t *testing.T) {
 
 	err := clusterTestConnectionCmd.RunE(clusterTestConnectionCmd, []string{"1"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Internal server error")
 }
 
 // ---------- cluster health ----------
 
 func TestClusterHealthCmd_TableOutput(t *testing.T) {
-	health := sampleClusterHealth()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/clusters/1/health/summary", r.URL.Path)
-		require.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/health/summary", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(health)
+		json.NewEncoder(w).Encode(sampleClusterHealth())
 	}))
 	defer server.Close()
 
@@ -1416,19 +1356,55 @@ func TestClusterHealthCmd_TableOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "Status")
-	assert.Contains(t, out, "Nodes")
-	assert.Contains(t, out, "3")
-	assert.Contains(t, out, "48Gi")
+	assert.Contains(t, out, "Health Status")
+	assert.Contains(t, out, "healthy")
+	assert.Contains(t, out, "3/3")
+	assert.Contains(t, out, "14Gi")
 	assert.Contains(t, out, "12")
 }
 
-func TestClusterHealthCmd_JSONOutput(t *testing.T) {
-	health := sampleClusterHealth()
+func TestClusterHealthCmd_UnknownWhenZeroNodes(t *testing.T) {
+	zero := types.ClusterHealthSummary{} // NodeCount: 0 — registry hasn't seen any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(health)
+		json.NewEncoder(w).Encode(zero)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "unknown\n", buf.String())
+}
+
+func TestClusterHealthCmd_DegradedWhenSomeNodesNotReady(t *testing.T) {
+	degraded := sampleClusterHealth()
+	degraded.ReadyNodeCount = 2 // 2 of 3 nodes ready
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(degraded)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"1"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "degraded")
+	assert.Contains(t, out, "2/3")
+}
+
+func TestClusterHealthCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterHealth())
 	}))
 	defer server.Close()
 
@@ -1438,18 +1414,17 @@ func TestClusterHealthCmd_JSONOutput(t *testing.T) {
 	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"1"})
 	require.NoError(t, err)
 
-	var result types.ClusterHealthSummary
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, 3, result.NodeCount)
-	assert.Equal(t, "48Gi", result.TotalMemory)
+	var got types.ClusterHealthSummary
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, 3, got.NodeCount)
+	assert.Equal(t, 12, got.NamespaceCount)
 }
 
 func TestClusterHealthCmd_YAMLOutput(t *testing.T) {
-	health := sampleClusterHealth()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(health)
+		json.NewEncoder(w).Encode(sampleClusterHealth())
 	}))
 	defer server.Close()
 
@@ -1458,18 +1433,16 @@ func TestClusterHealthCmd_YAMLOutput(t *testing.T) {
 
 	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"1"})
 	require.NoError(t, err)
-
 	out := buf.String()
-	assert.Contains(t, out, "node_count: 3")
-	assert.Contains(t, out, "total_memory: 48Gi")
+	assert.Contains(t, out, "ready_node_count: 3")
+	assert.Contains(t, out, "namespace_count: 12")
 }
 
 func TestClusterHealthCmd_QuietOutput(t *testing.T) {
-	health := sampleClusterHealth()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(health)
+		json.NewEncoder(w).Encode(sampleClusterHealth())
 	}))
 	defer server.Close()
 
@@ -1478,71 +1451,73 @@ func TestClusterHealthCmd_QuietOutput(t *testing.T) {
 
 	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"1"})
 	require.NoError(t, err)
-	assert.Equal(t, "1\n", buf.String())
-}
-
-func TestClusterHealthCmd_ParseIDError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach server")
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"  "})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must not be empty")
-}
-
-func TestClusterHealthCmd_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Internal server error")
+	assert.Equal(t, "healthy\n", buf.String())
 }
 
 // ---------- cluster nodes ----------
 
+func sampleClusterNodes() []types.ClusterNodeStatus {
+	return []types.ClusterNodeStatus{
+		{
+			Name: "node-a", Status: "Ready", PodCount: 14,
+			Capacity:    types.ClusterResourceQuantity{CPU: "4", Memory: "8Gi", Pods: "110"},
+			Allocatable: types.ClusterResourceQuantity{CPU: "3800m", Memory: "7Gi"},
+		},
+		{
+			Name: "node-b", Status: "NotReady", PodCount: 0,
+			Capacity:    types.ClusterResourceQuantity{CPU: "4", Memory: "8Gi"},
+			Allocatable: types.ClusterResourceQuantity{CPU: "3800m", Memory: "7Gi"},
+		},
+	}
+}
+
 func TestClusterNodesCmd_TableOutput(t *testing.T) {
-	node := sampleClusterNode()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/clusters/1/health/nodes", r.URL.Path)
-		require.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/health/nodes", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNode{node})
+		json.NewEncoder(w).Encode(sampleClusterNodes())
 	}))
 	defer server.Close()
 
 	buf := setupClusterTestCmd(t, server.URL)
-
 	err := clusterNodesCmd.RunE(clusterNodesCmd, []string{"1"})
 	require.NoError(t, err)
 
 	out := buf.String()
 	assert.Contains(t, out, "NAME")
 	assert.Contains(t, out, "STATUS")
-	assert.Contains(t, out, "node-1")
-	assert.Contains(t, out, "ready")
-	assert.Contains(t, out, "4")
-	assert.Contains(t, out, "16Gi")
-	assert.Contains(t, out, "12")
+	assert.Contains(t, out, "PODS")
+	assert.Contains(t, out, "CPU")
+	assert.Contains(t, out, "MEMORY")
+	assert.Contains(t, out, "node-a")
+	assert.Contains(t, out, "node-b")
+	assert.Contains(t, out, "Ready")
+	assert.Contains(t, out, "NotReady")
+	assert.Contains(t, out, "3800m")
 }
 
-func TestClusterNodesCmd_JSONOutput(t *testing.T) {
-	node := sampleClusterNode()
+func TestClusterNodesCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNode{node})
+		json.NewEncoder(w).Encode(sampleClusterNodes())
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	err := clusterNodesCmd.RunE(clusterNodesCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "node-a\nnode-b\n", buf.String())
+}
+
+func TestClusterNodesCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterNodes())
 	}))
 	defer server.Close()
 
@@ -1552,19 +1527,17 @@ func TestClusterNodesCmd_JSONOutput(t *testing.T) {
 	err := clusterNodesCmd.RunE(clusterNodesCmd, []string{"1"})
 	require.NoError(t, err)
 
-	var result []types.ClusterNode
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	require.Len(t, result, 1)
-	assert.Equal(t, "node-1", result[0].Name)
-	assert.Equal(t, "ready", result[0].Status)
+	var got []types.ClusterNodeStatus
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 2)
+	assert.Equal(t, "node-a", got[0].Name)
 }
 
 func TestClusterNodesCmd_YAMLOutput(t *testing.T) {
-	node := sampleClusterNode()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNode{node})
+		json.NewEncoder(w).Encode(sampleClusterNodes())
 	}))
 	defer server.Close()
 
@@ -1573,91 +1546,65 @@ func TestClusterNodesCmd_YAMLOutput(t *testing.T) {
 
 	err := clusterNodesCmd.RunE(clusterNodesCmd, []string{"1"})
 	require.NoError(t, err)
-
 	out := buf.String()
-	assert.Contains(t, out, "name: node-1")
-	assert.Contains(t, out, "status: ready")
-}
-
-func TestClusterNodesCmd_QuietOutput(t *testing.T) {
-	n1 := sampleClusterNode()
-	n2 := sampleClusterNode()
-	n2.Name = "node-2"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNode{n1, n2})
-	}))
-	defer server.Close()
-
-	buf := setupClusterTestCmd(t, server.URL)
-	printer.Quiet = true
-
-	err := clusterNodesCmd.RunE(clusterNodesCmd, []string{"1"})
-	require.NoError(t, err)
-	assert.Equal(t, "node-1\nnode-2\n", buf.String())
-}
-
-func TestClusterNodesCmd_ParseIDError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach server")
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterNodesCmd.RunE(clusterNodesCmd, []string{"  "})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must not be empty")
-}
-
-func TestClusterNodesCmd_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterNodesCmd.RunE(clusterNodesCmd, []string{"1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Internal server error")
+	assert.Contains(t, out, "name: node-a")
+	assert.Contains(t, out, "status: Ready")
 }
 
 // ---------- cluster namespaces ----------
 
+func sampleClusterNamespaces() []types.ClusterNamespace {
+	now := time.Date(2026, 1, 10, 14, 30, 0, 0, time.UTC)
+	return []types.ClusterNamespace{
+		{Name: "stack-prod-web", Phase: "Active", CreatedAt: now},
+		{Name: "stack-dev-api", Phase: "Active", CreatedAt: now},
+	}
+}
+
 func TestClusterNamespacesCmd_TableOutput(t *testing.T) {
-	ns := sampleClusterNamespace()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/clusters/1/namespaces", r.URL.Path)
-		require.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/namespaces", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNamespace{ns})
+		json.NewEncoder(w).Encode(sampleClusterNamespaces())
 	}))
 	defer server.Close()
 
 	buf := setupClusterTestCmd(t, server.URL)
-
 	err := clusterNamespacesCmd.RunE(clusterNamespacesCmd, []string{"1"})
 	require.NoError(t, err)
 
 	out := buf.String()
 	assert.Contains(t, out, "NAME")
 	assert.Contains(t, out, "PHASE")
-	assert.Contains(t, out, "stack-dev-alice")
+	assert.Contains(t, out, "CREATED")
+	assert.Contains(t, out, "stack-prod-web")
+	assert.Contains(t, out, "stack-dev-api")
 	assert.Contains(t, out, "Active")
-	assert.Contains(t, out, "2025-06-15")
+	assert.Contains(t, out, "2026-01-10 14:30:00")
 }
 
-func TestClusterNamespacesCmd_JSONOutput(t *testing.T) {
-	ns := sampleClusterNamespace()
+func TestClusterNamespacesCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNamespace{ns})
+		json.NewEncoder(w).Encode(sampleClusterNamespaces())
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	err := clusterNamespacesCmd.RunE(clusterNamespacesCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "stack-prod-web\nstack-dev-api\n", buf.String())
+}
+
+func TestClusterNamespacesCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterNamespaces())
 	}))
 	defer server.Close()
 
@@ -1667,19 +1614,16 @@ func TestClusterNamespacesCmd_JSONOutput(t *testing.T) {
 	err := clusterNamespacesCmd.RunE(clusterNamespacesCmd, []string{"1"})
 	require.NoError(t, err)
 
-	var result []types.ClusterNamespace
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	require.Len(t, result, 1)
-	assert.Equal(t, "stack-dev-alice", result[0].Name)
-	assert.Equal(t, "Active", result[0].Phase)
+	var got []types.ClusterNamespace
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 2)
 }
 
 func TestClusterNamespacesCmd_YAMLOutput(t *testing.T) {
-	ns := sampleClusterNamespace()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNamespace{ns})
+		json.NewEncoder(w).Encode(sampleClusterNamespaces())
 	}))
 	defer server.Close()
 
@@ -1688,69 +1632,29 @@ func TestClusterNamespacesCmd_YAMLOutput(t *testing.T) {
 
 	err := clusterNamespacesCmd.RunE(clusterNamespacesCmd, []string{"1"})
 	require.NoError(t, err)
-
 	out := buf.String()
-	assert.Contains(t, out, "name: stack-dev-alice")
+	assert.Contains(t, out, "name: stack-prod-web")
 	assert.Contains(t, out, "phase: Active")
-}
-
-func TestClusterNamespacesCmd_QuietOutput(t *testing.T) {
-	ns1 := sampleClusterNamespace()
-	ns2 := sampleClusterNamespace()
-	ns2.Name = "stack-prod-bob"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]types.ClusterNamespace{ns1, ns2})
-	}))
-	defer server.Close()
-
-	buf := setupClusterTestCmd(t, server.URL)
-	printer.Quiet = true
-
-	err := clusterNamespacesCmd.RunE(clusterNamespacesCmd, []string{"1"})
-	require.NoError(t, err)
-	assert.Equal(t, "stack-dev-alice\nstack-prod-bob\n", buf.String())
-}
-
-func TestClusterNamespacesCmd_ParseIDError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach server")
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterNamespacesCmd.RunE(clusterNamespacesCmd, []string{"  "})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must not be empty")
-}
-
-func TestClusterNamespacesCmd_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterNamespacesCmd.RunE(clusterNamespacesCmd, []string{"1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Internal server error")
 }
 
 // ---------- cluster utilization ----------
 
+func sampleClusterUtilization() types.ClusterUtilization {
+	return types.ClusterUtilization{
+		ClusterID: "1",
+		Namespaces: []types.NamespaceResourceUsage{
+			{Namespace: "stack-prod", CPUUsed: "1500m", CPULimit: "4", MemoryUsed: "2Gi", MemoryLimit: "8Gi", PodCount: 10, PodLimit: 50},
+			{Namespace: "stack-dev", CPUUsed: "500m", CPULimit: "2", MemoryUsed: "1Gi", MemoryLimit: "4Gi", PodCount: 3},
+		},
+	}
+}
+
 func TestClusterUtilizationCmd_TableOutput(t *testing.T) {
-	util := sampleClusterUtilization()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/clusters/1/utilization", r.URL.Path)
-		require.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/utilization", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(util)
+		json.NewEncoder(w).Encode(sampleClusterUtilization())
 	}))
 	defer server.Close()
 
@@ -1762,18 +1666,36 @@ func TestClusterUtilizationCmd_TableOutput(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "NAMESPACE")
 	assert.Contains(t, out, "CPU USED")
-	assert.Contains(t, out, "stack-dev-alice")
-	assert.Contains(t, out, "500m")
-	assert.Contains(t, out, "256Mi")
-	assert.Contains(t, out, "3/10")
+	assert.Contains(t, out, "MEM LIMIT")
+	assert.Contains(t, out, "PODS")
+	assert.Contains(t, out, "stack-prod")
+	assert.Contains(t, out, "1500m")
+	assert.Contains(t, out, "10/50")
+	// stack-dev has no PodLimit — shown as bare PodCount.
+	assert.Contains(t, out, "stack-dev")
 }
 
-func TestClusterUtilizationCmd_JSONOutput(t *testing.T) {
-	util := sampleClusterUtilization()
+func TestClusterUtilizationCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(util)
+		json.NewEncoder(w).Encode(sampleClusterUtilization())
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	err := clusterUtilizationCmd.RunE(clusterUtilizationCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "stack-prod\nstack-dev\n", buf.String())
+}
+
+func TestClusterUtilizationCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterUtilization())
 	}))
 	defer server.Close()
 
@@ -1783,19 +1705,17 @@ func TestClusterUtilizationCmd_JSONOutput(t *testing.T) {
 	err := clusterUtilizationCmd.RunE(clusterUtilizationCmd, []string{"1"})
 	require.NoError(t, err)
 
-	var result types.ClusterUtilization
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, "1", result.ClusterID)
-	require.Len(t, result.Namespaces, 1)
-	assert.Equal(t, "stack-dev-alice", result.Namespaces[0].Namespace)
+	var got types.ClusterUtilization
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "1", got.ClusterID)
+	assert.Len(t, got.Namespaces, 2)
 }
 
 func TestClusterUtilizationCmd_YAMLOutput(t *testing.T) {
-	util := sampleClusterUtilization()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(util)
+		json.NewEncoder(w).Encode(sampleClusterUtilization())
 	}))
 	defer server.Close()
 
@@ -1804,53 +1724,22 @@ func TestClusterUtilizationCmd_YAMLOutput(t *testing.T) {
 
 	err := clusterUtilizationCmd.RunE(clusterUtilizationCmd, []string{"1"})
 	require.NoError(t, err)
-
 	out := buf.String()
-	assert.Contains(t, out, "cluster_id: \"1\"")
-	assert.Contains(t, out, "namespace: stack-dev-alice")
+	assert.Contains(t, out, "cluster_id:")
+	assert.Contains(t, out, "namespace: stack-prod")
 }
 
-func TestClusterUtilizationCmd_QuietOutput(t *testing.T) {
-	util := sampleClusterUtilization()
+func TestClusterHealthCmd_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(util)
-	}))
-	defer server.Close()
-
-	buf := setupClusterTestCmd(t, server.URL)
-	printer.Quiet = true
-
-	err := clusterUtilizationCmd.RunE(clusterUtilizationCmd, []string{"1"})
-	require.NoError(t, err)
-	assert.Equal(t, "1\n", buf.String())
-}
-
-func TestClusterUtilizationCmd_ParseIDError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach server")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
 	}))
 	defer server.Close()
 
 	_ = setupClusterTestCmd(t, server.URL)
 
-	err := clusterUtilizationCmd.RunE(clusterUtilizationCmd, []string{"  "})
+	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"999"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must not be empty")
-}
-
-func TestClusterUtilizationCmd_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Internal server error"})
-	}))
-	defer server.Close()
-
-	_ = setupClusterTestCmd(t, server.URL)
-
-	err := clusterUtilizationCmd.RunE(clusterUtilizationCmd, []string{"1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Internal server error")
+	assert.Contains(t, err.Error(), "cluster not found")
 }

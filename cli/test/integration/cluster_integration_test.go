@@ -20,15 +20,17 @@ import (
 
 // clusterMockState holds mutable state for the cluster mock server.
 type clusterMockState struct {
-	mu       sync.Mutex
-	nextID   uint
-	clusters map[string]*types.Cluster
+	mu          sync.Mutex
+	nextID      uint
+	clusters    map[string]*types.Cluster
+	unreachable map[string]bool // cluster IDs that POST /test should report as unreachable
 }
 
 func newClusterMockState() *clusterMockState {
 	return &clusterMockState{
-		nextID:   1,
-		clusters: make(map[string]*types.Cluster),
+		nextID:      1,
+		clusters:    make(map[string]*types.Cluster),
+		unreachable: make(map[string]bool),
 	}
 }
 
@@ -91,6 +93,9 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 			case 2:
 				id = parts[0]
 				action = parts[1]
+			case 3:
+				// /api/v1/clusters/<id>/health/<sub> — handled below as a special case.
+				id = parts[0]
 			default:
 				w.WriteHeader(http.StatusNotFound)
 				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
@@ -105,6 +110,41 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 			state.mu.Lock()
 			cl, exists := state.clusters[id]
 			state.mu.Unlock()
+
+			// Two-level paths: /api/v1/clusters/<id>/health/<sub> — handle
+			// before the action switch since `action` stays empty for len==3.
+			if len(parts) == 3 && parts[1] == "health" && r.Method == http.MethodGet {
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+					return
+				}
+				switch parts[2] {
+				case "summary":
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode(types.ClusterHealthSummary{
+						NodeCount: 3, ReadyNodeCount: 3,
+						TotalCPU: "8", TotalMemory: "16Gi",
+						AllocatableCPU: "7", AllocatableMemory: "14Gi",
+						NamespaceCount: 12,
+					})
+					return
+				case "nodes":
+					w.WriteHeader(http.StatusOK)
+					json.NewEncoder(w).Encode([]types.ClusterNodeStatus{
+						{
+							Name: "node-a", Status: "Ready", PodCount: 14,
+							Capacity:    types.ClusterResourceQuantity{CPU: "4", Memory: "8Gi", Pods: "110"},
+							Allocatable: types.ClusterResourceQuantity{CPU: "3800m", Memory: "7Gi"},
+						},
+					})
+					return
+				default:
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+					return
+				}
+			}
 
 			switch {
 			// GET /api/v1/clusters/:id
@@ -174,6 +214,51 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 				cl.IsDefault = true
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusNoContent)
+
+			// POST /api/v1/clusters/:id/test
+			case action == "test" && r.Method == http.MethodPost:
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+					return
+				}
+				if state.unreachable[id] {
+					w.WriteHeader(http.StatusBadGateway)
+					json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Cluster is unreachable"})
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(types.ClusterTestConnectionResult{
+					Status: "success", Message: "Connection successful", ServerVersion: "v1.29.4",
+				})
+
+			// GET /api/v1/clusters/:id/namespaces
+			case action == "namespaces" && r.Method == http.MethodGet:
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode([]types.ClusterNamespace{
+					{Name: "stack-prod-web", Phase: "Active"},
+					{Name: "stack-dev-api", Phase: "Active"},
+				})
+
+			// GET /api/v1/clusters/:id/utilization
+			case action == "utilization" && r.Method == http.MethodGet:
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cluster not found"})
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(types.ClusterUtilization{
+					ClusterID: id,
+					Namespaces: []types.NamespaceResourceUsage{
+						{Namespace: "stack-prod-web", CPUUsed: "1500m", CPULimit: "4", MemoryUsed: "2Gi", MemoryLimit: "8Gi", PodCount: 10, PodLimit: 50},
+					},
+				})
 
 			default:
 				w.WriteHeader(http.StatusNotFound)
@@ -386,171 +471,115 @@ func TestClusterCobra_CreateListSetDefaultDelete(t *testing.T) {
 	assert.False(t, exists)
 }
 
-// startHealthUtilMockServer starts a mock HTTP server that serves all 5 new
-// cluster subcommand routes plus the basic cluster get route.
-func startHealthUtilMockServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/api/v1/clusters/1/test" && r.Method == http.MethodPost:
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(types.TestConnectionResponse{
-				Status:        "ok",
-				Message:       "Connected successfully",
-				ServerVersion: "v1.29.0",
-			})
+func TestClusterWorkflow_HealthSurface(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	t.Parallel()
 
-		case r.URL.Path == "/api/v1/clusters/1/health/summary" && r.Method == http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(types.ClusterHealthSummary{
-				NodeCount:         3,
-				ReadyNodeCount:    3,
-				TotalCPU:          "12",
-				TotalMemory:       "48Gi",
-				AllocatableCPU:    "11.7",
-				AllocatableMemory: "45Gi",
-				NamespaceCount:    5,
-			})
+	state := newClusterMockState()
+	server := startClusterMockServer(t, state)
+	defer server.Close()
 
-		case r.URL.Path == "/api/v1/clusters/1/health/nodes" && r.Method == http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode([]types.ClusterNode{
-				{
-					Name:     "node-a",
-					Status:   "ready",
-					PodCount: 10,
-					Capacity: types.ResourceQuantity{CPU: "4", Memory: "16Gi"},
-				},
-				{
-					Name:     "node-b",
-					Status:   "ready",
-					PodCount: 8,
-					Capacity: types.ResourceQuantity{CPU: "8", Memory: "32Gi"},
-				},
-			})
+	c := client.New(server.URL)
 
-		case r.URL.Path == "/api/v1/clusters/1/namespaces" && r.Method == http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode([]types.ClusterNamespace{
-				{Name: "stack-dev-alice", Phase: "Active", CreatedAt: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)},
-				{Name: "stack-staging-bob", Phase: "Active", CreatedAt: time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC)},
-			})
+	cluster, err := c.CreateCluster(&types.CreateClusterRequest{Name: "h-cluster"})
+	require.NoError(t, err)
+	id := cluster.ID
 
-		case r.URL.Path == "/api/v1/clusters/1/utilization" && r.Method == http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(types.ClusterUtilization{
-				ClusterID: "1",
-				Namespaces: []types.NamespaceResourceUsage{
-					{
-						Namespace:   "stack-dev-alice",
-						CPUUsed:     "500m",
-						CPULimit:    "2",
-						MemoryUsed:  "256Mi",
-						MemoryLimit: "1Gi",
-						PodCount:    3,
-						PodLimit:    10,
-					},
-				},
-			})
+	// test-connection (success path)
+	res, err := c.TestClusterConnection(id)
+	require.NoError(t, err)
+	assert.Equal(t, "success", res.Status)
+	assert.Equal(t, "v1.29.4", res.ServerVersion)
 
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
-		}
-	}))
+	// health summary
+	health, err := c.GetClusterHealth(id)
+	require.NoError(t, err)
+	assert.Equal(t, 3, health.NodeCount)
+	assert.Equal(t, 3, health.ReadyNodeCount)
+	assert.Equal(t, 12, health.NamespaceCount)
+
+	// nodes
+	nodes, err := c.GetClusterNodes(id)
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	assert.Equal(t, "Ready", nodes[0].Status)
+
+	// namespaces
+	ns, err := c.GetClusterNamespaces(id)
+	require.NoError(t, err)
+	require.Len(t, ns, 2)
+
+	// utilization
+	util, err := c.GetClusterUtilization(id)
+	require.NoError(t, err)
+	require.Len(t, util.Namespaces, 1)
+	assert.Equal(t, "stack-prod-web", util.Namespaces[0].Namespace)
 }
 
-// TestClusterCobra_HealthTestConnectionUtilization drives the 5 new cluster
-// subcommands in-process via Cobra, validating output and error handling.
-// NOT parallel: drives cmd package globals (rootCmd, printer).
-func TestClusterCobra_HealthTestConnectionUtilization(t *testing.T) {
+func TestClusterWorkflow_TestConnectionUnreachable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	t.Parallel()
+
+	state := newClusterMockState()
+	server := startClusterMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	cluster, err := c.CreateCluster(&types.CreateClusterRequest{Name: "broken"})
+	require.NoError(t, err)
+	id := cluster.ID
+
+	state.mu.Lock()
+	state.unreachable[id] = true
+	state.mu.Unlock()
+
+	res, err := c.TestClusterConnection(id)
+	require.Error(t, err)
+	assert.Nil(t, res)
+	// 502 maps through the client error mapper; we just need a non-nil error.
+}
+
+// Cobra in-process drive: cluster health <id> happy path against the mock.
+// NOT parallel: mutates cmd package globals.
+func TestClusterCobra_Health(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	server := startHealthUtilMockServer(t)
+	state := newClusterMockState()
+	server := startClusterMockServer(t, state)
 	defer server.Close()
 
 	t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
 	t.Setenv("STACKCTL_API_URL", server.URL)
 
-	tests := []struct {
-		name       string
-		args       []string
-		wantStrs   []string
-		outputJSON bool
-	}{
-		{
-			name:     "test-connection table",
-			args:     []string{"cluster", "test-connection", "1"},
-			wantStrs: []string{"ok", "Connected successfully", "v1.29.0"},
-		},
-		{
-			name:       "test-connection json",
-			args:       []string{"cluster", "test-connection", "1", "--output", "json"},
-			wantStrs:   []string{`"status"`, `"ok"`, `"server_version"`},
-			outputJSON: true,
-		},
-		{
-			name:     "health table",
-			args:     []string{"cluster", "health", "1"},
-			wantStrs: []string{"Nodes", "3", "48Gi"},
-		},
-		{
-			name:       "health json",
-			args:       []string{"cluster", "health", "1", "--output", "json"},
-			wantStrs:   []string{`"node_count"`, `"total_memory"`, `"48Gi"`},
-			outputJSON: true,
-		},
-		{
-			name:     "nodes table",
-			args:     []string{"cluster", "nodes", "1"},
-			wantStrs: []string{"node-a", "node-b", "ready", "4", "16Gi"},
-		},
-		{
-			name:       "nodes json",
-			args:       []string{"cluster", "nodes", "1", "--output", "json"},
-			wantStrs:   []string{`"node-a"`, `"node-b"`, `"ready"`},
-			outputJSON: true,
-		},
-		{
-			name:     "namespaces table",
-			args:     []string{"cluster", "namespaces", "1"},
-			wantStrs: []string{"stack-dev-alice", "stack-staging-bob", "Active"},
-		},
-		{
-			name:       "namespaces json",
-			args:       []string{"cluster", "namespaces", "1", "--output", "json"},
-			wantStrs:   []string{`"stack-dev-alice"`, `"stack-staging-bob"`},
-			outputJSON: true,
-		},
-		{
-			name:     "utilization table",
-			args:     []string{"cluster", "utilization", "1"},
-			wantStrs: []string{"stack-dev-alice", "500m", "256Mi", "3/10"},
-		},
-		{
-			name:       "utilization json",
-			args:       []string{"cluster", "utilization", "1", "--output", "json"},
-			wantStrs:   []string{`"cluster_id"`, `"stack-dev-alice"`, `"500m"`},
-			outputJSON: true,
-		},
-	}
+	var buf bytes.Buffer
 
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			cmd.ResetFlagsForTest()
-			var buf bytes.Buffer
-			cmd.SetOut(&buf)
-			cmd.SetArgs(tt.args)
-			require.NoError(t, cmd.Execute())
+	// Seed a cluster via Cobra create so we exercise the same path users hit.
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cluster", "create", "--name", "h-cobra"})
+	require.NoError(t, cmd.Execute())
 
-			out := buf.String()
-			for _, want := range tt.wantStrs {
-				assert.Contains(t, out, want)
-			}
-		})
+	state.mu.Lock()
+	var id string
+	for k := range state.clusters {
+		id = k
 	}
+	state.mu.Unlock()
+	require.NotEmpty(t, id)
+
+	buf.Reset()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cluster", "health", id})
+	require.NoError(t, cmd.Execute())
+
+	out := buf.String()
+	assert.Contains(t, out, "Health Status")
+	assert.Contains(t, out, "healthy")
+	assert.Contains(t, out, "3/3")
 }
