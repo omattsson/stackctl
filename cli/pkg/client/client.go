@@ -1050,6 +1050,46 @@ func (c *Client) GetClusterHealth(id string) (*types.ClusterHealthSummary, error
 	return &health, nil
 }
 
+// TestClusterConnection tests connectivity to a cluster.
+func (c *Client) TestClusterConnection(id string) (*types.TestConnectionResponse, error) {
+	var resp types.TestConnectionResponse
+	err := c.Post(fmt.Sprintf("/api/v1/clusters/%s/test", id), nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetClusterNodes returns per-node health for a cluster.
+func (c *Client) GetClusterNodes(id string) ([]types.ClusterNode, error) {
+	var nodes []types.ClusterNode
+	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/health/nodes", id), &nodes)
+	if err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+// GetClusterNamespaces returns all stack namespaces in a cluster.
+func (c *Client) GetClusterNamespaces(id string) ([]types.ClusterNamespace, error) {
+	var ns []types.ClusterNamespace
+	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/namespaces", id), &ns)
+	if err != nil {
+		return nil, err
+	}
+	return ns, nil
+}
+
+// GetClusterUtilization returns per-namespace resource utilization for a cluster.
+func (c *Client) GetClusterUtilization(id string) (*types.ClusterUtilization, error) {
+	var util types.ClusterUtilization
+	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/utilization", id), &util)
+	if err != nil {
+		return nil, err
+	}
+	return &util, nil
+}
+
 // ListSharedValues returns all shared values for a cluster.
 func (c *Client) ListSharedValues(clusterID string) ([]types.SharedValues, error) {
 	var sv []types.SharedValues

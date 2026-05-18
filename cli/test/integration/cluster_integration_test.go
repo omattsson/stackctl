@@ -385,3 +385,171 @@ func TestClusterCobra_CreateListSetDefaultDelete(t *testing.T) {
 	state.mu.Unlock()
 	assert.False(t, exists)
 }
+
+// startHealthUtilMockServer starts a mock HTTP server that serves all 5 new
+// cluster subcommand routes plus the basic cluster get route.
+func startHealthUtilMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/clusters/1/test" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(types.TestConnectionResponse{
+				Status:        "ok",
+				Message:       "Connected successfully",
+				ServerVersion: "v1.29.0",
+			})
+
+		case r.URL.Path == "/api/v1/clusters/1/health/summary" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(types.ClusterHealthSummary{
+				NodeCount:         3,
+				ReadyNodeCount:    3,
+				TotalCPU:          "12",
+				TotalMemory:       "48Gi",
+				AllocatableCPU:    "11.7",
+				AllocatableMemory: "45Gi",
+				NamespaceCount:    5,
+			})
+
+		case r.URL.Path == "/api/v1/clusters/1/health/nodes" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]types.ClusterNode{
+				{
+					Name:     "node-a",
+					Status:   "ready",
+					PodCount: 10,
+					Capacity: types.ResourceQuantity{CPU: "4", Memory: "16Gi"},
+				},
+				{
+					Name:     "node-b",
+					Status:   "ready",
+					PodCount: 8,
+					Capacity: types.ResourceQuantity{CPU: "8", Memory: "32Gi"},
+				},
+			})
+
+		case r.URL.Path == "/api/v1/clusters/1/namespaces" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]types.ClusterNamespace{
+				{Name: "stack-dev-alice", Phase: "Active", CreatedAt: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)},
+				{Name: "stack-staging-bob", Phase: "Active", CreatedAt: time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC)},
+			})
+
+		case r.URL.Path == "/api/v1/clusters/1/utilization" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(types.ClusterUtilization{
+				ClusterID: "1",
+				Namespaces: []types.NamespaceResourceUsage{
+					{
+						Namespace:   "stack-dev-alice",
+						CPUUsed:     "500m",
+						CPULimit:    "2",
+						MemoryUsed:  "256Mi",
+						MemoryLimit: "1Gi",
+						PodCount:    3,
+						PodLimit:    10,
+					},
+				},
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+		}
+	}))
+}
+
+// TestClusterCobra_HealthTestConnectionUtilization drives the 5 new cluster
+// subcommands in-process via Cobra, validating output and error handling.
+// NOT parallel: drives cmd package globals (rootCmd, printer).
+func TestClusterCobra_HealthTestConnectionUtilization(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	server := startHealthUtilMockServer(t)
+	defer server.Close()
+
+	t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
+	t.Setenv("STACKCTL_API_URL", server.URL)
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantStrs   []string
+		outputJSON bool
+	}{
+		{
+			name:     "test-connection table",
+			args:     []string{"cluster", "test-connection", "1"},
+			wantStrs: []string{"ok", "Connected successfully", "v1.29.0"},
+		},
+		{
+			name:       "test-connection json",
+			args:       []string{"cluster", "test-connection", "1", "--output", "json"},
+			wantStrs:   []string{`"status"`, `"ok"`, `"server_version"`},
+			outputJSON: true,
+		},
+		{
+			name:     "health table",
+			args:     []string{"cluster", "health", "1"},
+			wantStrs: []string{"Nodes", "3", "48Gi"},
+		},
+		{
+			name:       "health json",
+			args:       []string{"cluster", "health", "1", "--output", "json"},
+			wantStrs:   []string{`"node_count"`, `"total_memory"`, `"48Gi"`},
+			outputJSON: true,
+		},
+		{
+			name:     "nodes table",
+			args:     []string{"cluster", "nodes", "1"},
+			wantStrs: []string{"node-a", "node-b", "ready", "4", "16Gi"},
+		},
+		{
+			name:       "nodes json",
+			args:       []string{"cluster", "nodes", "1", "--output", "json"},
+			wantStrs:   []string{`"node-a"`, `"node-b"`, `"ready"`},
+			outputJSON: true,
+		},
+		{
+			name:     "namespaces table",
+			args:     []string{"cluster", "namespaces", "1"},
+			wantStrs: []string{"stack-dev-alice", "stack-staging-bob", "Active"},
+		},
+		{
+			name:       "namespaces json",
+			args:       []string{"cluster", "namespaces", "1", "--output", "json"},
+			wantStrs:   []string{`"stack-dev-alice"`, `"stack-staging-bob"`},
+			outputJSON: true,
+		},
+		{
+			name:     "utilization table",
+			args:     []string{"cluster", "utilization", "1"},
+			wantStrs: []string{"stack-dev-alice", "500m", "256Mi", "3/10"},
+		},
+		{
+			name:       "utilization json",
+			args:       []string{"cluster", "utilization", "1", "--output", "json"},
+			wantStrs:   []string{`"cluster_id"`, `"stack-dev-alice"`, `"500m"`},
+			outputJSON: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetArgs(tt.args)
+			require.NoError(t, cmd.Execute())
+
+			out := buf.String()
+			for _, want := range tt.wantStrs {
+				assert.Contains(t, out, want)
+			}
+		})
+	}
+}

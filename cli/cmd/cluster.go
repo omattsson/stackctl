@@ -153,16 +153,20 @@ Examples:
 				{Key: "Nodes", Value: strconv.Itoa(cluster.NodeCount)},
 			}
 			if health != nil {
+				readyStatus := "healthy"
+				if health.ReadyNodeCount < health.NodeCount {
+					readyStatus = "degraded"
+				}
 				fields = append(fields,
-					output.KeyValue{Key: "Health Status", Value: printer.StatusColor(health.Status)},
-					output.KeyValue{Key: "CPU Usage", Value: health.CPUUsage},
-					output.KeyValue{Key: "CPU Total", Value: health.CPUTotal},
-					output.KeyValue{Key: "Memory Usage", Value: health.MemUsage},
-					output.KeyValue{Key: "Memory Total", Value: health.MemTotal},
+					output.KeyValue{Key: "Health", Value: printer.StatusColor(readyStatus)},
+					output.KeyValue{Key: "Ready Nodes", Value: fmt.Sprintf("%d/%d", health.ReadyNodeCount, health.NodeCount)},
+					output.KeyValue{Key: "Total CPU", Value: health.TotalCPU},
+					output.KeyValue{Key: "Total Memory", Value: health.TotalMemory},
+					output.KeyValue{Key: "Namespaces", Value: strconv.Itoa(health.NamespaceCount)},
 				)
 			} else {
 				fields = append(fields,
-					output.KeyValue{Key: "Health Status", Value: "unavailable"},
+					output.KeyValue{Key: "Health", Value: "unavailable"},
 				)
 			}
 			return printer.PrintSingle(cluster, fields)
@@ -680,6 +684,272 @@ var clusterSetDefaultCmd = &cobra.Command{
 	},
 }
 
+var clusterTestConnectionCmd = &cobra.Command{
+	Use:   "test-connection <id>",
+	Short: "Test connectivity to a cluster",
+	Long: `Test connectivity to a registered cluster.
+
+Examples:
+  stackctl cluster test-connection 1`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.TestClusterConnection(id)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, resp.Status)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(resp)
+		case output.FormatYAML:
+			return printer.PrintYAML(resp)
+		default:
+			fields := []output.KeyValue{
+				{Key: "Status", Value: printer.StatusColor(resp.Status)},
+				{Key: "Message", Value: resp.Message},
+			}
+			if resp.ServerVersion != "" {
+				fields = append(fields, output.KeyValue{Key: "Server Version", Value: resp.ServerVersion})
+			}
+			return printer.PrintSingle(resp, fields)
+		}
+	},
+}
+
+var clusterHealthCmd = &cobra.Command{
+	Use:   "health <id>",
+	Short: "Show health summary for a cluster",
+	Long: `Show health summary (node count, CPU, memory) for a cluster.
+
+Examples:
+  stackctl cluster health 1
+  stackctl cluster health 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		health, err := c.GetClusterHealth(id)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, id)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(health)
+		case output.FormatYAML:
+			return printer.PrintYAML(health)
+		default:
+			readyStatus := "healthy"
+			if health.ReadyNodeCount < health.NodeCount {
+				readyStatus = "degraded"
+			}
+			fields := []output.KeyValue{
+				{Key: "Status", Value: printer.StatusColor(readyStatus)},
+				{Key: "Nodes", Value: strconv.Itoa(health.NodeCount)},
+				{Key: "Ready Nodes", Value: strconv.Itoa(health.ReadyNodeCount)},
+				{Key: "Total CPU", Value: health.TotalCPU},
+				{Key: "Allocatable CPU", Value: health.AllocatableCPU},
+				{Key: "Total Memory", Value: health.TotalMemory},
+				{Key: "Allocatable Memory", Value: health.AllocatableMemory},
+				{Key: "Namespaces", Value: strconv.Itoa(health.NamespaceCount)},
+			}
+			return printer.PrintSingle(health, fields)
+		}
+	},
+}
+
+var clusterNodesCmd = &cobra.Command{
+	Use:   "nodes <id>",
+	Short: "List nodes in a cluster",
+	Long: `List all nodes in a cluster with status, capacity, and pod count.
+
+Examples:
+  stackctl cluster nodes 1
+  stackctl cluster nodes 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		nodes, err := c.GetClusterNodes(id)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			for _, n := range nodes {
+				fmt.Fprintln(printer.Writer, n.Name)
+			}
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(nodes)
+		case output.FormatYAML:
+			return printer.PrintYAML(nodes)
+		default:
+			headers := []string{"NAME", "STATUS", "CPU", "MEMORY", "PODS"}
+			rows := make([][]string, len(nodes))
+			for i, n := range nodes {
+				rows[i] = []string{
+					n.Name,
+					printer.StatusColor(n.Status),
+					n.Capacity.CPU,
+					n.Capacity.Memory,
+					strconv.Itoa(n.PodCount),
+				}
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
+}
+
+var clusterNamespacesCmd = &cobra.Command{
+	Use:   "namespaces <id>",
+	Short: "List stack namespaces in a cluster",
+	Long: `List all stack-* namespaces in a cluster.
+
+Examples:
+  stackctl cluster namespaces 1
+  stackctl cluster namespaces 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		namespaces, err := c.GetClusterNamespaces(id)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			for _, ns := range namespaces {
+				fmt.Fprintln(printer.Writer, ns.Name)
+			}
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(namespaces)
+		case output.FormatYAML:
+			return printer.PrintYAML(namespaces)
+		default:
+			headers := []string{"NAME", "PHASE", "CREATED"}
+			rows := make([][]string, len(namespaces))
+			for i, ns := range namespaces {
+				rows[i] = []string{
+					ns.Name,
+					ns.Phase,
+					ns.CreatedAt.Format("2006-01-02 15:04:05"),
+				}
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
+}
+
+var clusterUtilizationCmd = &cobra.Command{
+	Use:   "utilization <id>",
+	Short: "Show per-namespace resource utilization for a cluster",
+	Long: `Show CPU, memory, and pod usage per namespace for a cluster.
+
+Examples:
+  stackctl cluster utilization 1
+  stackctl cluster utilization 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		util, err := c.GetClusterUtilization(id)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, id)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(util)
+		case output.FormatYAML:
+			return printer.PrintYAML(util)
+		default:
+			headers := []string{"NAMESPACE", "CPU USED", "CPU LIMIT", "MEM USED", "MEM LIMIT", "PODS"}
+			rows := make([][]string, len(util.Namespaces))
+			for i, ns := range util.Namespaces {
+				rows[i] = []string{
+					ns.Namespace,
+					ns.CPUUsed,
+					ns.CPULimit,
+					ns.MemoryUsed,
+					ns.MemoryLimit,
+					fmt.Sprintf("%d/%d", ns.PodCount, ns.PodLimit),
+				}
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
+}
+
 func init() {
 	// shared-values set flags
 	clusterSharedValuesSetCmd.Flags().String("name", "", "Name for the shared values entry (required)")
@@ -723,5 +993,10 @@ func init() {
 	clusterCmd.AddCommand(clusterUpdateCmd)
 	clusterCmd.AddCommand(clusterDeleteCmd)
 	clusterCmd.AddCommand(clusterSetDefaultCmd)
+	clusterCmd.AddCommand(clusterTestConnectionCmd)
+	clusterCmd.AddCommand(clusterHealthCmd)
+	clusterCmd.AddCommand(clusterNodesCmd)
+	clusterCmd.AddCommand(clusterNamespacesCmd)
+	clusterCmd.AddCommand(clusterUtilizationCmd)
 	rootCmd.AddCommand(clusterCmd)
 }

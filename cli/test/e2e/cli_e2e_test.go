@@ -1866,3 +1866,50 @@ func TestE2EClusterSetDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "set as default")
 }
+
+func TestE2EClusterHealth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/clusters/1/health/summary" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			resp := map[string]interface{}{
+				"node_count":          3,
+				"ready_node_count":    3,
+				"total_cpu":           "12",
+				"total_memory":        "48Gi",
+				"allocatable_cpu":     "11.7",
+				"allocatable_memory":  "45Gi",
+				"namespace_count":     7,
+			}
+			json.NewEncoder(w).Encode(resp)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// table output
+	stdout, _, err := runStackctl(t, dir, "cluster", "health", "1")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Nodes")
+	assert.Contains(t, stdout, "3")
+	assert.Contains(t, stdout, "48Gi")
+	assert.Contains(t, stdout, "11.7")
+
+	// json output
+	stdout, _, err = runStackctl(t, dir, "cluster", "health", "1", "--output", "json")
+	require.NoError(t, err)
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+	assert.Equal(t, float64(3), result["node_count"])
+	assert.Equal(t, "48Gi", result["total_memory"])
+}

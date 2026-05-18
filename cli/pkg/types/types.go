@@ -285,14 +285,70 @@ type GitValidateResponse struct {
 	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
-// ClusterHealthSummary represents a cluster's health summary.
+// ClusterHealthSummary represents a cluster's health summary from GET /api/v1/clusters/:id/health/summary.
 type ClusterHealthSummary struct {
-	Status    string `json:"status" yaml:"status"`
-	NodeCount int    `json:"node_count" yaml:"node_count"`
-	CPUUsage  string `json:"cpu_usage,omitempty" yaml:"cpu_usage,omitempty"`
-	MemUsage  string `json:"memory_usage,omitempty" yaml:"memory_usage,omitempty"`
-	CPUTotal  string `json:"cpu_total,omitempty" yaml:"cpu_total,omitempty"`
-	MemTotal  string `json:"memory_total,omitempty" yaml:"memory_total,omitempty"`
+	TotalCPU          string `json:"total_cpu" yaml:"total_cpu"`
+	TotalMemory       string `json:"total_memory" yaml:"total_memory"`
+	AllocatableCPU    string `json:"allocatable_cpu" yaml:"allocatable_cpu"`
+	AllocatableMemory string `json:"allocatable_memory" yaml:"allocatable_memory"`
+	NodeCount         int    `json:"node_count" yaml:"node_count"`
+	ReadyNodeCount    int    `json:"ready_node_count" yaml:"ready_node_count"`
+	NamespaceCount    int    `json:"namespace_count" yaml:"namespace_count"`
+}
+
+// NodeCondition represents a single node condition.
+type NodeCondition struct {
+	Type    string `json:"type" yaml:"type"`
+	Status  string `json:"status" yaml:"status"`
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+// ResourceQuantity holds CPU, memory, and optional pod capacity values as strings.
+type ResourceQuantity struct {
+	CPU    string `json:"cpu" yaml:"cpu"`
+	Memory string `json:"memory" yaml:"memory"`
+	Pods   string `json:"pods,omitempty" yaml:"pods,omitempty"`
+}
+
+// ClusterNode represents the health and capacity of a single cluster node.
+type ClusterNode struct {
+	Conditions  []NodeCondition  `json:"conditions" yaml:"conditions"`
+	Capacity    ResourceQuantity `json:"capacity" yaml:"capacity"`
+	Allocatable ResourceQuantity `json:"allocatable" yaml:"allocatable"`
+	Name        string           `json:"name" yaml:"name"`
+	Status      string           `json:"status" yaml:"status"`
+	PodCount    int              `json:"pod_count" yaml:"pod_count"`
+}
+
+// ClusterNamespace represents a Kubernetes namespace in a cluster.
+type ClusterNamespace struct {
+	CreatedAt time.Time `json:"created_at" yaml:"created_at"`
+	Name      string    `json:"name" yaml:"name"`
+	Phase     string    `json:"phase" yaml:"phase"`
+}
+
+// NamespaceResourceUsage holds resource usage for a single namespace.
+type NamespaceResourceUsage struct {
+	Namespace   string `json:"namespace" yaml:"namespace"`
+	CPUUsed     string `json:"cpu_used" yaml:"cpu_used"`
+	CPULimit    string `json:"cpu_limit" yaml:"cpu_limit"`
+	MemoryUsed  string `json:"memory_used" yaml:"memory_used"`
+	MemoryLimit string `json:"memory_limit" yaml:"memory_limit"`
+	PodCount    int    `json:"pod_count" yaml:"pod_count"`
+	PodLimit    int    `json:"pod_limit" yaml:"pod_limit"`
+}
+
+// ClusterUtilization represents per-namespace resource usage for a cluster.
+type ClusterUtilization struct {
+	ClusterID  string                   `json:"cluster_id" yaml:"cluster_id"`
+	Namespaces []NamespaceResourceUsage `json:"namespaces" yaml:"namespaces"`
+}
+
+// TestConnectionResponse is the response from POST /api/v1/clusters/:id/test.
+type TestConnectionResponse struct {
+	Status        string `json:"status" yaml:"status"`
+	Message       string `json:"message" yaml:"message"`
+	ServerVersion string `json:"server_version,omitempty" yaml:"server_version,omitempty"`
 }
 
 // ErrorResponse represents an API error response.
