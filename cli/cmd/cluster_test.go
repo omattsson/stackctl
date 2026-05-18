@@ -1308,7 +1308,7 @@ func TestClusterTestConnectionCmd_YAMLOutput(t *testing.T) {
 	assert.Contains(t, out, "server_version: v1.29.4")
 }
 
-func TestClusterTestConnectionCmd_TableOutputIgnoresQuiet(t *testing.T) {
+func TestClusterTestConnectionCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1321,9 +1321,7 @@ func TestClusterTestConnectionCmd_TableOutputIgnoresQuiet(t *testing.T) {
 
 	err := clusterTestConnectionCmd.RunE(clusterTestConnectionCmd, []string{"1"})
 	require.NoError(t, err)
-	out := buf.String()
-	assert.Contains(t, out, "Status")
-	assert.Contains(t, out, "success")
+	assert.Equal(t, "success\n", buf.String())
 }
 
 func TestClusterTestConnectionCmd_Unreachable(t *testing.T) {
@@ -1375,10 +1373,11 @@ func TestClusterHealthCmd_UnknownWhenZeroNodes(t *testing.T) {
 	defer server.Close()
 
 	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
 
 	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"1"})
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "unknown")
+	assert.Equal(t, "unknown\n", buf.String())
 }
 
 func TestClusterHealthCmd_DegradedWhenSomeNodesNotReady(t *testing.T) {
@@ -1439,7 +1438,7 @@ func TestClusterHealthCmd_YAMLOutput(t *testing.T) {
 	assert.Contains(t, out, "namespace_count: 12")
 }
 
-func TestClusterHealthCmd_TableOutputIgnoresQuiet(t *testing.T) {
+func TestClusterHealthCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1452,9 +1451,7 @@ func TestClusterHealthCmd_TableOutputIgnoresQuiet(t *testing.T) {
 
 	err := clusterHealthCmd.RunE(clusterHealthCmd, []string{"1"})
 	require.NoError(t, err)
-	out := buf.String()
-	assert.Contains(t, out, "Health Status")
-	assert.Contains(t, out, "healthy")
+	assert.Equal(t, "healthy\n", buf.String())
 }
 
 // ---------- cluster nodes ----------

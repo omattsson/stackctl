@@ -719,6 +719,11 @@ var clusterTestConnectionCmd = &cobra.Command{
 			return err
 		}
 
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, result.Status)
+			return nil
+		}
+
 		switch printer.Format {
 		case output.FormatJSON:
 			return printer.PrintJSON(result)
@@ -752,6 +757,11 @@ var clusterHealthCmd = &cobra.Command{
 		health, err := c.GetClusterHealth(id)
 		if err != nil {
 			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, deriveHealthStatus(health))
+			return nil
 		}
 
 		switch printer.Format {

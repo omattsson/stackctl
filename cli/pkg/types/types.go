@@ -299,8 +299,9 @@ type ClusterHealthSummary struct {
 }
 
 // ClusterTestConnectionResult is the response shape of
-// POST /api/v1/clusters/:id/test. On success Status == "success"; on a
-// reachable-but-erroring cluster the backend returns 502 with Status == "error".
+// POST /api/v1/clusters/:id/test. On success Status == "success". On an
+// unreachable cluster the backend returns a non-2xx response that the client
+// surfaces as an APIError; this struct is only populated on 200 responses.
 type ClusterTestConnectionResult struct {
 	Status        string `json:"status" yaml:"status"`
 	Message       string `json:"message,omitempty" yaml:"message,omitempty"`
