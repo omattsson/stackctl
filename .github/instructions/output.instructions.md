@@ -14,6 +14,13 @@ Every formatter MUST handle all four modes consistently:
 - `yaml` — `gopkg.in/yaml.v3`, full structure
 - `quiet` — identifiers only, one per line, no headers, no color
 
+  Most commands print numeric IDs. Documented exceptions that print other stable identifiers:
+  - `orphaned list`, `cluster namespaces` → namespace names
+  - `cluster nodes` → node names
+  - `cluster utilization` → namespace names from the utilization payload
+  - `cluster health` → derived status label (`healthy`/`degraded`/`unknown`)
+  - `cluster test-connection` → connection status string (`success`/`error`)
+
 `--quiet` is checked first and short-circuits the format switch. Quiet output goes to `printer.Writer` (which Cobra sets to the command's stdout).
 
 ## Color

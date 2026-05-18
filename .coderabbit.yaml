@@ -48,6 +48,18 @@ reviews:
       instructions: |
         Follow the rules in .github/instructions/config.instructions.md.
 
+    - path: "cli/pkg/types/**"
+      instructions: |
+        Follow the rules in .github/instructions/types.instructions.md.
+        Key points:
+        - Every field must have both json: and yaml: struct tags
+        - All ID fields are string, not int/uint
+        - Resource structs embed Base; request/response-only structs do not
+        - Update request structs use pointer fields for optional fields
+        - Every exported type must have a godoc comment stating the endpoint it corresponds to
+          and when fields are populated vs zero-valued (especially status/error fields)
+        - Structs only populated on HTTP 200 must state that explicitly in the docstring
+
     - path: "cli/**_test.go"
       instructions: |
         Follow the rules in .github/instructions/tests.instructions.md.
