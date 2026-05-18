@@ -1041,6 +1041,8 @@ func (c *Client) GetCluster(id string) (*types.Cluster, error) {
 }
 
 // GetClusterHealth returns the health summary for a cluster.
+//
+// @see GET /api/v1/clusters/:id/health/summary
 func (c *Client) GetClusterHealth(id string) (*types.ClusterHealthSummary, error) {
 	var health types.ClusterHealthSummary
 	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/health/summary", id), &health)
@@ -1054,6 +1056,8 @@ func (c *Client) GetClusterHealth(id string) (*types.ClusterHealthSummary, error
 // cluster's API server. On a reachable cluster the backend responds 200 with
 // status=="success"; on an unreachable cluster it returns a non-2xx response
 // which surfaces here as a client.APIError.
+//
+// @see POST /api/v1/clusters/:id/test
 func (c *Client) TestClusterConnection(id string) (*types.ClusterTestConnectionResult, error) {
 	var result types.ClusterTestConnectionResult
 	if err := c.Post(fmt.Sprintf("/api/v1/clusters/%s/test", id), nil, &result); err != nil {
@@ -1063,6 +1067,8 @@ func (c *Client) TestClusterConnection(id string) (*types.ClusterTestConnectionR
 }
 
 // GetClusterNodes returns per-node status for a cluster.
+//
+// @see GET /api/v1/clusters/:id/health/nodes
 func (c *Client) GetClusterNodes(id string) ([]types.ClusterNodeStatus, error) {
 	var nodes []types.ClusterNodeStatus
 	if err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/health/nodes", id), &nodes); err != nil {
@@ -1072,6 +1078,8 @@ func (c *Client) GetClusterNodes(id string) ([]types.ClusterNodeStatus, error) {
 }
 
 // GetClusterNamespaces returns the stack-* namespaces present in the cluster.
+//
+// @see GET /api/v1/clusters/:id/namespaces
 func (c *Client) GetClusterNamespaces(id string) ([]types.ClusterNamespace, error) {
 	var namespaces []types.ClusterNamespace
 	if err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/namespaces", id), &namespaces); err != nil {
@@ -1081,6 +1089,8 @@ func (c *Client) GetClusterNamespaces(id string) ([]types.ClusterNamespace, erro
 }
 
 // GetClusterUtilization returns aggregated per-namespace resource utilization.
+//
+// @see GET /api/v1/clusters/:id/utilization
 func (c *Client) GetClusterUtilization(id string) (*types.ClusterUtilization, error) {
 	var util types.ClusterUtilization
 	if err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/utilization", id), &util); err != nil {

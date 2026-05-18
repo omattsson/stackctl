@@ -4,7 +4,8 @@
 language: en-US
 
 reviews:
-  # Require review on every push (not just the first commit)
+  # Controls auto-approval behavior after requested changes or failing checks are
+  # resolved (true enables the auto-approval workflow).
   request_changes_workflow: false
 
   # Pull in the project instruction files so CodeRabbit understands

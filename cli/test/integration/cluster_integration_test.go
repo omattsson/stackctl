@@ -95,6 +95,11 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 				action = parts[1]
 			case 3:
 				// /api/v1/clusters/<id>/health/<sub> — handled below as a special case.
+				if parts[1] != "health" {
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "not found"})
+					return
+				}
 				id = parts[0]
 			default:
 				w.WriteHeader(http.StatusNotFound)

@@ -339,9 +339,9 @@ type ClusterNodeStatus struct {
 // ClusterNamespace is one namespace entry from
 // GET /api/v1/clusters/:id/namespaces. Mirrors backend k8s.NamespaceInfo.
 type ClusterNamespace struct {
-	Name      string    `json:"name" yaml:"name"`
-	Phase     string    `json:"phase" yaml:"phase"`
-	CreatedAt time.Time `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	Name      string     `json:"name" yaml:"name"`
+	Phase     string     `json:"phase" yaml:"phase"`
+	CreatedAt *time.Time `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
 // NamespaceResourceUsage is the per-namespace utilization entry inside a

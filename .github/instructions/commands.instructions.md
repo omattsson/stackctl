@@ -38,7 +38,7 @@ default:
   - `cluster namespaces <id>` → prints namespace names via `printer.PrintIDs`
   - `cluster utilization <id>` → prints namespace names via `printer.PrintIDs`
   - `cluster health <id>` → prints the derived status label (`healthy`/`degraded`/`unknown`) via `fmt.Fprintln(printer.Writer, deriveHealthStatus(health))`
-  - `cluster test-connection <id>` → prints the connection status string (`success`/`error`) via `fmt.Fprintln(printer.Writer, result.Status)`
+  - `cluster test-connection <id>` → prints `result.Status` (only on 2xx responses; non-2xx surfaces as an `APIError` command error, nothing is printed to stdout) via `fmt.Fprintln(printer.Writer, result.Status)`
 
 ## Destructive Operations
 Commands that delete or clean resources must:

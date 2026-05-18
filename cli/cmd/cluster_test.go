@@ -1559,8 +1559,8 @@ func TestClusterNodesCmd_YAMLOutput(t *testing.T) {
 func sampleClusterNamespaces() []types.ClusterNamespace {
 	now := time.Date(2026, 1, 10, 14, 30, 0, 0, time.UTC)
 	return []types.ClusterNamespace{
-		{Name: "stack-prod-web", Phase: "Active", CreatedAt: now},
-		{Name: "stack-dev-api", Phase: "Active", CreatedAt: now},
+		{Name: "stack-prod-web", Phase: "Active", CreatedAt: &now},
+		{Name: "stack-dev-api", Phase: "Active", CreatedAt: &now},
 	}
 }
 

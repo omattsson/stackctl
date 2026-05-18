@@ -66,7 +66,7 @@ E2E tests build and invoke the actual `stackctl` binary. Rules:
 ## Live Tests (`cli/test/live/`)
 Live tests call a real running backend. Rules:
 - File-level build tag: `//go:build live` — they are never compiled in normal `go test ./...` runs.
-- Run with: `go test -tags live ./test/live/ -v`
+- Run with: `cd cli && go test -tags live ./test/live/ -v`
 - Require env vars `STACKCTL_LIVE_USER` and `STACKCTL_LIVE_PASS`; skip (not fail) if unset.
 - Optional `STACKCTL_LIVE_URL`; defaults to `http://localhost:8081`.
 - The `newLiveClient(t)` helper does a connectivity check and calls `t.Skip()` if the backend is unreachable — never let live tests fail due to infrastructure absence.

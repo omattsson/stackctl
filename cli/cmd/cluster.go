@@ -873,7 +873,7 @@ var clusterNamespacesCmd = &cobra.Command{
 			rows := make([][]string, len(namespaces))
 			for i, n := range namespaces {
 				created := ""
-				if !n.CreatedAt.IsZero() {
+				if n.CreatedAt != nil {
 					created = n.CreatedAt.UTC().Format("2006-01-02 15:04:05")
 				}
 				rows[i] = []string{n.Name, printer.StatusColor(n.Phase), created}
