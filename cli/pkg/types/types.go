@@ -417,6 +417,57 @@ type NamespaceResourceUsage struct {
 	PodLimit    int    `json:"pod_limit" yaml:"pod_limit"`
 }
 
+// ClusterQuota is the success-path response of
+// GET /api/v1/clusters/:id/quotas and the response of
+// PUT /api/v1/clusters/:id/quotas after upsert. Mirrors the backend
+// models.ResourceQuotaConfig struct. Populated by Client.GetClusterQuota /
+// Client.SetClusterQuota.
+//
+// Embeds Base per the repo convention for resource entities. The backend's
+// ResourceQuotaConfig does not include a Version field, so the embedded
+// Base.Version is always the zero string on the read path.
+//
+// The backend returns 404 when no quota is set for the cluster — the client
+// surfaces that as an APIError with StatusCode 404, and the CLI distinguishes
+// "no quota configured" from a missing cluster by checking that error.
+//
+// Field semantics:
+//   - Base.ID, ClusterID, Base.CreatedAt, Base.UpdatedAt — always populated on
+//     the 200 path (server-owned; ignored if sent in a PUT body).
+//   - Base.Version, Base.DeletedAt — not used by this resource; left as zero
+//     values for convention compliance.
+//   - CPURequest, CPULimit, MemoryRequest, MemoryLimit, StorageLimit — empty
+//     string when that dimension has no limit set. Kubernetes resource notation
+//     when populated ("2", "500m", "4Gi").
+//   - PodLimit — 0 means "no pod-count limit"; positive integers cap namespace
+//     pod count.
+type ClusterQuota struct {
+	Base
+	ClusterID     string `json:"cluster_id" yaml:"cluster_id"`
+	CPURequest    string `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
+	CPULimit      string `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
+	MemoryRequest string `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
+	MemoryLimit   string `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
+	StorageLimit  string `json:"storage_limit,omitempty" yaml:"storage_limit,omitempty"`
+	PodLimit      int    `json:"pod_limit" yaml:"pod_limit"`
+}
+
+// SetClusterQuotaRequest is the body for PUT /api/v1/clusters/:id/quotas
+// (admin-only). Mirrors the backend handlers.UpdateQuotaRequest. Used by
+// Client.SetClusterQuota.
+//
+// Field semantics:
+//   - Any string field left empty removes that dimension's limit on upsert.
+//   - PodLimit == 0 means "no pod-count limit" (not "leave unchanged").
+type SetClusterQuotaRequest struct {
+	CPURequest    string `json:"cpu_request" yaml:"cpu_request"`
+	CPULimit      string `json:"cpu_limit" yaml:"cpu_limit"`
+	MemoryRequest string `json:"memory_request" yaml:"memory_request"`
+	MemoryLimit   string `json:"memory_limit" yaml:"memory_limit"`
+	StorageLimit  string `json:"storage_limit" yaml:"storage_limit"`
+	PodLimit      int    `json:"pod_limit" yaml:"pod_limit"`
+}
+
 // ClusterUtilization is the success-path response of
 // GET /api/v1/clusters/:id/utilization (HTTP 200 only). Mirrors backend
 // ClusterUtilization. Populated by Client.GetClusterUtilization.

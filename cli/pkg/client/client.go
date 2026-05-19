@@ -1106,6 +1106,40 @@ func (c *Client) GetClusterNamespaces(id string) ([]types.ClusterNamespace, erro
 	return namespaces, nil
 }
 
+// GetClusterQuota returns the resource-quota config for a cluster.
+// The backend responds 404 when no quota is configured for the cluster;
+// that surfaces here as a *client.APIError with StatusCode == 404.
+//
+// @see GET /api/v1/clusters/:id/quotas
+func (c *Client) GetClusterQuota(id string) (*types.ClusterQuota, error) {
+	var quota types.ClusterQuota
+	if err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/quotas", id), &quota); err != nil {
+		return nil, err
+	}
+	return &quota, nil
+}
+
+// SetClusterQuota upserts the resource-quota config for a cluster (admin only).
+// The backend re-reads the saved config so the returned struct has ID and
+// timestamps populated.
+//
+// @see PUT /api/v1/clusters/:id/quotas
+func (c *Client) SetClusterQuota(id string, req *types.SetClusterQuotaRequest) (*types.ClusterQuota, error) {
+	var quota types.ClusterQuota
+	if err := c.Put(fmt.Sprintf("/api/v1/clusters/%s/quotas", id), req, &quota); err != nil {
+		return nil, err
+	}
+	return &quota, nil
+}
+
+// DeleteClusterQuota removes the resource-quota config for a cluster (admin
+// only). Returns nil on the 204 path; APIError on 403/404/5xx.
+//
+// @see DELETE /api/v1/clusters/:id/quotas
+func (c *Client) DeleteClusterQuota(id string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/clusters/%s/quotas", id))
+}
+
 // GetClusterUtilization returns aggregated per-namespace resource utilization.
 //
 // @see GET /api/v1/clusters/:id/utilization

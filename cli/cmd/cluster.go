@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -939,6 +940,223 @@ var clusterUtilizationCmd = &cobra.Command{
 	},
 }
 
+// --- Quotas ---
+
+var clusterQuotaCmd = &cobra.Command{
+	Use:   "quota",
+	Short: "Manage cluster-level resource quotas",
+	Long:  "Get, set, and delete the resource-quota config applied to stack-* namespaces on a cluster.",
+}
+
+var clusterQuotaGetCmd = &cobra.Command{
+	Use:          "get <cluster-id>",
+	Short:        "Show the resource-quota config for a cluster",
+	Long:         "Show the resource-quota config that the backend applies to stack-* namespaces on this cluster. Returns a not-found error when no quota is configured.",
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		quota, err := c.GetClusterQuota(id)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, quota.ID)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(quota)
+		case output.FormatYAML:
+			return printer.PrintYAML(quota)
+		default:
+			return printer.PrintSingle(quota, []output.KeyValue{
+				{Key: "ID", Value: quota.ID},
+				{Key: "Cluster ID", Value: quota.ClusterID},
+				{Key: "CPU Request", Value: quota.CPURequest},
+				{Key: "CPU Limit", Value: quota.CPULimit},
+				{Key: "Memory Request", Value: quota.MemoryRequest},
+				{Key: "Memory Limit", Value: quota.MemoryLimit},
+				{Key: "Storage Limit", Value: quota.StorageLimit},
+				{Key: "Pod Limit", Value: strconv.Itoa(quota.PodLimit)},
+			})
+		}
+	},
+}
+
+var clusterQuotaSetCmd = &cobra.Command{
+	Use:   "set <cluster-id>",
+	Short: "Create or update the resource-quota config for a cluster (admin only)",
+	Long: `Create or update the resource-quota config the backend applies to stack-* namespaces on this cluster.
+
+Provide the payload via --from-file (JSON or YAML), or via individual flags
+(--cpu-request, --cpu-limit, --memory-request, --memory-limit,
+--storage-limit, --pod-limit). When both are provided, individual flags
+override the file.
+
+The backend PUT is a full upsert — any field absent from the request body is
+treated as cleared (string fields) or "no limit" (--pod-limit 0). To preserve
+unspecified fields when using individual flags, the command first fetches the
+existing quota and uses its values as defaults; you only need to specify the
+fields you want to change. With --from-file, the file contents are sent
+verbatim — no merge — so include every field you want to keep.
+
+Examples:
+  stackctl cluster quota set 1 --from-file quota.json
+  stackctl cluster quota set 1 --cpu-limit 8 --memory-limit 16Gi --pod-limit 50
+  stackctl cluster quota set 1 --pod-limit 100   # other fields preserved from current quota`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		req := types.SetClusterQuotaRequest{}
+		fromFile, _ := cmd.Flags().GetString("from-file")
+		hasFlagInput := cmd.Flags().Changed("cpu-request") ||
+			cmd.Flags().Changed("cpu-limit") ||
+			cmd.Flags().Changed("memory-request") ||
+			cmd.Flags().Changed("memory-limit") ||
+			cmd.Flags().Changed("storage-limit") ||
+			cmd.Flags().Changed("pod-limit")
+
+		// Fail fast on a bare `quota set <id>` invocation. Without this guard
+		// the pre-fetch path would issue a no-op write (or an empty PUT
+		// against a cluster with no existing quota, silently creating a
+		// zero-valued quota config).
+		if fromFile == "" && !hasFlagInput {
+			return fmt.Errorf("provide --from-file or at least one quota flag (--cpu-request, --cpu-limit, --memory-request, --memory-limit, --storage-limit, --pod-limit)")
+		}
+
+		if fromFile != "" {
+			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
+				if segment == ".." {
+					return fmt.Errorf("file path must not contain '..' segments")
+				}
+			}
+			fromFile = filepath.Clean(fromFile)
+			data, err := os.ReadFile(fromFile)
+			if err != nil {
+				return fmt.Errorf("reading file %s: %w", fromFile, err)
+			}
+			if err := json.Unmarshal(data, &req); err != nil {
+				if yamlErr := yaml.Unmarshal(data, &req); yamlErr != nil {
+					return fmt.Errorf("invalid JSON/YAML in file %s (json: %v): %w", fromFile, err, yamlErr)
+				}
+			}
+		} else {
+			// PUT is a full upsert — pre-fetch the existing quota so omitted
+			// flags preserve their current values instead of silently clearing
+			// them. A 404 means "no quota yet" — start from a zero value.
+			existing, getErr := c.GetClusterQuota(id)
+			if getErr == nil {
+				req = types.SetClusterQuotaRequest{
+					CPURequest:    existing.CPURequest,
+					CPULimit:      existing.CPULimit,
+					MemoryRequest: existing.MemoryRequest,
+					MemoryLimit:   existing.MemoryLimit,
+					StorageLimit:  existing.StorageLimit,
+					PodLimit:      existing.PodLimit,
+				}
+			} else {
+				var apiErr *client.APIError
+				if !errors.As(getErr, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+					return getErr
+				}
+			}
+		}
+
+		// Individual flags override file/existing values when set on the command line.
+		if cmd.Flags().Changed("cpu-request") {
+			req.CPURequest, _ = cmd.Flags().GetString("cpu-request")
+		}
+		if cmd.Flags().Changed("cpu-limit") {
+			req.CPULimit, _ = cmd.Flags().GetString("cpu-limit")
+		}
+		if cmd.Flags().Changed("memory-request") {
+			req.MemoryRequest, _ = cmd.Flags().GetString("memory-request")
+		}
+		if cmd.Flags().Changed("memory-limit") {
+			req.MemoryLimit, _ = cmd.Flags().GetString("memory-limit")
+		}
+		if cmd.Flags().Changed("storage-limit") {
+			req.StorageLimit, _ = cmd.Flags().GetString("storage-limit")
+		}
+		if cmd.Flags().Changed("pod-limit") {
+			req.PodLimit, _ = cmd.Flags().GetInt("pod-limit")
+		}
+
+		quota, err := c.SetClusterQuota(id, &req)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, quota.ID)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(quota)
+		case output.FormatYAML:
+			return printer.PrintYAML(quota)
+		default:
+			// Render the persisted quota so the user can confirm the server's
+			// view (post-validation, with timestamps).
+			return printer.PrintSingle(quota, []output.KeyValue{
+				{Key: "ID", Value: quota.ID},
+				{Key: "Cluster ID", Value: quota.ClusterID},
+				{Key: "CPU Request", Value: quota.CPURequest},
+				{Key: "CPU Limit", Value: quota.CPULimit},
+				{Key: "Memory Request", Value: quota.MemoryRequest},
+				{Key: "Memory Limit", Value: quota.MemoryLimit},
+				{Key: "Storage Limit", Value: quota.StorageLimit},
+				{Key: "Pod Limit", Value: strconv.Itoa(quota.PodLimit)},
+			})
+		}
+	},
+}
+
+var clusterQuotaDeleteCmd = &cobra.Command{
+	Use:   "delete <cluster-id>",
+	Short: "Delete the resource-quota config for a cluster (admin only)",
+	Long: `Remove the resource-quota config so the backend no longer applies limits to stack-* namespaces on this cluster.
+
+This is a destructive operation. You will be prompted for confirmation
+unless --yes is specified.
+
+Examples:
+  stackctl cluster quota delete 1
+  stackctl cluster quota delete 1 --yes`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return deleteByID(cmd, args,
+			"This will remove the resource-quota config for cluster %s. Continue? (y/n): ",
+			passthroughID,
+			func(c *client.Client, id string) error { return c.DeleteClusterQuota(id) },
+			"Deleted resource-quota config for cluster %s",
+		)
+	},
+}
+
 func init() {
 	// shared-values set flags
 	clusterSharedValuesSetCmd.Flags().String("name", "", "Name for the shared values entry (required)")
@@ -975,6 +1193,24 @@ func init() {
 	clusterSharedValuesCmd.AddCommand(clusterSharedValuesSetCmd)
 	clusterSharedValuesCmd.AddCommand(clusterSharedValuesDeleteCmd)
 
+	// cluster quota set flags
+	clusterQuotaSetCmd.Flags().String("from-file", "", "JSON or YAML file with the SetClusterQuotaRequest payload")
+	clusterQuotaSetCmd.Flags().String("cpu-request", "", "CPU request limit (Kubernetes resource notation, e.g. \"500m\")")
+	clusterQuotaSetCmd.Flags().String("cpu-limit", "", "CPU limit")
+	clusterQuotaSetCmd.Flags().String("memory-request", "", "Memory request limit (e.g. \"2Gi\")")
+	clusterQuotaSetCmd.Flags().String("memory-limit", "", "Memory limit")
+	clusterQuotaSetCmd.Flags().String("storage-limit", "", "Storage limit")
+	clusterQuotaSetCmd.Flags().Int("pod-limit", 0, "Pod-count limit (0 = no limit)")
+
+	// cluster quota delete flags
+	clusterQuotaDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
+	clusterQuotaDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
+
+	// Wire up quota subcommands
+	clusterQuotaCmd.AddCommand(clusterQuotaGetCmd)
+	clusterQuotaCmd.AddCommand(clusterQuotaSetCmd)
+	clusterQuotaCmd.AddCommand(clusterQuotaDeleteCmd)
+
 	clusterCmd.AddCommand(clusterListCmd)
 	clusterCmd.AddCommand(clusterGetCmd)
 	clusterCmd.AddCommand(clusterSharedValuesCmd)
@@ -987,5 +1223,6 @@ func init() {
 	clusterCmd.AddCommand(clusterNodesCmd)
 	clusterCmd.AddCommand(clusterNamespacesCmd)
 	clusterCmd.AddCommand(clusterUtilizationCmd)
+	clusterCmd.AddCommand(clusterQuotaCmd)
 	rootCmd.AddCommand(clusterCmd)
 }
