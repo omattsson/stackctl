@@ -2396,6 +2396,135 @@ func TestDeleteClusterQuota_Forbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
 }
 
+// ---------- cleanup policies ----------
+
+func TestListCleanupPolicies_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/admin/cleanup-policies", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.CleanupPolicy{
+			{Base: types.Base{ID: "1"}, Name: "p1", Action: "stop", Condition: "idle_days:7", Schedule: "0 2 * * *", ClusterID: "all", Enabled: true},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	policies, err := c.ListCleanupPolicies()
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	assert.Equal(t, "p1", policies[0].Name)
+}
+
+func TestListCleanupPolicies_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	policies, err := c.ListCleanupPolicies()
+	require.Error(t, err)
+	assert.Nil(t, policies)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
+func TestCreateCleanupPolicy_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/admin/cleanup-policies", r.URL.Path)
+		var got types.CreateCleanupPolicyRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		assert.Equal(t, "p1", got.Name)
+		assert.Equal(t, "all", got.ClusterID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(types.CleanupPolicy{
+			Base:      types.Base{ID: "99"},
+			Name:      got.Name,
+			ClusterID: got.ClusterID,
+			Action:    got.Action,
+			Condition: got.Condition,
+			Schedule:  got.Schedule,
+			Enabled:   got.Enabled,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.CreateCleanupPolicy(&types.CreateCleanupPolicyRequest{
+		Name: "p1", ClusterID: "all", Action: "stop",
+		Condition: "idle_days:7", Schedule: "0 2 * * *", Enabled: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "99", got.ID)
+	assert.Equal(t, "p1", got.Name)
+}
+
+func TestUpdateCleanupPolicy_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/admin/cleanup-policies/1", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.CleanupPolicy{
+			Base:      types.Base{ID: "1"},
+			Name:      "p1-updated",
+			ClusterID: "all",
+			Action:    "stop",
+			Condition: "idle_days:14",
+			Schedule:  "0 4 * * *",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.UpdateCleanupPolicy("1", &types.UpdateCleanupPolicyRequest{
+		Name: "p1-updated", ClusterID: "all", Action: "stop",
+		Condition: "idle_days:14", Schedule: "0 4 * * *",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "p1-updated", got.Name)
+}
+
+func TestDeleteCleanupPolicy_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/admin/cleanup-policies/1", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.DeleteCleanupPolicy("1"))
+}
+
+func TestDeleteCleanupPolicy_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cleanup policy not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteCleanupPolicy("missing")
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
 // ---------- shared values ----------
 
 func TestListSharedValues_Success(t *testing.T) {

@@ -693,6 +693,67 @@ type TemplateVersionSide struct {
 	Snapshot TemplateSnapshot `json:"snapshot" yaml:"snapshot"`
 }
 
+// CleanupPolicy is the success-path response of
+// GET/POST/PUT /api/v1/admin/cleanup-policies. Mirrors the backend
+// models.CleanupPolicy wire format.
+//
+// Note: the backend model has no Version/DeletedAt columns, so those embedded
+// Base fields stay zero on the read path. ID/CreatedAt/UpdatedAt are populated.
+//
+// Field semantics:
+//   - ClusterID — UUID of a target cluster, or the literal string "all" to apply
+//     the policy across every cluster.
+//   - Action — one of "stop", "clean", "delete" (what to do with matching
+//     instances).
+//   - Condition — DSL string evaluated by the scheduler, e.g. "idle_days:7",
+//     "status:stopped,age_days:14", or "ttl_expired".
+//   - Schedule — standard 5-field cron expression, e.g. "0 2 * * *".
+//   - Enabled — false pauses the policy without deleting it.
+//   - DryRun — when true the scheduler logs matches but takes no action.
+//   - LastRunAt — nil until the policy has been executed (manually or by the
+//     scheduler) at least once.
+type CleanupPolicy struct {
+	Base
+	Name      string     `json:"name" yaml:"name"`
+	ClusterID string     `json:"cluster_id" yaml:"cluster_id"`
+	Action    string     `json:"action" yaml:"action"`
+	Condition string     `json:"condition" yaml:"condition"`
+	Schedule  string     `json:"schedule" yaml:"schedule"`
+	Enabled   bool       `json:"enabled" yaml:"enabled"`
+	DryRun    bool       `json:"dry_run" yaml:"dry_run"`
+	LastRunAt *time.Time `json:"last_run_at,omitempty" yaml:"last_run_at,omitempty"`
+}
+
+// CreateCleanupPolicyRequest is the body for POST /api/v1/admin/cleanup-policies
+// (admin-only). The backend uses models.CleanupPolicy as the request DTO too;
+// the CLI uses a dedicated type so that the read-path Base fields aren't
+// echoed back as zero values on create.
+//
+// Field semantics match CleanupPolicy. ID/CreatedAt/UpdatedAt are populated by
+// the server; do not set them on the request.
+type CreateCleanupPolicyRequest struct {
+	Name      string `json:"name" yaml:"name"`
+	ClusterID string `json:"cluster_id" yaml:"cluster_id"`
+	Action    string `json:"action" yaml:"action"`
+	Condition string `json:"condition" yaml:"condition"`
+	Schedule  string `json:"schedule" yaml:"schedule"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	DryRun    bool   `json:"dry_run" yaml:"dry_run"`
+}
+
+// UpdateCleanupPolicyRequest is the body for PUT /api/v1/admin/cleanup-policies/:id
+// (admin-only). Same shape as CreateCleanupPolicyRequest: PUT is a full
+// upsert, so all fields must be provided.
+type UpdateCleanupPolicyRequest struct {
+	Name      string `json:"name" yaml:"name"`
+	ClusterID string `json:"cluster_id" yaml:"cluster_id"`
+	Action    string `json:"action" yaml:"action"`
+	Condition string `json:"condition" yaml:"condition"`
+	Schedule  string `json:"schedule" yaml:"schedule"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	DryRun    bool   `json:"dry_run" yaml:"dry_run"`
+}
+
 // ChartDiffEntry describes chart-level differences between two template versions.
 type ChartDiffEntry struct {
 	ChartName      string `json:"chart_name" yaml:"chart_name"`
