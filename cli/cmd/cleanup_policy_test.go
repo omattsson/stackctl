@@ -734,3 +734,177 @@ func TestCleanupPolicyDeleteCmd_InteractiveDecline(t *testing.T) {
 	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"1"}))
 	assert.Contains(t, buf.String(), "Aborted")
 }
+
+// ---------- run ----------
+
+func sampleRunResults() []types.CleanupResult {
+	return []types.CleanupResult{
+		{InstanceID: "i1", InstanceName: "app-1", Namespace: "stack-app-1", OwnerID: "alice", Action: "stop", Status: "success"},
+		{InstanceID: "i2", InstanceName: "app-2", Namespace: "stack-app-2", OwnerID: "bob", Action: "stop", Status: "dry_run"},
+	}
+}
+
+func TestCleanupPolicyRunCmd_DryRun(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/admin/cleanup-policies/1/run", r.URL.Path)
+		require.Equal(t, "true", r.URL.Query().Get("dry_run"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleRunResults())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	require.NoError(t, cleanupPolicyRunCmd.Flags().Set("dry-run", "true"))
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyRunCmd.Flags(), "dry-run", "false") })
+
+	require.NoError(t, cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"}))
+	assert.True(t, called)
+	out := buf.String()
+	assert.Contains(t, out, "app-1")
+	assert.Contains(t, out, "Summary: 1 success, 0 error, 1 dry-run")
+}
+
+func TestCleanupPolicyRunCmd_RealRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/admin/cleanup-policies/1/run", r.URL.Path)
+		require.Empty(t, r.URL.Query().Get("dry_run"), "real run must NOT send dry_run param")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.CleanupResult{
+			{InstanceID: "i1", InstanceName: "app-1", Action: "stop", Status: "success"},
+		})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	require.NoError(t, cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"}))
+}
+
+func TestCleanupPolicyRunCmd_PartialFailureExitCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.CleanupResult{
+			{InstanceID: "i1", Action: "delete", Status: "success"},
+			{InstanceID: "i2", Action: "delete", Status: "error", Error: "namespace stuck terminating"},
+			{InstanceID: "i3", Action: "delete", Status: "error", Error: "kubeconfig expired"},
+		})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"})
+	require.Error(t, err, "partial failure must surface as a non-nil error so cobra exits non-zero")
+	assert.Contains(t, err.Error(), "2 per-instance failure")
+}
+
+func TestCleanupPolicyRunCmd_AllSuccessExitsZero(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.CleanupResult{
+			{InstanceID: "i1", Action: "stop", Status: "success"},
+		})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	require.NoError(t, cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"}))
+}
+
+func TestCleanupPolicyRunCmd_NoMatches(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.CleanupResult{})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	require.NoError(t, cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"}))
+	assert.Contains(t, buf.String(), "No instances matched")
+}
+
+func TestCleanupPolicyRunCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleRunResults())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+
+	require.NoError(t, cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"}))
+
+	var got []types.CleanupResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	assert.Len(t, got, 2)
+	assert.Equal(t, "i1", got[0].InstanceID)
+}
+
+func TestCleanupPolicyRunCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleRunResults())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	require.NoError(t, cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"}))
+
+	var got []types.CleanupResult
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+	assert.Len(t, got, 2)
+}
+
+func TestCleanupPolicyRunCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleRunResults())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	require.NoError(t, cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"}))
+	assert.Equal(t, "i1\ni2\n", buf.String(), "quiet mode must emit one instance ID per line")
+}
+
+func TestCleanupPolicyRunCmd_ResolveNameToID(t *testing.T) {
+	var capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(sampleCleanupPolicies())
+		case http.MethodPost:
+			capturedPath = r.URL.Path
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]types.CleanupResult{})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	require.NoError(t, cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"nightly-stop"}))
+	assert.Equal(t, "/api/v1/admin/cleanup-policies/1/run", capturedPath)
+}
+
+func TestCleanupPolicyRunCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "admin role required"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := cleanupPolicyRunCmd.RunE(cleanupPolicyRunCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, strings.ToLower(err.Error()), "admin role required")
+}

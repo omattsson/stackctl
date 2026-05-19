@@ -86,9 +86,36 @@ func startCleanupPolicyMockServer(t *testing.T, state *cleanupPolicyMockState) *
 				return
 			}
 			id := trimmed
+			action := ""
+			if i := strings.Index(id, "/"); i >= 0 {
+				id, action = id[:i], id[i+1:]
+			}
 			state.mu.Lock()
 			existing, exists := state.policies[id]
 			state.mu.Unlock()
+
+			// POST /api/v1/admin/cleanup-policies/:id/run — execute the policy.
+			if action == "run" && r.Method == http.MethodPost {
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "cleanup policy not found"})
+					return
+				}
+				dryRun := r.URL.Query().Get("dry_run") == "true"
+				status := "success"
+				if dryRun {
+					status = "dry_run"
+				}
+				results := []types.CleanupResult{
+					{InstanceID: "i-" + id + "-1", InstanceName: "app-1", Namespace: "stack-app-1", OwnerID: "alice", Action: existing.Action, Status: status},
+				}
+				state.mu.Lock()
+				existing.LastRunAt = func() *time.Time { t := time.Now(); return &t }()
+				state.mu.Unlock()
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(results)
+				return
+			}
 
 			switch r.Method {
 			case http.MethodPut:
@@ -283,4 +310,80 @@ func TestCleanupPolicyCobra_CRUDViaFile(t *testing.T) {
 	_, exists := state.policies[createdID]
 	state.mu.Unlock()
 	assert.False(t, exists)
+}
+
+func TestCleanupPolicyWorkflow_RunDryRunThenReal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	t.Parallel()
+
+	state := newCleanupPolicyMockState()
+	server := startCleanupPolicyMockServer(t, state)
+	defer server.Close()
+
+	c := client.New(server.URL)
+
+	created, err := c.CreateCleanupPolicy(&types.CreateCleanupPolicyRequest{
+		Name: "nightly-stop", ClusterID: "all", Action: "stop",
+		Condition: "idle_days:7", Schedule: "0 2 * * *", Enabled: true,
+	})
+	require.NoError(t, err)
+
+	// dry-run first
+	results, err := c.RunCleanupPolicy(created.ID, true)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "dry_run", results[0].Status)
+	assert.Equal(t, "stop", results[0].Action)
+
+	// real run
+	results, err = c.RunCleanupPolicy(created.ID, false)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "success", results[0].Status)
+}
+
+func TestCleanupPolicyCobra_Run(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	state := newCleanupPolicyMockState()
+	server := startCleanupPolicyMockServer(t, state)
+	defer server.Close()
+
+	dir := t.TempDir()
+	t.Setenv("STACKCTL_CONFIG_DIR", dir)
+	t.Setenv("STACKCTL_API_URL", server.URL)
+
+	// Seed a policy via the client so we have an ID to run.
+	c := client.New(server.URL)
+	created, err := c.CreateCleanupPolicy(&types.CreateCleanupPolicyRequest{
+		Name: "p1", ClusterID: "all", Action: "stop",
+		Condition: "idle_days:7", Schedule: "0 2 * * *", Enabled: true,
+	})
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+
+	// Real run first — the --dry-run flag is sticky across cmd.Execute() calls
+	// when reused in this in-process test loop, so do the explicit-false case
+	// before the explicit-true case to avoid bleed-over.
+	buf.Reset()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cleanup-policy", "run", created.ID, "--dry-run=false"})
+	require.NoError(t, cmd.Execute())
+	realOut := buf.String()
+	assert.Contains(t, realOut, "success", "result row must show the success status")
+	assert.Contains(t, realOut, "1 success", "summary must count the success result")
+
+	// Then --dry-run
+	buf.Reset()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cleanup-policy", "run", created.ID, "--dry-run"})
+	require.NoError(t, cmd.Execute())
+	dryOut := buf.String()
+	assert.Contains(t, dryOut, "dry_run", "result row must show the dry_run status")
+	assert.Contains(t, dryOut, "1 dry-run", "summary must count the dry-run result")
 }
