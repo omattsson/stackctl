@@ -1758,8 +1758,10 @@ func TestClusterHealthCmd_NotFound(t *testing.T) {
 // resetFlag sets a flag value AND clears its Changed marker. Plain
 // `flags.Set(name, "")` resets the value but leaves Changed=true, which leaks
 // across tests that use `cmd.Flags().Changed(...)` to detect explicit flags.
-func resetFlag(fs *pflag.FlagSet, name, value string) {
-	_ = fs.Set(name, value)
+// Surfaces fs.Set errors via require so a typo in a flag name fails fast.
+func resetFlag(t *testing.T, fs *pflag.FlagSet, name, value string) {
+	t.Helper()
+	require.NoError(t, fs.Set(name, value), "resetFlag: setting %q to %q", name, value)
 	if f := fs.Lookup(name); f != nil {
 		f.Changed = false
 	}
@@ -1890,7 +1892,7 @@ func TestClusterQuotaSetCmd_FromFile(t *testing.T) {
 
 	buf := setupClusterTestCmd(t, server.URL)
 	clusterQuotaSetCmd.Flags().Set("from-file", path)
-	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "from-file", "") })
+	t.Cleanup(func() { resetFlag(t, clusterQuotaSetCmd.Flags(), "from-file", "") })
 
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
 	require.NoError(t, err)
@@ -1924,8 +1926,8 @@ func TestClusterQuotaSetCmd_FlagsOverrideFile(t *testing.T) {
 	clusterQuotaSetCmd.Flags().Set("from-file", path)
 	clusterQuotaSetCmd.Flags().Set("pod-limit", "100")
 	t.Cleanup(func() {
-		resetFlag(clusterQuotaSetCmd.Flags(), "from-file", "")
-		resetFlag(clusterQuotaSetCmd.Flags(), "pod-limit", "0")
+		resetFlag(t, clusterQuotaSetCmd.Flags(), "from-file", "")
+		resetFlag(t, clusterQuotaSetCmd.Flags(), "pod-limit", "0")
 	})
 
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
@@ -1937,6 +1939,7 @@ func TestClusterQuotaSetCmd_FromFlagsOnly(t *testing.T) {
 	// their current values. Mock both: 404 on GET (no existing quota) +
 	// 200 on PUT echoing the request shape.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
 		switch r.Method {
 		case http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
@@ -1960,8 +1963,8 @@ func TestClusterQuotaSetCmd_FromFlagsOnly(t *testing.T) {
 	clusterQuotaSetCmd.Flags().Set("cpu-limit", "8")
 	clusterQuotaSetCmd.Flags().Set("memory-limit", "32Gi")
 	t.Cleanup(func() {
-		resetFlag(clusterQuotaSetCmd.Flags(), "cpu-limit", "")
-		resetFlag(clusterQuotaSetCmd.Flags(), "memory-limit", "")
+		resetFlag(t, clusterQuotaSetCmd.Flags(), "cpu-limit", "")
+		resetFlag(t, clusterQuotaSetCmd.Flags(), "memory-limit", "")
 	})
 
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
@@ -1975,6 +1978,7 @@ func TestClusterQuotaSetCmd_FlagsMergeWithExisting(t *testing.T) {
 	existing := sampleClusterQuota() // CPULimit "4", MemoryLimit "16Gi", PodLimit 50
 	var putBody types.SetClusterQuotaRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
 		switch r.Method {
 		case http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
@@ -1993,7 +1997,7 @@ func TestClusterQuotaSetCmd_FlagsMergeWithExisting(t *testing.T) {
 
 	_ = setupClusterTestCmd(t, server.URL)
 	clusterQuotaSetCmd.Flags().Set("pod-limit", "100")
-	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "pod-limit", "0") })
+	t.Cleanup(func() { resetFlag(t, clusterQuotaSetCmd.Flags(), "pod-limit", "0") })
 
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
 	require.NoError(t, err)
@@ -2007,6 +2011,7 @@ func TestClusterQuotaSetCmd_FlagsMergeWithExisting(t *testing.T) {
 
 func TestClusterQuotaSetCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
 		switch r.Method {
 		case http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
@@ -2025,7 +2030,7 @@ func TestClusterQuotaSetCmd_QuietOutput(t *testing.T) {
 	buf := setupClusterTestCmd(t, server.URL)
 	printer.Quiet = true
 	clusterQuotaSetCmd.Flags().Set("cpu-limit", "4")
-	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "cpu-limit", "") })
+	t.Cleanup(func() { resetFlag(t, clusterQuotaSetCmd.Flags(), "cpu-limit", "") })
 
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
 	require.NoError(t, err)
@@ -2036,6 +2041,7 @@ func TestClusterQuotaSetCmd_Forbidden(t *testing.T) {
 	// Realistic admin-gating: GET (devops) returns 404 (no quota yet),
 	// PUT (admin) returns 403 — we want to surface the PUT 403 cleanly.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
 		switch r.Method {
 		case http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
@@ -2053,7 +2059,7 @@ func TestClusterQuotaSetCmd_Forbidden(t *testing.T) {
 
 	_ = setupClusterTestCmd(t, server.URL)
 	clusterQuotaSetCmd.Flags().Set("cpu-limit", "4")
-	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "cpu-limit", "") })
+	t.Cleanup(func() { resetFlag(t, clusterQuotaSetCmd.Flags(), "cpu-limit", "") })
 
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
 	require.Error(t, err)
@@ -2081,7 +2087,7 @@ func TestClusterQuotaSetCmd_RejectsPathTraversal(t *testing.T) {
 	// in the --from-file path is rejected before opening the file.
 	_ = setupClusterTestCmd(t, "http://unused")
 	clusterQuotaSetCmd.Flags().Set("from-file", "../escape.json")
-	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "from-file", "") })
+	t.Cleanup(func() { resetFlag(t, clusterQuotaSetCmd.Flags(), "from-file", "") })
 
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
 	require.Error(t, err)
@@ -2095,7 +2101,7 @@ func TestClusterQuotaSetCmd_BadFile(t *testing.T) {
 
 	_ = setupClusterTestCmd(t, "http://unused")
 	clusterQuotaSetCmd.Flags().Set("from-file", path)
-	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "from-file", "") })
+	t.Cleanup(func() { resetFlag(t, clusterQuotaSetCmd.Flags(), "from-file", "") })
 
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
 	require.Error(t, err)
@@ -2114,12 +2120,35 @@ func TestClusterQuotaDeleteCmd_WithYesFlag(t *testing.T) {
 
 	buf := setupClusterTestCmd(t, server.URL)
 	clusterQuotaDeleteCmd.Flags().Set("yes", "true")
-	t.Cleanup(func() { resetFlag(clusterQuotaDeleteCmd.Flags(), "yes", "false") })
+	t.Cleanup(func() { resetFlag(t, clusterQuotaDeleteCmd.Flags(), "yes", "false") })
 
 	err := clusterQuotaDeleteCmd.RunE(clusterQuotaDeleteCmd, []string{"1"})
 	require.NoError(t, err)
 	assert.True(t, called)
 	assert.Contains(t, buf.String(), "Deleted resource-quota config for cluster 1")
+}
+
+// Quiet mode for `cluster quota delete` echoes the cluster ID only (no
+// descriptive message), via the shared deleteByID helper.
+func TestClusterQuotaDeleteCmd_QuietOutput(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
+		require.Equal(t, http.MethodDelete, r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+	clusterQuotaDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { resetFlag(t, clusterQuotaDeleteCmd.Flags(), "yes", "false") })
+
+	err := clusterQuotaDeleteCmd.RunE(clusterQuotaDeleteCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, "1\n", buf.String(), "quiet mode must echo only the cluster ID")
 }
 
 func TestClusterQuotaDeleteCmd_ConfirmAccept(t *testing.T) {
@@ -2133,7 +2162,7 @@ func TestClusterQuotaDeleteCmd_ConfirmAccept(t *testing.T) {
 	buf := setupClusterTestCmd(t, server.URL)
 	clusterQuotaDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
-		resetFlag(clusterQuotaDeleteCmd.Flags(), "yes", "false")
+		resetFlag(t, clusterQuotaDeleteCmd.Flags(), "yes", "false")
 		clusterQuotaDeleteCmd.SetIn(nil)
 		clusterQuotaDeleteCmd.SetErr(nil)
 	})
@@ -2155,7 +2184,7 @@ func TestClusterQuotaDeleteCmd_Declined(t *testing.T) {
 	buf := setupClusterTestCmd(t, server.URL)
 	clusterQuotaDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
-		resetFlag(clusterQuotaDeleteCmd.Flags(), "yes", "false")
+		resetFlag(t, clusterQuotaDeleteCmd.Flags(), "yes", "false")
 		clusterQuotaDeleteCmd.SetIn(nil)
 		clusterQuotaDeleteCmd.SetErr(nil)
 	})
@@ -2177,7 +2206,7 @@ func TestClusterQuotaDeleteCmd_Forbidden(t *testing.T) {
 
 	_ = setupClusterTestCmd(t, server.URL)
 	clusterQuotaDeleteCmd.Flags().Set("yes", "true")
-	t.Cleanup(func() { resetFlag(clusterQuotaDeleteCmd.Flags(), "yes", "false") })
+	t.Cleanup(func() { resetFlag(t, clusterQuotaDeleteCmd.Flags(), "yes", "false") })
 
 	err := clusterQuotaDeleteCmd.RunE(clusterQuotaDeleteCmd, []string{"1"})
 	require.Error(t, err)
