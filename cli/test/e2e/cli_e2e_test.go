@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -2023,5 +2025,177 @@ func TestE2EClusterQuotaSet(t *testing.T) {
 
 	// stackctl cluster quota delete 1 --yes
 	_, _, err = runStackctl(t, dir, "cluster", "quota", "delete", "1", "--yes")
+	require.NoError(t, err)
+}
+
+// startE2ECleanupPolicyMockServer is an in-memory backend for the cleanup-policy
+// e2e tests. It implements LIST/CREATE/PUT/DELETE on /api/v1/admin/cleanup-policies.
+func startE2ECleanupPolicyMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	type policy struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		ClusterID string `json:"cluster_id"`
+		Action    string `json:"action"`
+		Condition string `json:"condition"`
+		Schedule  string `json:"schedule"`
+		Enabled   bool   `json:"enabled"`
+		DryRun    bool   `json:"dry_run"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	var (
+		mu       sync.Mutex
+		nextID   = 1
+		policies = map[string]*policy{}
+	)
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/v1/admin/cleanup-policies" && r.Method == http.MethodGet:
+			mu.Lock()
+			out := make([]policy, 0, len(policies))
+			for _, p := range policies {
+				out = append(out, *p)
+			}
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(out)
+
+		case r.URL.Path == "/api/v1/admin/cleanup-policies" && r.Method == http.MethodPost:
+			var body policy
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+				return
+			}
+			mu.Lock()
+			id := fmt.Sprintf("%d", nextID)
+			nextID++
+			body.ID = id
+			body.CreatedAt = "2026-01-01T00:00:00Z"
+			body.UpdatedAt = "2026-01-01T00:00:00Z"
+			policies[id] = &body
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(body)
+
+		default:
+			trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/admin/cleanup-policies/")
+			if trimmed == r.URL.Path || trimmed == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+				return
+			}
+			id := trimmed
+			mu.Lock()
+			existing, exists := policies[id]
+			mu.Unlock()
+
+			switch r.Method {
+			case http.MethodPut:
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": "cleanup policy not found"})
+					return
+				}
+				var body policy
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+					return
+				}
+				body.ID = id
+				body.CreatedAt = existing.CreatedAt
+				body.UpdatedAt = "2026-01-02T00:00:00Z"
+				mu.Lock()
+				policies[id] = &body
+				mu.Unlock()
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(body)
+
+			case http.MethodDelete:
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": "cleanup policy not found"})
+					return
+				}
+				mu.Lock()
+				delete(policies, id)
+				mu.Unlock()
+				w.WriteHeader(http.StatusNoContent)
+
+			default:
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "method not allowed"})
+			}
+		}
+	}))
+}
+
+func TestE2ECleanupPolicyList(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ECleanupPolicyMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Empty list — table mode prints a friendly message.
+	stdout, _, err := runStackctl(t, dir, "cleanup-policy", "list")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "No cleanup policies found")
+}
+
+func TestE2ECleanupPolicyCRUDRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ECleanupPolicyMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	policyFile := filepath.Join(dir, "policy.json")
+	require.NoError(t, os.WriteFile(policyFile, []byte(`{
+		"name": "nightly-stop",
+		"cluster_id": "all",
+		"action": "stop",
+		"condition": "idle_days:7",
+		"schedule": "0 2 * * *",
+		"enabled": true
+	}`), 0o600))
+
+	// create
+	stdout, _, err := runStackctl(t, dir, "cleanup-policy", "create", "--from-file", policyFile)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "nightly-stop")
+
+	// list now has it
+	stdout, _, err = runStackctl(t, dir, "cleanup-policy", "list")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "nightly-stop")
+	assert.Contains(t, stdout, "0 2 * * *")
+
+	// get by name
+	stdout, _, err = runStackctl(t, dir, "cleanup-policy", "get", "nightly-stop", "--output", "json")
+	require.NoError(t, err)
+	var got struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Schedule string `json:"schedule"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, "nightly-stop", got.Name)
+	assert.Equal(t, "1", got.ID)
+
+	// delete
+	_, _, err = runStackctl(t, dir, "cleanup-policy", "delete", got.ID, "--yes")
 	require.NoError(t, err)
 }

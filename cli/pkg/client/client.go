@@ -1205,3 +1205,45 @@ func (c *Client) DeleteCluster(id string) error {
 func (c *Client) SetDefaultCluster(id string) error {
 	return c.Post(fmt.Sprintf("/api/v1/clusters/%s/default", id), nil, nil)
 }
+
+// ListCleanupPolicies returns every cleanup policy defined on the server.
+// Admin-only — non-admin callers receive APIError with status 403.
+//
+// @see GET /api/v1/admin/cleanup-policies
+func (c *Client) ListCleanupPolicies() ([]types.CleanupPolicy, error) {
+	var policies []types.CleanupPolicy
+	if err := c.Get("/api/v1/admin/cleanup-policies", &policies); err != nil {
+		return nil, err
+	}
+	return policies, nil
+}
+
+// CreateCleanupPolicy creates a new cleanup policy. Admin-only.
+//
+// @see POST /api/v1/admin/cleanup-policies
+func (c *Client) CreateCleanupPolicy(req *types.CreateCleanupPolicyRequest) (*types.CleanupPolicy, error) {
+	var policy types.CleanupPolicy
+	if err := c.Post("/api/v1/admin/cleanup-policies", req, &policy); err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+// UpdateCleanupPolicy replaces an existing cleanup policy by ID. Admin-only.
+// PUT is a full upsert; callers must provide every field.
+//
+// @see PUT /api/v1/admin/cleanup-policies/:id
+func (c *Client) UpdateCleanupPolicy(id string, req *types.UpdateCleanupPolicyRequest) (*types.CleanupPolicy, error) {
+	var policy types.CleanupPolicy
+	if err := c.Put(fmt.Sprintf("/api/v1/admin/cleanup-policies/%s", id), req, &policy); err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+// DeleteCleanupPolicy removes a cleanup policy by ID. Admin-only.
+//
+// @see DELETE /api/v1/admin/cleanup-policies/:id
+func (c *Client) DeleteCleanupPolicy(id string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/admin/cleanup-policies/%s", id))
+}
