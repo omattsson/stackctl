@@ -1029,6 +1029,20 @@ Examples:
 
 		req := types.SetClusterQuotaRequest{}
 		fromFile, _ := cmd.Flags().GetString("from-file")
+		hasFlagInput := cmd.Flags().Changed("cpu-request") ||
+			cmd.Flags().Changed("cpu-limit") ||
+			cmd.Flags().Changed("memory-request") ||
+			cmd.Flags().Changed("memory-limit") ||
+			cmd.Flags().Changed("storage-limit") ||
+			cmd.Flags().Changed("pod-limit")
+
+		// Fail fast on a bare `quota set <id>` invocation. Without this guard
+		// the pre-fetch path would issue a no-op write (or an empty PUT
+		// against a cluster with no existing quota, silently creating a
+		// zero-valued quota config).
+		if fromFile == "" && !hasFlagInput {
+			return fmt.Errorf("provide --from-file or at least one quota flag (--cpu-request, --cpu-limit, --memory-request, --memory-limit, --storage-limit, --pod-limit)")
+		}
 
 		if fromFile != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {

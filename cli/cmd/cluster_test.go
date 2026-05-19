@@ -2060,6 +2060,22 @@ func TestClusterQuotaSetCmd_Forbidden(t *testing.T) {
 	assert.Contains(t, err.Error(), "Permission denied")
 }
 
+// Without --from-file or any quota flag, `set` previously issued a silent
+// no-op (or zero-value-creating) PUT. The fail-fast guard makes the contract
+// explicit.
+func TestClusterQuotaSetCmd_RejectsBareInvocation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("backend should NOT be called when no payload is provided; got %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provide --from-file or at least one quota flag")
+}
+
 func TestClusterQuotaSetCmd_RejectsPathTraversal(t *testing.T) {
 	// Mirrors cluster create / update / shared-values set: any `..` segment
 	// in the --from-file path is rejected before opening the file.
