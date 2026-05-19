@@ -1752,3 +1752,403 @@ func TestClusterHealthCmd_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cluster not found")
 }
+
+// ---------- cluster quota ----------
+
+// resetFlag sets a flag value AND clears its Changed marker. Plain
+// `flags.Set(name, "")` resets the value but leaves Changed=true, which leaks
+// across tests that use `cmd.Flags().Changed(...)` to detect explicit flags.
+func resetFlag(fs *pflag.FlagSet, name, value string) {
+	_ = fs.Set(name, value)
+	if f := fs.Lookup(name); f != nil {
+		f.Changed = false
+	}
+}
+
+func sampleClusterQuota() types.ClusterQuota {
+	now := time.Date(2026, 1, 10, 14, 30, 0, 0, time.UTC)
+	return types.ClusterQuota{
+		ID: "q1", ClusterID: "1",
+		CPURequest: "500m", CPULimit: "4",
+		MemoryRequest: "1Gi", MemoryLimit: "16Gi",
+		StorageLimit: "100Gi", PodLimit: 50,
+		CreatedAt: now, UpdatedAt: now,
+	}
+}
+
+func TestClusterQuotaGetCmd_TableOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterQuota())
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	err := clusterQuotaGetCmd.RunE(clusterQuotaGetCmd, []string{"1"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "CPU Request")
+	assert.Contains(t, out, "500m")
+	assert.Contains(t, out, "16Gi")
+	assert.Contains(t, out, "50")
+}
+
+func TestClusterQuotaGetCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterQuota())
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+
+	err := clusterQuotaGetCmd.RunE(clusterQuotaGetCmd, []string{"1"})
+	require.NoError(t, err)
+
+	var got types.ClusterQuota
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "q1", got.ID)
+	assert.Equal(t, 50, got.PodLimit)
+}
+
+func TestClusterQuotaGetCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterQuota())
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	err := clusterQuotaGetCmd.RunE(clusterQuotaGetCmd, []string{"1"})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "id: q1")
+	assert.Contains(t, out, "pod_limit: 50")
+}
+
+func TestClusterQuotaGetCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterQuota())
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	err := clusterQuotaGetCmd.RunE(clusterQuotaGetCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "q1\n", buf.String())
+}
+
+func TestClusterQuotaGetCmd_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "resource quota config not found"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+	err := clusterQuotaGetCmd.RunE(clusterQuotaGetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestClusterQuotaSetCmd_FromFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
+		require.Equal(t, http.MethodPut, r.Method)
+
+		var got types.SetClusterQuotaRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		assert.Equal(t, "4", got.CPULimit)
+		assert.Equal(t, "16Gi", got.MemoryLimit)
+		assert.Equal(t, 50, got.PodLimit)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterQuota())
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "quota.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"cpu_limit":"4","memory_limit":"16Gi","pod_limit":50}`), 0o600))
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterQuotaSetCmd.Flags().Set("from-file", path)
+	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "from-file", "") })
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.NoError(t, err)
+	out := buf.String()
+	// `set` now renders the persisted quota (post-validation, with timestamps)
+	// so the user can confirm the server's view.
+	assert.Contains(t, out, "Cluster ID")
+	assert.Contains(t, out, "Pod Limit")
+	assert.Contains(t, out, "q1")
+}
+
+func TestClusterQuotaSetCmd_FlagsOverrideFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got types.SetClusterQuotaRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		// File supplied cpu_limit=4 and pod_limit=50; --pod-limit=100 overrides.
+		assert.Equal(t, "4", got.CPULimit)
+		assert.Equal(t, 100, got.PodLimit)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(sampleClusterQuota())
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "quota.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"cpu_limit":"4","pod_limit":50}`), 0o600))
+
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterQuotaSetCmd.Flags().Set("from-file", path)
+	clusterQuotaSetCmd.Flags().Set("pod-limit", "100")
+	t.Cleanup(func() {
+		resetFlag(clusterQuotaSetCmd.Flags(), "from-file", "")
+		resetFlag(clusterQuotaSetCmd.Flags(), "pod-limit", "0")
+	})
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.NoError(t, err)
+}
+
+func TestClusterQuotaSetCmd_FromFlagsOnly(t *testing.T) {
+	// Flag-only `set` triggers a pre-fetch GET so unspecified fields preserve
+	// their current values. Mock both: 404 on GET (no existing quota) +
+	// 200 on PUT echoing the request shape.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "resource quota config not found"})
+		case http.MethodPut:
+			var got types.SetClusterQuotaRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+			assert.Equal(t, "8", got.CPULimit)
+			assert.Equal(t, "32Gi", got.MemoryLimit)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(sampleClusterQuota())
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterQuotaSetCmd.Flags().Set("cpu-limit", "8")
+	clusterQuotaSetCmd.Flags().Set("memory-limit", "32Gi")
+	t.Cleanup(func() {
+		resetFlag(clusterQuotaSetCmd.Flags(), "cpu-limit", "")
+		resetFlag(clusterQuotaSetCmd.Flags(), "memory-limit", "")
+	})
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.NoError(t, err)
+}
+
+// Regression test for the "PUT wipes unspecified fields" hazard: flag-only set
+// with only --pod-limit must preserve CPU/memory limits from the existing
+// quota, not silently clear them.
+func TestClusterQuotaSetCmd_FlagsMergeWithExisting(t *testing.T) {
+	existing := sampleClusterQuota() // CPULimit "4", MemoryLimit "16Gi", PodLimit 50
+	var putBody types.SetClusterQuotaRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(existing)
+		case http.MethodPut:
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&putBody))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(existing)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterQuotaSetCmd.Flags().Set("pod-limit", "100")
+	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "pod-limit", "0") })
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.NoError(t, err)
+
+	// pod-limit changed; everything else preserved from the existing quota.
+	assert.Equal(t, 100, putBody.PodLimit)
+	assert.Equal(t, "4", putBody.CPULimit, "CPU limit must be preserved from existing quota")
+	assert.Equal(t, "16Gi", putBody.MemoryLimit, "Memory limit must be preserved from existing quota")
+	assert.Equal(t, "500m", putBody.CPURequest, "CPU request must be preserved from existing quota")
+}
+
+func TestClusterQuotaSetCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "resource quota config not found"})
+		case http.MethodPut:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(sampleClusterQuota())
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Quiet = true
+	clusterQuotaSetCmd.Flags().Set("cpu-limit", "4")
+	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "cpu-limit", "") })
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Equal(t, "q1\n", buf.String())
+}
+
+func TestClusterQuotaSetCmd_Forbidden(t *testing.T) {
+	// Realistic admin-gating: GET (devops) returns 404 (no quota yet),
+	// PUT (admin) returns 403 — we want to surface the PUT 403 cleanly.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "resource quota config not found"})
+		case http.MethodPut:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterQuotaSetCmd.Flags().Set("cpu-limit", "4")
+	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "cpu-limit", "") })
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}
+
+func TestClusterQuotaSetCmd_BadFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	require.NoError(t, os.WriteFile(path, []byte("not json {;;}"), 0o600))
+
+	_ = setupClusterTestCmd(t, "http://unused")
+	clusterQuotaSetCmd.Flags().Set("from-file", path)
+	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "from-file", "") })
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid JSON/YAML")
+}
+
+func TestClusterQuotaDeleteCmd_WithYesFlag(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
+		require.Equal(t, http.MethodDelete, r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterQuotaDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { resetFlag(clusterQuotaDeleteCmd.Flags(), "yes", "false") })
+
+	err := clusterQuotaDeleteCmd.RunE(clusterQuotaDeleteCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted resource-quota config for cluster 1")
+}
+
+func TestClusterQuotaDeleteCmd_ConfirmAccept(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterQuotaDeleteCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		resetFlag(clusterQuotaDeleteCmd.Flags(), "yes", "false")
+		clusterQuotaDeleteCmd.SetIn(nil)
+		clusterQuotaDeleteCmd.SetErr(nil)
+	})
+	clusterQuotaDeleteCmd.SetIn(strings.NewReader("y\n"))
+	clusterQuotaDeleteCmd.SetErr(&bytes.Buffer{})
+
+	err := clusterQuotaDeleteCmd.RunE(clusterQuotaDeleteCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted resource-quota config")
+}
+
+func TestClusterQuotaDeleteCmd_Declined(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should NOT be called when user declines")
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterQuotaDeleteCmd.Flags().Set("yes", "false")
+	t.Cleanup(func() {
+		resetFlag(clusterQuotaDeleteCmd.Flags(), "yes", "false")
+		clusterQuotaDeleteCmd.SetIn(nil)
+		clusterQuotaDeleteCmd.SetErr(nil)
+	})
+	clusterQuotaDeleteCmd.SetIn(strings.NewReader("n\n"))
+	clusterQuotaDeleteCmd.SetErr(&bytes.Buffer{})
+
+	err := clusterQuotaDeleteCmd.RunE(clusterQuotaDeleteCmd, []string{"1"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Aborted")
+}
+
+func TestClusterQuotaDeleteCmd_Forbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+	}))
+	defer server.Close()
+
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterQuotaDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { resetFlag(clusterQuotaDeleteCmd.Flags(), "yes", "false") })
+
+	err := clusterQuotaDeleteCmd.RunE(clusterQuotaDeleteCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Permission denied")
+}

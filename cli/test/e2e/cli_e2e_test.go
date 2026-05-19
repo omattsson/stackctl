@@ -1817,6 +1817,32 @@ func startE2EClusterMockServer(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/api/v1/clusters/1/default" && r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusNoContent)
 
+		// PUT /api/v1/clusters/1/quotas
+		case r.URL.Path == "/api/v1/clusters/1/quotas" && r.Method == http.MethodPut:
+			var req map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id": "q1", "cluster_id": "1",
+				"cpu_request": req["cpu_request"], "cpu_limit": req["cpu_limit"],
+				"memory_request": req["memory_request"], "memory_limit": req["memory_limit"],
+				"storage_limit": req["storage_limit"], "pod_limit": req["pod_limit"],
+				"created_at": "2026-01-10T14:30:00Z", "updated_at": "2026-01-10T14:30:00Z",
+			})
+
+		// GET /api/v1/clusters/1/quotas
+		case r.URL.Path == "/api/v1/clusters/1/quotas" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id": "q1", "cluster_id": "1",
+				"cpu_limit": "4", "memory_limit": "16Gi", "pod_limit": 50,
+				"created_at": "2026-01-10T14:30:00Z", "updated_at": "2026-01-10T14:30:00Z",
+			})
+
+		// DELETE /api/v1/clusters/1/quotas
+		case r.URL.Path == "/api/v1/clusters/1/quotas" && r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
@@ -1944,4 +1970,47 @@ func TestE2EClusterHealth(t *testing.T) {
 	stdout, _, err = runStackctl(t, dir, "cluster", "health", "1", "--quiet")
 	require.NoError(t, err)
 	assert.Equal(t, "healthy\n", stdout)
+}
+
+func TestE2EClusterQuotaSet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EClusterMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Write a quota payload to a temp file.
+	quotaFile := filepath.Join(dir, "quota.json")
+	require.NoError(t, os.WriteFile(quotaFile, []byte(`{
+  "cpu_limit": "4",
+  "memory_limit": "16Gi",
+  "pod_limit": 50
+}`), 0o600))
+
+	// stackctl cluster quota set 1 --from-file quota.json
+	stdout, _, err := runStackctl(t, dir, "cluster", "quota", "set", "1", "--from-file", quotaFile)
+	require.NoError(t, err)
+	// `set` renders the persisted quota in default mode so users can confirm
+	// the server's view (post-validation, with timestamps).
+	assert.Contains(t, stdout, "Cluster ID")
+	assert.Contains(t, stdout, "Pod Limit")
+
+	// stackctl cluster quota get 1 -o json — verify the returned shape.
+	stdout, _, err = runStackctl(t, dir, "cluster", "quota", "get", "1", "--output", "json")
+	require.NoError(t, err)
+	var got struct {
+		ID       string `json:"id"`
+		PodLimit int    `json:"pod_limit"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, "q1", got.ID)
+	assert.Equal(t, 50, got.PodLimit)
+
+	// stackctl cluster quota delete 1 --yes
+	_, _, err = runStackctl(t, dir, "cluster", "quota", "delete", "1", "--yes")
+	require.NoError(t, err)
 }

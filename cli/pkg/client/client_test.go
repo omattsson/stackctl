@@ -2271,6 +2271,129 @@ func TestGetClusterUtilization_Success(t *testing.T) {
 	assert.Equal(t, 10, util.Namespaces[0].PodCount)
 }
 
+// ---------- cluster quota ----------
+
+func TestGetClusterQuota_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ClusterQuota{
+			ID: "q1", ClusterID: "1",
+			CPULimit: "4", MemoryLimit: "16Gi", PodLimit: 50,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	quota, err := c.GetClusterQuota("1")
+	require.NoError(t, err)
+	assert.Equal(t, "q1", quota.ID)
+	assert.Equal(t, "1", quota.ClusterID)
+	assert.Equal(t, "4", quota.CPULimit)
+	assert.Equal(t, 50, quota.PodLimit)
+}
+
+func TestGetClusterQuota_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "resource quota config not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	quota, err := c.GetClusterQuota("1")
+	require.Error(t, err)
+	assert.Nil(t, quota)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+func TestSetClusterQuota_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
+		// Verify body shape — `pod_limit` must serialize even when 0 (backend
+		// treats 0 as "no limit", not "field absent").
+		var got types.SetClusterQuotaRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		assert.Equal(t, "4", got.CPULimit)
+		assert.Equal(t, 50, got.PodLimit)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.ClusterQuota{
+			ID: "q1", ClusterID: "1",
+			CPULimit: got.CPULimit, PodLimit: got.PodLimit,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	quota, err := c.SetClusterQuota("1", &types.SetClusterQuotaRequest{
+		CPULimit: "4", PodLimit: 50,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "q1", quota.ID)
+	assert.Equal(t, "4", quota.CPULimit)
+	assert.Equal(t, 50, quota.PodLimit)
+}
+
+func TestSetClusterQuota_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	quota, err := c.SetClusterQuota("1", &types.SetClusterQuotaRequest{CPULimit: "4"})
+	require.Error(t, err)
+	assert.Nil(t, quota)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+	assert.Contains(t, apiErr.UserFacingError(), "Permission denied")
+}
+
+func TestDeleteClusterQuota_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/clusters/1/quotas", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.DeleteClusterQuota("1"))
+}
+
+func TestDeleteClusterQuota_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteClusterQuota("1")
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
 // ---------- shared values ----------
 
 func TestListSharedValues_Success(t *testing.T) {
