@@ -90,6 +90,9 @@ var cleanupPolicyGetCmd = &cobra.Command{
 The backend does not expose a GET-by-ID endpoint for cleanup policies, so this
 command fetches the full list and filters client-side.
 
+Arguments that look like an integer or a UUID are treated as IDs; rename a
+policy if you need name-based access to it.
+
 Examples:
   stackctl cleanup-policy get 1
   stackctl cleanup-policy get nightly-stop

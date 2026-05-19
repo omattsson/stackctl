@@ -255,7 +255,7 @@ func TestCleanupPolicyCreateCmd_FromFile(t *testing.T) {
 	}
 	path := writeTempPolicyFile(t, "policy.json", req)
 	require.NoError(t, cleanupPolicyCreateCmd.Flags().Set("from-file", path))
-	t.Cleanup(func() { _ = cleanupPolicyCreateCmd.Flags().Set("from-file", "") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyCreateCmd.Flags(), "from-file", "") })
 
 	require.NoError(t, cleanupPolicyCreateCmd.RunE(cleanupPolicyCreateCmd, []string{}))
 	assert.Equal(t, "new-policy", captured.Name)
@@ -274,7 +274,7 @@ func TestCleanupPolicyCreateCmd_MissingFromFile(t *testing.T) {
 func TestCleanupPolicyCreateCmd_PathTraversalRejected(t *testing.T) {
 	_ = setupStackTestCmd(t, "http://localhost:0")
 	require.NoError(t, cleanupPolicyCreateCmd.Flags().Set("from-file", "../policy.json"))
-	t.Cleanup(func() { _ = cleanupPolicyCreateCmd.Flags().Set("from-file", "") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyCreateCmd.Flags(), "from-file", "") })
 	err := cleanupPolicyCreateCmd.RunE(cleanupPolicyCreateCmd, []string{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "..")
@@ -286,7 +286,7 @@ func TestCleanupPolicyCreateCmd_ValidationError(t *testing.T) {
 	bad := types.CreateCleanupPolicyRequest{Name: "x"} // missing required fields
 	path := writeTempPolicyFile(t, "bad.json", bad)
 	require.NoError(t, cleanupPolicyCreateCmd.Flags().Set("from-file", path))
-	t.Cleanup(func() { _ = cleanupPolicyCreateCmd.Flags().Set("from-file", "") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyCreateCmd.Flags(), "from-file", "") })
 
 	err := cleanupPolicyCreateCmd.RunE(cleanupPolicyCreateCmd, []string{})
 	require.Error(t, err)
@@ -308,7 +308,7 @@ func TestCleanupPolicyCreateCmd_Forbidden(t *testing.T) {
 	}
 	path := writeTempPolicyFile(t, "policy.json", req)
 	require.NoError(t, cleanupPolicyCreateCmd.Flags().Set("from-file", path))
-	t.Cleanup(func() { _ = cleanupPolicyCreateCmd.Flags().Set("from-file", "") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyCreateCmd.Flags(), "from-file", "") })
 
 	err := cleanupPolicyCreateCmd.RunE(cleanupPolicyCreateCmd, []string{})
 	require.Error(t, err)
@@ -346,7 +346,7 @@ func TestCleanupPolicyUpdateCmd_FromFile(t *testing.T) {
 	}
 	path := writeTempPolicyFile(t, "update.json", req)
 	require.NoError(t, cleanupPolicyUpdateCmd.Flags().Set("from-file", path))
-	t.Cleanup(func() { _ = cleanupPolicyUpdateCmd.Flags().Set("from-file", "") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyUpdateCmd.Flags(), "from-file", "") })
 
 	require.NoError(t, cleanupPolicyUpdateCmd.RunE(cleanupPolicyUpdateCmd, []string{"1"}))
 	assert.Equal(t, "/api/v1/admin/cleanup-policies/1", capturedPath)
@@ -387,7 +387,7 @@ func TestCleanupPolicyUpdateCmd_ResolveNameToID(t *testing.T) {
 	}
 	path := writeTempPolicyFile(t, "update.json", req)
 	require.NoError(t, cleanupPolicyUpdateCmd.Flags().Set("from-file", path))
-	t.Cleanup(func() { _ = cleanupPolicyUpdateCmd.Flags().Set("from-file", "") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyUpdateCmd.Flags(), "from-file", "") })
 
 	require.NoError(t, cleanupPolicyUpdateCmd.RunE(cleanupPolicyUpdateCmd, []string{"nightly-stop"}))
 	assert.Equal(t, "/api/v1/admin/cleanup-policies/1", capturedPath)
@@ -415,7 +415,7 @@ func TestCleanupPolicyDeleteCmd_WithYesFlag(t *testing.T) {
 
 	buf := setupStackTestCmd(t, server.URL)
 	require.NoError(t, cleanupPolicyDeleteCmd.Flags().Set("yes", "true"))
-	t.Cleanup(func() { _ = cleanupPolicyDeleteCmd.Flags().Set("yes", "false") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyDeleteCmd.Flags(), "yes", "false") })
 
 	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"1"}))
 	assert.True(t, deleted)
@@ -432,7 +432,7 @@ func TestCleanupPolicyDeleteCmd_QuietOutput(t *testing.T) {
 	buf := setupStackTestCmd(t, server.URL)
 	printer.Quiet = true
 	require.NoError(t, cleanupPolicyDeleteCmd.Flags().Set("yes", "true"))
-	t.Cleanup(func() { _ = cleanupPolicyDeleteCmd.Flags().Set("yes", "false") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyDeleteCmd.Flags(), "yes", "false") })
 
 	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"1"}))
 	assert.Equal(t, "1\n", buf.String(), "quiet mode must echo only the policy ID")
@@ -447,7 +447,7 @@ func TestCleanupPolicyDeleteCmd_DryRun(t *testing.T) {
 
 	buf := setupStackTestCmd(t, server.URL)
 	require.NoError(t, cleanupPolicyDeleteCmd.Flags().Set("dry-run", "true"))
-	t.Cleanup(func() { _ = cleanupPolicyDeleteCmd.Flags().Set("dry-run", "false") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyDeleteCmd.Flags(), "dry-run", "false") })
 
 	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"1"}))
 	assert.False(t, called, "dry-run must not contact the backend")
@@ -472,7 +472,7 @@ func TestCleanupPolicyDeleteCmd_ResolveNameToID(t *testing.T) {
 
 	_ = setupStackTestCmd(t, server.URL)
 	require.NoError(t, cleanupPolicyDeleteCmd.Flags().Set("yes", "true"))
-	t.Cleanup(func() { _ = cleanupPolicyDeleteCmd.Flags().Set("yes", "false") })
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyDeleteCmd.Flags(), "yes", "false") })
 
 	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"ttl-cleanup"}))
 	assert.Equal(t, "/api/v1/admin/cleanup-policies/2", capturedPath)
