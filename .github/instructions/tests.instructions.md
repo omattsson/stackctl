@@ -35,6 +35,11 @@ When testing `registerPlugins()`, set up an isolated `PATH` pointing to a `t.Tem
 
 ## Coverage Requirements
 - Test all output modes: table, JSON, YAML, quiet
+  - **Quiet tests**: set `printer.Quiet = true`, assert the expected identifiers/labels are
+    present (one per line), and use `assert.NotContains` to verify table headers (`NAME`,
+    `STATUS`, `NAMESPACE`, etc.) are absent
+  - **Table tests**: assert header presence and key column values
+  - **JSON/YAML tests**: unmarshal the buffer and assert on struct fields
 - Test error cases: API errors (401, 404, 500), invalid input
 - Test flag parsing and validation
 - Test confirmation prompt behavior (yes/no/--yes flag)
@@ -47,3 +52,22 @@ Use `setupStackTestCmd(t, apiURL)` or equivalent helper that:
 3. Registers cleanup to restore defaults (`cfg`, `printer`, all `flag*` globals)
 
 Because `cmd/` tests mutate package-level globals, they MUST NOT use `t.Parallel()` — even in subtests. Helpers should snapshot and restore globals via `t.Cleanup()`.
+
+## E2E Tests (`cli/test/e2e/`)
+E2E tests build and invoke the actual `stackctl` binary. Rules:
+- `TestMain` builds the binary into a temp dir before running any test, and removes it after.
+- Every test calls `t.Skip()` when `testing.Short()` is true — they are excluded from `go test ./... -short`.
+- Use `runStackctl(t, configDir, args...)` / `runStackctlWithStdin(...)` helpers — never call `exec.Command` directly in individual tests.
+- Inject an isolated config dir via `STACKCTL_CONFIG_DIR` env var so tests don't touch `~/.stackmanager`.
+- Use `httptest.NewServer` for the mock API server; the server URL is passed via `--api-url`.
+- Assert on stdout/stderr strings and `err` (nil means exit 0; non-nil means non-zero exit).
+- Do NOT use `t.Parallel()` — binary builds and package-global `binaryPath` are not concurrency-safe.
+
+## Live Tests (`cli/test/live/`)
+Live tests call a real running backend. Rules:
+- File-level build tag: `//go:build live` — they are never compiled in normal `go test ./...` runs.
+- Run with: `cd cli && go test -tags live ./test/live/ -v`
+- Require env vars `STACKCTL_LIVE_USER` and `STACKCTL_LIVE_PASS`; skip (not fail) if unset.
+- Optional `STACKCTL_LIVE_URL`; defaults to `http://localhost:8081`.
+- The `newLiveClient(t)` helper does a connectivity check and calls `t.Skip()` if the backend is unreachable — never let live tests fail due to infrastructure absence.
+- Do not add live tests to CI pipelines — they are developer opt-in only.

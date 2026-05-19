@@ -197,12 +197,30 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
 			apiErr.retryAfter = parseRetryAfter(ra)
 		}
-		var errResp types.ErrorResponse
+		// Most endpoints return {"error": "..."}, but a few (notably
+		// POST /api/v1/clusters/:id/test on 502) return
+		// {"status": "...", "message": "..."} instead. Decode both
+		// shapes so the backend-provided message surfaces in the
+		// user-facing APIError.
+		var errResp struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 			apiErr.Message = http.StatusText(resp.StatusCode)
 			return nil, apiErr
 		}
-		apiErr.Message = errResp.Error
+		switch {
+		case errResp.Error != "":
+			apiErr.Message = errResp.Error
+		case errResp.Message != "":
+			apiErr.Message = errResp.Message
+		default:
+			// Decoded successfully but both fields empty — fall back to the
+			// status text so the user-facing rendering still has *some*
+			// context rather than just "Server error.".
+			apiErr.Message = http.StatusText(resp.StatusCode)
+		}
 		return nil, apiErr
 	}
 
@@ -1041,6 +1059,8 @@ func (c *Client) GetCluster(id string) (*types.Cluster, error) {
 }
 
 // GetClusterHealth returns the health summary for a cluster.
+//
+// @see GET /api/v1/clusters/:id/health/summary
 func (c *Client) GetClusterHealth(id string) (*types.ClusterHealthSummary, error) {
 	var health types.ClusterHealthSummary
 	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/health/summary", id), &health)
@@ -1050,41 +1070,48 @@ func (c *Client) GetClusterHealth(id string) (*types.ClusterHealthSummary, error
 	return &health, nil
 }
 
-// TestClusterConnection tests connectivity to a cluster.
-func (c *Client) TestClusterConnection(id string) (*types.TestConnectionResponse, error) {
-	var resp types.TestConnectionResponse
-	err := c.Post(fmt.Sprintf("/api/v1/clusters/%s/test", id), nil, &resp)
-	if err != nil {
+// TestClusterConnection asks the backend to verify connectivity to the
+// cluster's API server. On a reachable cluster the backend responds 200 with
+// status=="success"; on an unreachable cluster it returns a non-2xx response
+// which surfaces here as a client.APIError.
+//
+// @see POST /api/v1/clusters/:id/test
+func (c *Client) TestClusterConnection(id string) (*types.ClusterTestConnectionResult, error) {
+	var result types.ClusterTestConnectionResult
+	if err := c.Post(fmt.Sprintf("/api/v1/clusters/%s/test", id), nil, &result); err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	return &result, nil
 }
 
-// GetClusterNodes returns per-node health for a cluster.
-func (c *Client) GetClusterNodes(id string) ([]types.ClusterNode, error) {
-	var nodes []types.ClusterNode
-	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/health/nodes", id), &nodes)
-	if err != nil {
+// GetClusterNodes returns per-node status for a cluster.
+//
+// @see GET /api/v1/clusters/:id/health/nodes
+func (c *Client) GetClusterNodes(id string) ([]types.ClusterNodeStatus, error) {
+	var nodes []types.ClusterNodeStatus
+	if err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/health/nodes", id), &nodes); err != nil {
 		return nil, err
 	}
 	return nodes, nil
 }
 
-// GetClusterNamespaces returns all stack namespaces in a cluster.
+// GetClusterNamespaces returns the stack-* namespaces present in the cluster.
+//
+// @see GET /api/v1/clusters/:id/namespaces
 func (c *Client) GetClusterNamespaces(id string) ([]types.ClusterNamespace, error) {
-	var ns []types.ClusterNamespace
-	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/namespaces", id), &ns)
-	if err != nil {
+	var namespaces []types.ClusterNamespace
+	if err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/namespaces", id), &namespaces); err != nil {
 		return nil, err
 	}
-	return ns, nil
+	return namespaces, nil
 }
 
-// GetClusterUtilization returns per-namespace resource utilization for a cluster.
+// GetClusterUtilization returns aggregated per-namespace resource utilization.
+//
+// @see GET /api/v1/clusters/:id/utilization
 func (c *Client) GetClusterUtilization(id string) (*types.ClusterUtilization, error) {
 	var util types.ClusterUtilization
-	err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/utilization", id), &util)
-	if err != nil {
+	if err := c.Get(fmt.Sprintf("/api/v1/clusters/%s/utilization", id), &util); err != nil {
 		return nil, err
 	}
 	return &util, nil
