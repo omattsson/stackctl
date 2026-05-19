@@ -1768,11 +1768,14 @@ func resetFlag(fs *pflag.FlagSet, name, value string) {
 func sampleClusterQuota() types.ClusterQuota {
 	now := time.Date(2026, 1, 10, 14, 30, 0, 0, time.UTC)
 	return types.ClusterQuota{
-		ID: "q1", ClusterID: "1",
-		CPURequest: "500m", CPULimit: "4",
-		MemoryRequest: "1Gi", MemoryLimit: "16Gi",
-		StorageLimit: "100Gi", PodLimit: 50,
-		CreatedAt: now, UpdatedAt: now,
+		Base:          types.Base{ID: "q1", CreatedAt: now, UpdatedAt: now},
+		ClusterID:     "1",
+		CPURequest:    "500m",
+		CPULimit:      "4",
+		MemoryRequest: "1Gi",
+		MemoryLimit:   "16Gi",
+		StorageLimit:  "100Gi",
+		PodLimit:      50,
 	}
 }
 
@@ -2055,6 +2058,18 @@ func TestClusterQuotaSetCmd_Forbidden(t *testing.T) {
 	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Permission denied")
+}
+
+func TestClusterQuotaSetCmd_RejectsPathTraversal(t *testing.T) {
+	// Mirrors cluster create / update / shared-values set: any `..` segment
+	// in the --from-file path is rejected before opening the file.
+	_ = setupClusterTestCmd(t, "http://unused")
+	clusterQuotaSetCmd.Flags().Set("from-file", "../escape.json")
+	t.Cleanup(func() { resetFlag(clusterQuotaSetCmd.Flags(), "from-file", "") })
+
+	err := clusterQuotaSetCmd.RunE(clusterQuotaSetCmd, []string{"1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "'..' segments")
 }
 
 func TestClusterQuotaSetCmd_BadFile(t *testing.T) {

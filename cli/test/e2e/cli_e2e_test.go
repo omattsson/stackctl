@@ -1701,6 +1701,16 @@ func TestE2E_BulkTemplateDelete_NoConfirmation(t *testing.T) {
 // startE2EClusterMockServer starts a mock API with cluster lifecycle endpoints for e2e tests.
 func startE2EClusterMockServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	// Persistent quota state so PUT → GET reflects the body the CLI actually
+	// sent, instead of a hard-coded fixture. Catches regressions where the
+	// CLI stops sending or merging a quota field.
+	quota := map[string]interface{}{
+		"id": "q1", "cluster_id": "1",
+		"cpu_request": "", "cpu_limit": "4",
+		"memory_request": "", "memory_limit": "16Gi",
+		"storage_limit": "", "pod_limit": 50,
+		"created_at": "2026-01-10T14:30:00Z", "updated_at": "2026-01-10T14:30:00Z",
+	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -1820,24 +1830,25 @@ func startE2EClusterMockServer(t *testing.T) *httptest.Server {
 		// PUT /api/v1/clusters/1/quotas
 		case r.URL.Path == "/api/v1/clusters/1/quotas" && r.Method == http.MethodPut:
 			var req map[string]interface{}
-			_ = json.NewDecoder(r.Body).Decode(&req)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+				return
+			}
+			// Persist every quota field from the request body so the
+			// subsequent GET reflects exactly what the CLI sent (round-trip).
+			for _, k := range []string{"cpu_request", "cpu_limit", "memory_request", "memory_limit", "storage_limit", "pod_limit"} {
+				if v, ok := req[k]; ok {
+					quota[k] = v
+				}
+			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"id": "q1", "cluster_id": "1",
-				"cpu_request": req["cpu_request"], "cpu_limit": req["cpu_limit"],
-				"memory_request": req["memory_request"], "memory_limit": req["memory_limit"],
-				"storage_limit": req["storage_limit"], "pod_limit": req["pod_limit"],
-				"created_at": "2026-01-10T14:30:00Z", "updated_at": "2026-01-10T14:30:00Z",
-			})
+			_ = json.NewEncoder(w).Encode(quota)
 
 		// GET /api/v1/clusters/1/quotas
 		case r.URL.Path == "/api/v1/clusters/1/quotas" && r.Method == http.MethodGet:
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"id": "q1", "cluster_id": "1",
-				"cpu_limit": "4", "memory_limit": "16Gi", "pod_limit": 50,
-				"created_at": "2026-01-10T14:30:00Z", "updated_at": "2026-01-10T14:30:00Z",
-			})
+			_ = json.NewEncoder(w).Encode(quota)
 
 		// DELETE /api/v1/clusters/1/quotas
 		case r.URL.Path == "/api/v1/clusters/1/quotas" && r.Method == http.MethodDelete:

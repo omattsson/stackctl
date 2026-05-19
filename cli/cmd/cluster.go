@@ -1031,7 +1031,13 @@ Examples:
 		fromFile, _ := cmd.Flags().GetString("from-file")
 
 		if fromFile != "" {
-			data, err := os.ReadFile(filepath.Clean(fromFile))
+			for _, segment := range strings.Split(filepath.ToSlash(fromFile), "/") {
+				if segment == ".." {
+					return fmt.Errorf("file path must not contain '..' segments")
+				}
+			}
+			fromFile = filepath.Clean(fromFile)
+			data, err := os.ReadFile(fromFile)
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", fromFile, err)
 			}

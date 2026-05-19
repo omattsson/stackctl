@@ -423,29 +423,33 @@ type NamespaceResourceUsage struct {
 // models.ResourceQuotaConfig struct. Populated by Client.GetClusterQuota /
 // Client.SetClusterQuota.
 //
+// Embeds Base per the repo convention for resource entities. The backend's
+// ResourceQuotaConfig does not include a Version field, so the embedded
+// Base.Version is always the zero string on the read path.
+//
 // The backend returns 404 when no quota is set for the cluster — the client
 // surfaces that as an APIError with StatusCode 404, and the CLI distinguishes
 // "no quota configured" from a missing cluster by checking that error.
 //
 // Field semantics:
-//   - ID, ClusterID, CreatedAt, UpdatedAt — always populated on the 200 path
-//     (server-owned; ignored if sent in a PUT body).
+//   - Base.ID, ClusterID, Base.CreatedAt, Base.UpdatedAt — always populated on
+//     the 200 path (server-owned; ignored if sent in a PUT body).
+//   - Base.Version, Base.DeletedAt — not used by this resource; left as zero
+//     values for convention compliance.
 //   - CPURequest, CPULimit, MemoryRequest, MemoryLimit, StorageLimit — empty
 //     string when that dimension has no limit set. Kubernetes resource notation
 //     when populated ("2", "500m", "4Gi").
 //   - PodLimit — 0 means "no pod-count limit"; positive integers cap namespace
 //     pod count.
 type ClusterQuota struct {
-	ID            string    `json:"id" yaml:"id"`
-	ClusterID     string    `json:"cluster_id" yaml:"cluster_id"`
-	CPURequest    string    `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
-	CPULimit      string    `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
-	MemoryRequest string    `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
-	MemoryLimit   string    `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
-	StorageLimit  string    `json:"storage_limit,omitempty" yaml:"storage_limit,omitempty"`
-	PodLimit      int       `json:"pod_limit" yaml:"pod_limit"`
-	CreatedAt     time.Time `json:"created_at,omitempty" yaml:"created_at,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
+	Base
+	ClusterID     string `json:"cluster_id" yaml:"cluster_id"`
+	CPURequest    string `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
+	CPULimit      string `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
+	MemoryRequest string `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
+	MemoryLimit   string `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
+	StorageLimit  string `json:"storage_limit,omitempty" yaml:"storage_limit,omitempty"`
+	PodLimit      int    `json:"pod_limit" yaml:"pod_limit"`
 }
 
 // SetClusterQuotaRequest is the body for PUT /api/v1/clusters/:id/quotas

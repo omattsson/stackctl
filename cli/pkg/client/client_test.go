@@ -2281,8 +2281,9 @@ func TestGetClusterQuota_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ClusterQuota{
-			ID: "q1", ClusterID: "1",
-			CPULimit: "4", MemoryLimit: "16Gi", PodLimit: 50,
+			Base:      types.Base{ID: "q1"},
+			ClusterID: "1",
+			CPULimit:  "4", MemoryLimit: "16Gi", PodLimit: 50,
 		})
 	}))
 	defer server.Close()
@@ -2329,8 +2330,9 @@ func TestSetClusterQuota_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ClusterQuota{
-			ID: "q1", ClusterID: "1",
-			CPULimit: got.CPULimit, PodLimit: got.PodLimit,
+			Base:      types.Base{ID: "q1"},
+			ClusterID: "1",
+			CPULimit:  got.CPULimit, PodLimit: got.PodLimit,
 		})
 	}))
 	defer server.Close()

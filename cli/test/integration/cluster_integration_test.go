@@ -316,7 +316,11 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 					existing.UpdatedAt = now
 				} else {
 					existing = &types.ClusterQuota{
-						ID:            fmt.Sprintf("q%d", state.nextQuotaID),
+						Base: types.Base{
+							ID:        fmt.Sprintf("q%d", state.nextQuotaID),
+							CreatedAt: now,
+							UpdatedAt: now,
+						},
 						ClusterID:     id,
 						CPURequest:    req.CPURequest,
 						CPULimit:      req.CPULimit,
@@ -324,8 +328,6 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 						MemoryLimit:   req.MemoryLimit,
 						StorageLimit:  req.StorageLimit,
 						PodLimit:      req.PodLimit,
-						CreatedAt:     now,
-						UpdatedAt:     now,
 					}
 					state.nextQuotaID++
 					state.quotas[id] = existing
@@ -343,6 +345,12 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 					return
 				}
 				state.mu.Lock()
+				if _, hasQuota := state.quotas[id]; !hasQuota {
+					state.mu.Unlock()
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "resource quota config not found"})
+					return
+				}
 				delete(state.quotas, id)
 				state.mu.Unlock()
 				w.WriteHeader(http.StatusNoContent)
