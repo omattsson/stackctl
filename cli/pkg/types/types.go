@@ -285,9 +285,18 @@ type GitValidateResponse struct {
 	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
-// ClusterHealthSummary represents a cluster's health summary as returned by
-// GET /api/v1/clusters/:id/health/summary. Field names match the backend
-// k8s.ClusterSummary struct so JSON unmarshaling round-trips correctly.
+// ClusterHealthSummary is the success-path response of
+// GET /api/v1/clusters/:id/health/summary. Field names mirror the backend
+// k8s.ClusterSummary struct so JSON round-trips without renaming.
+//
+// Population: only returned on HTTP 200. On non-2xx the client surfaces an
+// APIError and this struct is left zero-valued by the caller.
+// Field semantics:
+//   - NodeCount, ReadyNodeCount, NamespaceCount — always present (may be 0
+//     for empty/just-registered clusters; 0 is a valid value, not "missing").
+//   - TotalCPU, TotalMemory, AllocatableCPU, AllocatableMemory — populated
+//     when the backend was able to read node capacity; omitted (empty string)
+//     when no nodes were reachable, hence the `omitempty` tags.
 type ClusterHealthSummary struct {
 	NodeCount         int    `json:"node_count" yaml:"node_count"`
 	ReadyNodeCount    int    `json:"ready_node_count" yaml:"ready_node_count"`
@@ -298,35 +307,70 @@ type ClusterHealthSummary struct {
 	NamespaceCount    int    `json:"namespace_count" yaml:"namespace_count"`
 }
 
-// ClusterTestConnectionResult is the response shape of
-// POST /api/v1/clusters/:id/test. On success Status == "success". On an
-// unreachable cluster the backend returns a non-2xx response that the client
-// surfaces as an APIError; this struct is only populated on 200 responses.
+// ClusterTestConnectionResult is the success-path response of
+// POST /api/v1/clusters/:id/test (HTTP 200 only). Populated by
+// Client.TestClusterConnection.
+//
+// Population: only returned on HTTP 200 with Status == "success". On an
+// unreachable cluster the backend returns HTTP 502 with a JSON body of
+// shape {"status":"error","message":"..."}; the client decoder in
+// Client.do() maps that into an APIError (Message set to the backend
+// "message"), so callers never see this struct populated with Status="error".
+// Field semantics:
+//   - Status — always present on the 200 path ("success").
+//   - Message — present on the 200 path; backend uses "Connection successful".
+//   - ServerVersion — populated when the backend's discovery client reported
+//     a Kubernetes git version (e.g. "v1.29.4"); empty when the discovery
+//     response was malformed or the test fake doesn't implement RESTClient.
 type ClusterTestConnectionResult struct {
 	Status        string `json:"status" yaml:"status"`
 	Message       string `json:"message,omitempty" yaml:"message,omitempty"`
 	ServerVersion string `json:"server_version,omitempty" yaml:"server_version,omitempty"`
 }
 
-// ClusterResourceQuantity captures CPU/memory/pod capacity strings, mirroring
-// the backend k8s.ResourceQuantity.
+// ClusterResourceQuantity holds CPU/memory/pod capacity values as strings,
+// mirroring backend k8s.ResourceQuantity. Embedded inside ClusterNodeStatus
+// (Capacity, Allocatable) returned from
+// GET /api/v1/clusters/:id/health/nodes.
+//
+// Field semantics:
+//   - CPU, Memory — always populated for a node returned by the API; format
+//     is Kubernetes resource notation ("3800m", "16Gi").
+//   - Pods — currently always populated by the backend (k8s
+//     ResourceList.Pods().String() returns "0" worst case). The `omitempty`
+//     JSON tag is defensive in case a future backend version stops emitting
+//     the field.
 type ClusterResourceQuantity struct {
 	CPU    string `json:"cpu" yaml:"cpu"`
 	Memory string `json:"memory" yaml:"memory"`
 	Pods   string `json:"pods,omitempty" yaml:"pods,omitempty"`
 }
 
-// ClusterNodeCondition represents a single node condition (Ready,
-// MemoryPressure, etc.), mirroring backend k8s.NodeCondition.
+// ClusterNodeCondition represents one node condition (Ready, MemoryPressure,
+// DiskPressure, PIDPressure, NetworkUnavailable, etc.), mirroring backend
+// k8s.NodeCondition. Embedded inside ClusterNodeStatus.Conditions.
+//
+// Field semantics:
+//   - Type, Status — always present. Status is one of "True"/"False"/"Unknown".
+//   - Message — populated when the controller has additional context (which
+//     in practice is almost always — the kubelet sets a message even on
+//     healthy Ready conditions). The `omitempty` JSON tag only hides
+//     genuinely empty strings.
 type ClusterNodeCondition struct {
 	Type    string `json:"type" yaml:"type"`
 	Status  string `json:"status" yaml:"status"`
 	Message string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
-// ClusterNodeStatus is one node's health snapshot, returned as an element of
-// the array from GET /api/v1/clusters/:id/health/nodes. Mirrors backend
-// k8s.NodeStatus.
+// ClusterNodeStatus is one node's health snapshot, returned as an array
+// element of GET /api/v1/clusters/:id/health/nodes (HTTP 200 only). Mirrors
+// backend k8s.NodeStatus. Populated by Client.GetClusterNodes.
+//
+// Field semantics:
+//   - Name, Status, Capacity, Allocatable, PodCount — always populated; Status
+//     is "Ready" or "NotReady".
+//   - Conditions — omitted when the backend has no conditions to report
+//     (rare); typically a non-empty slice on Linux nodes.
 type ClusterNodeStatus struct {
 	Name        string                  `json:"name" yaml:"name"`
 	Status      string                  `json:"status" yaml:"status"`
@@ -336,16 +380,33 @@ type ClusterNodeStatus struct {
 	PodCount    int                     `json:"pod_count" yaml:"pod_count"`
 }
 
-// ClusterNamespace is one namespace entry from
-// GET /api/v1/clusters/:id/namespaces. Mirrors backend k8s.NamespaceInfo.
+// ClusterNamespace is one namespace entry returned as an array element of
+// GET /api/v1/clusters/:id/namespaces (HTTP 200 only). Mirrors backend
+// k8s.NamespaceInfo (filtered to "stack-*" namespaces). Populated by
+// Client.GetClusterNamespaces.
+//
+// Field semantics:
+//   - Name, Phase — always populated. Phase is the string form of
+//     corev1.NamespacePhase ("Active" or "Terminating").
+//   - CreatedAt — populated from the namespace's metadata.creationTimestamp;
+//     a nil pointer when the backend omitted the field (rare; treated as
+//     "unknown age" by the CLI).
 type ClusterNamespace struct {
 	Name      string     `json:"name" yaml:"name"`
 	Phase     string     `json:"phase" yaml:"phase"`
 	CreatedAt *time.Time `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
-// NamespaceResourceUsage is the per-namespace utilization entry inside a
-// ClusterUtilization, mirroring backend NamespaceResourceUsage.
+// NamespaceResourceUsage is the per-namespace utilization entry embedded
+// inside ClusterUtilization.Namespaces. Mirrors backend NamespaceResourceUsage.
+//
+// Field semantics:
+//   - Namespace, PodCount, PodLimit — always present (PodLimit is 0 when the
+//     namespace has no quota; CLI renders it as just PodCount in that case).
+//   - CPUUsed/CPULimit/MemoryUsed/MemoryLimit — populated when the backend's
+//     metrics client successfully fetched usage/limits; empty when metrics
+//     were unavailable for that namespace (still returned by the API for
+//     completeness — hence `omitempty`).
 type NamespaceResourceUsage struct {
 	Namespace   string `json:"namespace" yaml:"namespace"`
 	CPUUsed     string `json:"cpu_used,omitempty" yaml:"cpu_used,omitempty"`
@@ -356,8 +417,14 @@ type NamespaceResourceUsage struct {
 	PodLimit    int    `json:"pod_limit" yaml:"pod_limit"`
 }
 
-// ClusterUtilization is the response shape of
-// GET /api/v1/clusters/:id/utilization. Mirrors backend ClusterUtilization.
+// ClusterUtilization is the success-path response of
+// GET /api/v1/clusters/:id/utilization (HTTP 200 only). Mirrors backend
+// ClusterUtilization. Populated by Client.GetClusterUtilization.
+//
+// Field semantics:
+//   - ClusterID — always present, echoes the path parameter.
+//   - Namespaces — always present (empty slice when no stack-* namespaces
+//     exist on the cluster).
 type ClusterUtilization struct {
 	ClusterID  string                   `json:"cluster_id" yaml:"cluster_id"`
 	Namespaces []NamespaceResourceUsage `json:"namespaces" yaml:"namespaces"`

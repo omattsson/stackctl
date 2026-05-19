@@ -197,12 +197,30 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
 			apiErr.retryAfter = parseRetryAfter(ra)
 		}
-		var errResp types.ErrorResponse
+		// Most endpoints return {"error": "..."}, but a few (notably
+		// POST /api/v1/clusters/:id/test on 502) return
+		// {"status": "...", "message": "..."} instead. Decode both
+		// shapes so the backend-provided message surfaces in the
+		// user-facing APIError.
+		var errResp struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 			apiErr.Message = http.StatusText(resp.StatusCode)
 			return nil, apiErr
 		}
-		apiErr.Message = errResp.Error
+		switch {
+		case errResp.Error != "":
+			apiErr.Message = errResp.Error
+		case errResp.Message != "":
+			apiErr.Message = errResp.Message
+		default:
+			// Decoded successfully but both fields empty — fall back to the
+			// status text so the user-facing rendering still has *some*
+			// context rather than just "Server error.".
+			apiErr.Message = http.StatusText(resp.StatusCode)
+		}
 		return nil, apiErr
 	}
 

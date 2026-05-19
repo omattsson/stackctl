@@ -2157,8 +2157,15 @@ func TestTestClusterConnection_Success(t *testing.T) {
 func TestTestClusterConnection_Unreachable(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Real backend wire shape for POST /clusters/:id/test on a 502:
+		// {"status":"error","message":"..."} — NOT the generic {"error":"..."}
+		// envelope. The client decoder must fall back to `message` so the
+		// backend-provided context surfaces in the APIError.
 		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Cluster is unreachable"})
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Cluster is unreachable",
+		})
 	}))
 	defer server.Close()
 
@@ -2168,7 +2175,12 @@ func TestTestClusterConnection_Unreachable(t *testing.T) {
 	assert.Nil(t, result)
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
-	assert.Contains(t, apiErr.UserFacingError(), "Cluster is unreachable")
+	assert.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
+	assert.Equal(t, "Cluster is unreachable", apiErr.Message,
+		"client decoder must surface the backend `message` field, not the generic 'Bad Gateway' fallback")
+	face := apiErr.UserFacingError()
+	assert.Contains(t, face, "Server error")
+	assert.Contains(t, face, "Cluster is unreachable")
 }
 
 func TestGetClusterNodes_Success(t *testing.T) {
