@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // Tests in this file are NOT parallelized because they mutate package-level
@@ -84,6 +86,25 @@ func TestCleanupPolicyListCmd_JSONOutput(t *testing.T) {
 
 	var got []types.CleanupPolicy
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	assert.Len(t, got, 2)
+	assert.Equal(t, "nightly-stop", got[0].Name)
+}
+
+func TestCleanupPolicyListCmd_YAMLOutput(t *testing.T) {
+	policies := sampleCleanupPolicies()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(policies))
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	require.NoError(t, cleanupPolicyListCmd.RunE(cleanupPolicyListCmd, []string{}))
+
+	var got []types.CleanupPolicy
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
 	assert.Len(t, got, 2)
 	assert.Equal(t, "nightly-stop", got[0].Name)
 }
@@ -213,6 +234,39 @@ func TestCleanupPolicyGetCmd_JSONOutput(t *testing.T) {
 	assert.Equal(t, "nightly-stop", got.Name)
 }
 
+func TestCleanupPolicyGetCmd_YAMLOutput(t *testing.T) {
+	policies := sampleCleanupPolicies()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(policies))
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	require.NoError(t, cleanupPolicyGetCmd.RunE(cleanupPolicyGetCmd, []string{"1"}))
+
+	var got types.CleanupPolicy
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "nightly-stop", got.Name)
+}
+
+func TestCleanupPolicyGetCmd_QuietOutput(t *testing.T) {
+	policies := sampleCleanupPolicies()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(policies))
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	require.NoError(t, cleanupPolicyGetCmd.RunE(cleanupPolicyGetCmd, []string{"nightly-stop"}))
+	assert.Equal(t, "1\n", buf.String(), "quiet mode must emit only the policy ID")
+}
+
 // ---------- create ----------
 
 func writeTempPolicyFile(t *testing.T, name string, payload interface{}) string {
@@ -261,6 +315,86 @@ func TestCleanupPolicyCreateCmd_FromFile(t *testing.T) {
 	assert.Equal(t, "new-policy", captured.Name)
 	assert.Equal(t, "all", captured.ClusterID)
 	assert.Contains(t, buf.String(), "new-policy")
+}
+
+// createMockServer returns a mock server that echoes the request payload back
+// as a created CleanupPolicy with ID=99 and timestamps zeroed. Shared by the
+// output-format tests below.
+func createMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req types.CreateCleanupPolicyRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(types.CleanupPolicy{
+			Base:      types.Base{ID: "99"},
+			Name:      req.Name,
+			ClusterID: req.ClusterID,
+			Action:    req.Action,
+			Condition: req.Condition,
+			Schedule:  req.Schedule,
+			Enabled:   req.Enabled,
+		})
+	}))
+}
+
+func writeValidCreatePayload(t *testing.T) string {
+	t.Helper()
+	return writeTempPolicyFile(t, "policy.json", types.CreateCleanupPolicyRequest{
+		Name: "new-policy", ClusterID: "all", Action: "stop",
+		Condition: "idle_days:14", Schedule: "0 3 * * *", Enabled: true,
+	})
+}
+
+func TestCleanupPolicyCreateCmd_JSONOutput(t *testing.T) {
+	server := createMockServer(t)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+
+	require.NoError(t, cleanupPolicyCreateCmd.Flags().Set("from-file", writeValidCreatePayload(t)))
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyCreateCmd.Flags(), "from-file", "") })
+
+	require.NoError(t, cleanupPolicyCreateCmd.RunE(cleanupPolicyCreateCmd, []string{}))
+
+	var got types.CleanupPolicy
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "99", got.ID)
+	assert.Equal(t, "new-policy", got.Name)
+}
+
+func TestCleanupPolicyCreateCmd_YAMLOutput(t *testing.T) {
+	server := createMockServer(t)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	require.NoError(t, cleanupPolicyCreateCmd.Flags().Set("from-file", writeValidCreatePayload(t)))
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyCreateCmd.Flags(), "from-file", "") })
+
+	require.NoError(t, cleanupPolicyCreateCmd.RunE(cleanupPolicyCreateCmd, []string{}))
+
+	var got types.CleanupPolicy
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "99", got.ID)
+	assert.Equal(t, "new-policy", got.Name)
+}
+
+func TestCleanupPolicyCreateCmd_QuietOutput(t *testing.T) {
+	server := createMockServer(t)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	require.NoError(t, cleanupPolicyCreateCmd.Flags().Set("from-file", writeValidCreatePayload(t)))
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyCreateCmd.Flags(), "from-file", "") })
+
+	require.NoError(t, cleanupPolicyCreateCmd.RunE(cleanupPolicyCreateCmd, []string{}))
+	assert.Equal(t, "99\n", buf.String(), "quiet mode must emit only the created ID")
 }
 
 func TestCleanupPolicyCreateCmd_MissingFromFile(t *testing.T) {
@@ -401,6 +535,85 @@ func TestCleanupPolicyUpdateCmd_MissingFromFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "--from-file is required")
 }
 
+// updateMockServer returns a mock server that echoes the request payload back
+// as an updated CleanupPolicy with ID=1. Shared by the output-format tests.
+func updateMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPut, r.Method)
+		var req types.UpdateCleanupPolicyRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.CleanupPolicy{
+			Base:      types.Base{ID: "1"},
+			Name:      req.Name,
+			ClusterID: req.ClusterID,
+			Action:    req.Action,
+			Condition: req.Condition,
+			Schedule:  req.Schedule,
+			Enabled:   req.Enabled,
+		})
+	}))
+}
+
+func writeValidUpdatePayload(t *testing.T) string {
+	t.Helper()
+	return writeTempPolicyFile(t, "update.json", types.UpdateCleanupPolicyRequest{
+		Name: "nightly-stop", ClusterID: "all", Action: "stop",
+		Condition: "idle_days:14", Schedule: "0 4 * * *", Enabled: true,
+	})
+}
+
+func TestCleanupPolicyUpdateCmd_JSONOutput(t *testing.T) {
+	server := updateMockServer(t)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+
+	require.NoError(t, cleanupPolicyUpdateCmd.Flags().Set("from-file", writeValidUpdatePayload(t)))
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyUpdateCmd.Flags(), "from-file", "") })
+
+	require.NoError(t, cleanupPolicyUpdateCmd.RunE(cleanupPolicyUpdateCmd, []string{"1"}))
+
+	var got types.CleanupPolicy
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "1", got.ID)
+	assert.Equal(t, "idle_days:14", got.Condition)
+}
+
+func TestCleanupPolicyUpdateCmd_YAMLOutput(t *testing.T) {
+	server := updateMockServer(t)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+
+	require.NoError(t, cleanupPolicyUpdateCmd.Flags().Set("from-file", writeValidUpdatePayload(t)))
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyUpdateCmd.Flags(), "from-file", "") })
+
+	require.NoError(t, cleanupPolicyUpdateCmd.RunE(cleanupPolicyUpdateCmd, []string{"1"}))
+
+	var got types.CleanupPolicy
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "1", got.ID)
+	assert.Equal(t, "idle_days:14", got.Condition)
+}
+
+func TestCleanupPolicyUpdateCmd_QuietOutput(t *testing.T) {
+	server := updateMockServer(t)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+
+	require.NoError(t, cleanupPolicyUpdateCmd.Flags().Set("from-file", writeValidUpdatePayload(t)))
+	t.Cleanup(func() { resetFlag(t, cleanupPolicyUpdateCmd.Flags(), "from-file", "") })
+
+	require.NoError(t, cleanupPolicyUpdateCmd.RunE(cleanupPolicyUpdateCmd, []string{"1"}))
+	assert.Equal(t, "1\n", buf.String(), "quiet mode must emit only the updated ID")
+}
+
 // ---------- delete ----------
 
 func TestCleanupPolicyDeleteCmd_WithYesFlag(t *testing.T) {
@@ -476,4 +689,48 @@ func TestCleanupPolicyDeleteCmd_ResolveNameToID(t *testing.T) {
 
 	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"ttl-cleanup"}))
 	assert.Equal(t, "/api/v1/admin/cleanup-policies/2", capturedPath)
+}
+
+func TestCleanupPolicyDeleteCmd_InteractiveConfirm(t *testing.T) {
+	deleted := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodDelete, r.Method)
+		require.Equal(t, "/api/v1/admin/cleanup-policies/1", r.URL.Path)
+		deleted = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	// Default --yes=false. Pipe "y\n" to stdin to confirm.
+	cleanupPolicyDeleteCmd.SetIn(strings.NewReader("y\n"))
+	cleanupPolicyDeleteCmd.SetErr(&bytes.Buffer{})
+	t.Cleanup(func() {
+		cleanupPolicyDeleteCmd.SetIn(nil)
+		cleanupPolicyDeleteCmd.SetErr(nil)
+	})
+
+	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"1"}))
+	assert.True(t, deleted, "DELETE must fire when user confirms")
+	assert.Contains(t, buf.String(), "Deleted cleanup policy 1")
+}
+
+func TestCleanupPolicyDeleteCmd_InteractiveDecline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("API must NOT be called when user declines: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+
+	cleanupPolicyDeleteCmd.SetIn(strings.NewReader("n\n"))
+	cleanupPolicyDeleteCmd.SetErr(&bytes.Buffer{})
+	t.Cleanup(func() {
+		cleanupPolicyDeleteCmd.SetIn(nil)
+		cleanupPolicyDeleteCmd.SetErr(nil)
+	})
+
+	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"1"}))
+	assert.Contains(t, buf.String(), "Aborted")
 }
