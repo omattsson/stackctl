@@ -2480,9 +2480,13 @@ func startE2EAPIKeyMockServer(t *testing.T) *httptest.Server {
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
 				return
 			}
-			if body.Name == "" || (body.ExpiresAt == nil && body.ExpiresInDays == nil) {
+			hasAt := body.ExpiresAt != nil
+			hasDays := body.ExpiresInDays != nil
+			if body.Name == "" || (!hasAt && !hasDays) || (hasAt && hasDays) {
 				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "name and expiry are required"})
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": "name and exactly one of expires_at or expires_in_days are required",
+				})
 				return
 			}
 			mu.Lock()
@@ -2514,6 +2518,13 @@ func startE2EAPIKeyMockServer(t *testing.T) *httptest.Server {
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
+
+		case len(parts) >= 4:
+			// e.g. /users/:id/api-keys/:keyId/<garbage> — not a real route;
+			// 404 matches the cleanup-policy mock convention and avoids
+			// misleading 405 responses for routes that don't exist.
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)

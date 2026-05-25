@@ -166,6 +166,14 @@ func TestAPIKeyCobra_CreateListRevoke_QuietBootstrap(t *testing.T) {
 
 	var buf bytes.Buffer
 
+	// Reset root persistent flags before the FIRST Execute() so this test
+	// doesn't inherit state from any earlier in-process Cobra test that
+	// ran in the same package. ResetFlagsForTest() only resets root
+	// persistent flags (--output, --quiet, --api-url, etc.) — subcommand
+	// flags like --name/--expires-in-days are scoped to the command and
+	// not affected.
+	cmd.ResetFlagsForTest()
+
 	// apikey create --name ci --expires-in-days 30 --quiet
 	// Verifies the CI-bootstrap contract: stdout is the raw key ONLY,
 	// one line, pipeable.

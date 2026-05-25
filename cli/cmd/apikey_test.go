@@ -269,6 +269,36 @@ func TestAPIKeyCreateCmd_JSONIncludesRawKey(t *testing.T) {
 	assert.Equal(t, "sk_json", got.RawKey)
 }
 
+func TestAPIKeyCreateCmd_YAMLIncludesRawKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/auth/me":
+			_ = json.NewEncoder(w).Encode(types.User{Base: types.Base{ID: callerID}})
+		case strings.Contains(r.URL.Path, "/api-keys") && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(types.CreateAPIKeyResponse{ID: "id", Name: "ci", RawKey: "sk_yaml"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	require.NoError(t, apikeyCreateCmd.Flags().Set("name", "ci"))
+	require.NoError(t, apikeyCreateCmd.Flags().Set("expires-in-days", "30"))
+	t.Cleanup(func() {
+		resetFlag(t, apikeyCreateCmd.Flags(), "name", "")
+		resetFlag(t, apikeyCreateCmd.Flags(), "expires-in-days", "0")
+	})
+
+	require.NoError(t, apikeyCreateCmd.RunE(apikeyCreateCmd, []string{}))
+	var got types.CreateAPIKeyResponse
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+	assert.Equal(t, "sk_yaml", got.RawKey)
+}
+
 func TestAPIKeyCreateCmd_RequiresExpiry(t *testing.T) {
 	// Backend must NOT be called when no expiry is provided.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
