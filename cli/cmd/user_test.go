@@ -410,3 +410,102 @@ func TestAuthRegisterCmd_QuietOutput(t *testing.T) {
 	require.NoError(t, authRegisterCmd.RunE(authRegisterCmd, []string{}))
 	assert.Equal(t, "new-id\n", buf.String())
 }
+
+// ---------- API error matrix (401/404/500) ----------
+//
+// Every new user/auth command must surface the documented APIError statuses
+// (401/404/500) as a non-nil error from RunE so the cobra harness exits
+// non-zero. The cases below are genuinely homogeneous — same setup, same
+// assertion shape, only the command and status differ — so table-driven is
+// the right fit per tests.instructions.md.
+
+func TestUserAuthCmd_APIErrorMatrix(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   map[string]string
+		want   string // substring expected in the surfaced error
+	}{
+		{"Unauthorized", http.StatusUnauthorized, map[string]string{"error": "unauthorized"}, "authenticated"},
+		{"NotFound", http.StatusNotFound, map[string]string{"error": "user not found"}, "not found"},
+		{"InternalServerError", http.StatusInternalServerError, map[string]string{"error": "boom"}, "boom"},
+	}
+
+	// Each invocation pairs a command with the arguments + per-test setup
+	// needed to reach the API call. Run helpers return the error from RunE.
+	invocations := []struct {
+		name string
+		run  func(t *testing.T) error
+	}{
+		{
+			name: "userList",
+			run: func(t *testing.T) error {
+				return userListCmd.RunE(userListCmd, []string{})
+			},
+		},
+		{
+			name: "userDelete",
+			run: func(t *testing.T) error {
+				require.NoError(t, userDeleteCmd.Flags().Set("yes", "true"))
+				t.Cleanup(func() { resetFlag(t, userDeleteCmd.Flags(), "yes", "false") })
+				return userDeleteCmd.RunE(userDeleteCmd, []string{"u1"})
+			},
+		},
+		{
+			name: "userDisable",
+			run: func(t *testing.T) error {
+				return userDisableCmd.RunE(userDisableCmd, []string{"u1"})
+			},
+		},
+		{
+			name: "userEnable",
+			run: func(t *testing.T) error {
+				return userEnableCmd.RunE(userEnableCmd, []string{"u1"})
+			},
+		},
+		{
+			name: "userResetPassword",
+			run: func(t *testing.T) error {
+				require.NoError(t, userResetPasswordCmd.Flags().Set("password-stdin", "true"))
+				t.Cleanup(func() { resetFlag(t, userResetPasswordCmd.Flags(), "password-stdin", "false") })
+				userResetPasswordCmd.SetIn(strings.NewReader("new-password-strong-enough\n"))
+				t.Cleanup(func() { userResetPasswordCmd.SetIn(nil) })
+				return userResetPasswordCmd.RunE(userResetPasswordCmd, []string{"u1"})
+			},
+		},
+		{
+			name: "authRegister",
+			run: func(t *testing.T) error {
+				require.NoError(t, authRegisterCmd.Flags().Set("username", "alice"))
+				require.NoError(t, authRegisterCmd.Flags().Set("password-stdin", "true"))
+				t.Cleanup(func() {
+					resetFlag(t, authRegisterCmd.Flags(), "username", "")
+					resetFlag(t, authRegisterCmd.Flags(), "password-stdin", "false")
+				})
+				authRegisterCmd.SetIn(strings.NewReader("strongpass!\n"))
+				t.Cleanup(func() { authRegisterCmd.SetIn(nil) })
+				return authRegisterCmd.RunE(authRegisterCmd, []string{})
+			},
+		},
+	}
+
+	for _, inv := range invocations {
+		for _, tc := range cases {
+			name := inv.name + "_" + tc.name
+			t.Run(name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.status)
+					_ = json.NewEncoder(w).Encode(tc.body)
+				}))
+				defer server.Close()
+
+				_ = setupStackTestCmd(t, server.URL)
+				err := inv.run(t)
+				require.Error(t, err, "%s: expected non-nil error for status %d", name, tc.status)
+				assert.Contains(t, strings.ToLower(err.Error()), strings.ToLower(tc.want),
+					"%s: error %q should contain %q", name, err.Error(), tc.want)
+			})
+		}
+	}
+}

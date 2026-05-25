@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -2751,6 +2752,56 @@ func TestResetUserPassword_NonLocalRejected(t *testing.T) {
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+}
+
+// TestUserAuthClient_APIErrorMatrix asserts every new user/auth client
+// method surfaces 401/404/500 as a *APIError with the right StatusCode.
+// Genuinely homogeneous error-mapping cases — table-driven is the right
+// fit per tests.instructions.md.
+func TestUserAuthClient_APIErrorMatrix(t *testing.T) {
+	t.Parallel()
+	statuses := []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError}
+	calls := []struct {
+		name string
+		call func(c *Client) error
+	}{
+		{"Register", func(c *Client) error {
+			_, err := c.Register(&types.RegisterRequest{Username: "x", Password: "strongpass!"})
+			return err
+		}},
+		{"ListUsers", func(c *Client) error {
+			_, err := c.ListUsers()
+			return err
+		}},
+		{"DeleteUser", func(c *Client) error { return c.DeleteUser("u1") }},
+		{"DisableUser", func(c *Client) error { return c.DisableUser("u1") }},
+		{"EnableUser", func(c *Client) error { return c.EnableUser("u1") }},
+		{"ResetUserPassword", func(c *Client) error { return c.ResetUserPassword("u1", "strongpass!") }},
+	}
+
+	for _, call := range calls {
+		call := call
+		for _, status := range statuses {
+			status := status
+			name := fmt.Sprintf("%s_%d", call.name, status)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "x"})
+				}))
+				defer server.Close()
+
+				c := New(server.URL)
+				err := call.call(c)
+				require.Error(t, err, "%s: expected non-nil error for status %d", name, status)
+				var apiErr *APIError
+				require.ErrorAs(t, err, &apiErr, "%s: error must wrap *APIError", name)
+				assert.Equal(t, status, apiErr.StatusCode, "%s: status code mismatch", name)
+			})
+		}
+	}
 }
 
 // ---------- shared values ----------
