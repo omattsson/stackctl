@@ -31,12 +31,26 @@ type Cluster struct {
 Request/response-only structs (e.g. `CreateClusterRequest`, `LoginResponse`) do NOT embed `Base`.
 
 ### Update Requests
-Update request structs use pointer fields for all optional fields so that only non-nil fields are marshaled:
-```go
-type UpdateFooRequest struct {
-    Name *string `json:"name,omitempty" yaml:"name,omitempty"`
-}
-```
+The shape of an update request struct depends on **how the backend handler treats the PUT**:
+
+- **Partial-update backends** (handler reads the existing record, decodes the request body over it, then writes — e.g. `UpdateCluster` in k8s-stack-manager): use pointer fields with `omitempty` so that only non-nil fields are marshaled and unspecified fields keep their server-side value.
+  ```go
+  type UpdateClusterRequest struct {
+      Name *string `json:"name,omitempty" yaml:"name,omitempty"`
+  }
+  ```
+
+- **Full-upsert backends** (handler decodes into a fresh struct and overwrites the row, only preserving server-managed fields like `CreatedAt`/`LastRunAt` — e.g. `UpdateCleanupPolicy`): use plain value fields (no `omitempty` on bools). Pointer+omitempty here would silently zero out unspecified fields on the backend and produce wrong wire semantics. State the full-upsert contract explicitly in the struct godoc.
+  ```go
+  // UpdateCleanupPolicyRequest is the body for PUT .../cleanup-policies/:id.
+  // PUT is a full upsert — every field must be provided.
+  type UpdateCleanupPolicyRequest struct {
+      Name    string `json:"name" yaml:"name"`
+      Enabled bool   `json:"enabled" yaml:"enabled"`
+  }
+  ```
+
+When in doubt, read the backend handler in `omattsson/k8s-stack-manager/backend/internal/api/handlers/` before changing wire format. Never refactor a value-field update request to pointer fields without first confirming the backend supports partial updates.
 
 ### Docstrings
 Every exported type MUST have a godoc comment that states:

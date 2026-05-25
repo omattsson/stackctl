@@ -3,10 +3,29 @@
 
 language: en-US
 
+# Tone: terse, evidence-based. Verify against .github/instructions/ before
+# suggesting wire-format/struct/convention changes. Anti-patterns to skip are
+# listed in each path's instructions below; do not propose them.
+tone_instructions: "Terse and evidence-based. Before any wire-format, struct, or convention change, VERIFY against .github/instructions/ and the backend handler. Never propose anti-patterns listed in path_instructions."
+
 reviews:
+  # Profile: CHILL is the right default for a small CLI maintained by one
+  # person — avoids the noise of ASSERTIVE on every PR.
+  profile: chill
+
   # Controls auto-approval behavior after requested changes or failing checks are
   # resolved (true enables the auto-approval workflow).
   request_changes_workflow: false
+
+  # Skip review on paths CodeRabbit cannot meaningfully comment on.
+  path_filters:
+    - "!**/*.svg"
+    - "!**/*.png"
+    - "!**/*.jpg"
+    - "!**/*.lock"
+    - "!**/go.sum"
+    - "!**/vendor/**"
+    - "!**/testdata/**"
 
   # Pull in the project instruction files so CodeRabbit understands
   # project-specific conventions before commenting.
@@ -26,7 +45,12 @@ reviews:
             cluster test-connection → connection status string (success/error)
         - Destructive commands require --yes flag and stderr confirmation prompt
         - All API calls go through pkg/client via newClient()
-        - parseID() for sub-resource IDs; resolveStackID() for stack-instance commands
+        - parseID() for sub-resource IDs; resolveStackID() (and the
+          resolveXxxID family more broadly) for name-or-ID resolution.
+          resolveXxxID intentionally short-circuits via looksLikeID before
+          falling back to a list+filter — do NOT suggest replacing this
+          short-circuit with parseID(); it would force an extra API call
+          on every command invocation that already has the ID.
 
     - path: "cli/pkg/client/**"
       instructions: |
@@ -36,6 +60,10 @@ reviews:
         - Non-2xx responses are returned as *APIError (decoded from {"error":"..."} body)
         - The do() method handles all non-2xx uniformly; endpoint-specific structs are
           only populated on 200 responses
+        - Query parameters on POST endpoints (e.g. ?dry_run=true on the
+          cleanup-policy run route) are appended to the path string — the
+          do() implementation uses url.Parse + ResolveReference which
+          preserves RawQuery cleanly. This is intentional, not a bug.
 
     - path: "cli/pkg/output/**"
       instructions: |
@@ -56,10 +84,18 @@ reviews:
         - Every field must have both json: and yaml: struct tags
         - All ID fields are string, not int/uint
         - Resource structs embed Base; request/response-only structs do not
-        - Update request structs use pointer fields for optional fields
-        - Every exported type must have a godoc comment stating the endpoint it corresponds to
-          and when fields are populated vs zero-valued (especially status/error fields)
-        - Structs only populated on HTTP 200 must state that explicitly in the docstring
+        - Update request structs: shape depends on backend handler semantics.
+          * Partial-update backends (handler reads existing, decodes over it):
+            pointer + omitempty fields (e.g. UpdateClusterRequest).
+          * Full-upsert backends (handler decodes into a fresh struct and
+            overwrites): plain value fields, no omitempty on bools
+            (e.g. UpdateCleanupPolicyRequest). Document the full-upsert
+            contract in the struct godoc.
+          Do NOT suggest a pointer-field refactor without first checking
+          the backend handler.
+        - Every exported type must have a godoc comment stating the endpoint
+          it corresponds to and when fields are populated vs zero-valued.
+        - Structs only populated on HTTP 200 must state that explicitly.
 
     - path: "cli/**_test.go"
       instructions: |
@@ -71,6 +107,32 @@ reviews:
         - Quiet-mode tests must assert names/identifiers only and assert.NotContains for
           table headers (NAME, STATUS, etc.)
         - Table-output tests assert header presence; JSON/YAML tests unmarshal and check fields
+        - Do NOT suggest converting scenario tests (different mock state,
+          different stdin plumbing, CRUD sequences) into table-driven form.
+          The tests.instructions.md "When NOT to use table-driven tests"
+          section documents which cases stay as separate Test* functions.
+
+    - path: "cli/test/integration/**"
+      instructions: |
+        Integration tests run in-process against a mock server.
+        - cmd.SetArgs/Execute calls share cobra's package-global flag state
+          across calls within one test. ResetFlagsForTest() only resets the
+          ROOT persistent flags (--output/--quiet/--api-url/etc.), NOT
+          subcommand flags like --dry-run.
+        - Tests that mix --dry-run states must either pass --dry-run=false
+          explicitly, run the false case first, or call the test-only
+          resetFlag helper. Do NOT suggest "just toggle the flag" — flag
+          leakage between Execute() calls is a documented gotcha.
+
+    - path: "cli/test/e2e/**"
+      instructions: |
+        E2E tests build and exec the stackctl binary against a mock server.
+        - testing.Short() skip is mandatory.
+        - Use runStackctl() / runStackctlWithStdin() — never spawn the
+          binary directly via exec.Command.
+        - Mock servers that parse /:id/<action> paths MUST reject unknown
+          actions with 404 before falling through to PUT/DELETE handlers,
+          to prevent /:id/<garbage> from silently mutating /:id.
 
   # Enable all severity levels
   high_level_summary: true

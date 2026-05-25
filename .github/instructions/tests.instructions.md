@@ -10,6 +10,17 @@ applyTo: "cli/**_test.go"
 - `cmd/` tests must NOT use `t.Parallel()` — they mutate package-level globals (`cfg`, `printer`, `flagAPIURL`)
 - Capture range variable: `tt := tt` inside the loop (only needed with `t.Parallel()`)
 
+### When NOT to use table-driven tests
+Table-driven structure is the right shape when cases share the same setup and differ only in inputs/expectations (e.g. parsing, validation, name-or-ID resolution).
+
+Do NOT refactor scenario tests into a table when cases:
+- exercise meaningfully different mock-server state or seed data
+- need distinct stdin/stderr plumbing (e.g. confirm/decline interactive prompts)
+- combine different flag sets or run different sequences of commands
+- are CRUD-round-trip tests where each step depends on the previous one
+
+These cases stay clearer as separate `func TestX_Scenario` blocks. Reviewers that reflexively suggest "convert to table-driven" on heterogeneous scenarios are wrong here — push back with the scenario-difference reason.
+
 ## API Mocking
 Always use `httptest.NewServer` — never call a real API in unit tests. Live-backend tests belong in `cli/test/live/` and must be opt-in via build tag or env var.
 
