@@ -117,6 +117,14 @@ func startCleanupPolicyMockServer(t *testing.T, state *cleanupPolicyMockState) *
 				return
 			}
 
+			// Reject any other action segment so /:id/<unknown> doesn't fall
+			// through to PUT/DELETE on the base policy.
+			if action != "" {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "unknown action: " + action})
+				return
+			}
+
 			switch r.Method {
 			case http.MethodPut:
 				if !exists {

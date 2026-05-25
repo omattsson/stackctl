@@ -745,6 +745,9 @@ type CreateCleanupPolicyRequest struct {
 // POST /api/v1/admin/cleanup-policies/:id/run. Mirrors backend
 // scheduler.CleanupResult.
 //
+// Population: only returned on HTTP 200. On non-2xx the client surfaces an
+// APIError and the result slice is left nil by the caller.
+//
 // Field semantics:
 //   - Status — "success" (action applied), "error" (action attempted and
 //     failed), or "dry_run" (matched, no action taken). Callers should treat

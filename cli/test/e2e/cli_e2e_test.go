@@ -2116,6 +2116,16 @@ func startE2ECleanupPolicyMockServer(t *testing.T) *httptest.Server {
 				return
 			}
 
+			// If the path carried an action segment we didn't explicitly handle
+			// (e.g. /:id/unknown), reject before falling through to PUT/DELETE
+			// on the base policy — otherwise the mock would silently mutate
+			// /:id when the caller asked for /:id/<something-else>.
+			if action != "" {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "unknown action: " + action})
+				return
+			}
+
 			switch r.Method {
 			case http.MethodPut:
 				if !exists {
