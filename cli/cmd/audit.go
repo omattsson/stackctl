@@ -143,7 +143,7 @@ Examples:
   stackctl audit log export                       # JSON to stdout
   stackctl audit log export --format csv > log.csv
   stackctl audit log export --format csv --output-file log.csv
-  stackctl audit log export --since 7d --format csv --output-file weekly.csv`,
+  stackctl audit log export --since 168h --format csv --output-file weekly.csv`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format := strings.ToLower(strings.TrimSpace(auditFlagFormat))
