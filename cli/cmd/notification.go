@@ -60,6 +60,12 @@ Examples:
   stackctl notification list --quiet`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if notifFlagLimit < 0 {
+			return fmt.Errorf("--limit must be >= 0")
+		}
+		if notifFlagOffset < 0 {
+			return fmt.Errorf("--offset must be >= 0")
+		}
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -226,6 +232,13 @@ Examples:
 		}
 
 		if printer.Quiet {
+			// Documented quiet-mode exception: notification preferences are
+			// keyed by (user_id, event_type) server-side, so EventType is the
+			// stable functional identifier — the UUID `ID` is opaque database
+			// state that changes when a row is recreated and is useless for
+			// scripting ("disable stack.deploy.failed" rather than "disable
+			// 7f3c…"). Listed in .coderabbit.yaml alongside the other docu-
+			// mented exceptions (cluster nodes/namespaces, orphaned list).
 			for _, p := range prefs {
 				fmt.Fprintln(printer.Writer, p.EventType)
 			}
@@ -318,6 +331,7 @@ Examples:
 		}
 
 		if printer.Quiet {
+			// Same documented quiet-mode exception as prefs get above.
 			for _, p := range updated {
 				fmt.Fprintln(printer.Writer, p.EventType)
 			}

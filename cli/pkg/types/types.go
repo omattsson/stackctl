@@ -364,11 +364,22 @@ type PaginatedNotifications struct {
 	UnreadCount   int64          `json:"unread_count" yaml:"unread_count"`
 }
 
-// NotificationPreference is one row in the user's notification preferences.
+// NotificationPreference is one row in the notification-preference payload
+// used by GET /api/v1/notifications/preferences and PUT /api/v1/notifications/preferences.
 // Mirrors backend models.NotificationPreference.
 //
-// The Channel field is optional in PUT requests — the backend defaults it
-// to "in_app" when omitted. On GET responses Channel is always populated.
+// Population: returned on HTTP 200 from GET and PUT. On non-2xx the client
+// surfaces an APIError and callers should treat the value as zero-valued.
+//
+// Field semantics:
+//   - EventType is required and always populated on GET/PUT responses;
+//     forms the primary key with UserID server-side.
+//   - Enabled is required and always populated (default true on first PUT).
+//   - Channel is OPTIONAL on PUT — backend defaults to "in_app" when the
+//     field is empty. Always populated on GET responses.
+//   - ID and UserID are populated on GET/PUT responses; they may be omitted
+//     in PUT request bodies (the backend keys on EventType + the
+//     authenticated user, not on the wire ID).
 //
 // Field declaration order is alphabetical by json tag (see Notification).
 type NotificationPreference struct {

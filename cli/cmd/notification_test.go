@@ -191,6 +191,36 @@ func TestNotificationCountCmd_JSONOutput(t *testing.T) {
 	assert.Equal(t, int64(7), got.UnreadCount)
 }
 
+func TestNotificationCountCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.UnreadCountResponse{UnreadCount: 7})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	require.NoError(t, notificationCountCmd.RunE(notificationCountCmd, []string{}))
+	assert.Contains(t, buf.String(), "unread_count: 7")
+}
+
+// TestNotificationCountCmd_QuietOutput documents that --quiet on `count`
+// falls through to the scalar table path (a single integer). There is no
+// list of identifiers to suppress — and a count IS already the shell-
+// scriptable form — so it behaves identically to default table mode.
+func TestNotificationCountCmd_QuietOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.UnreadCountResponse{UnreadCount: 7})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	require.NoError(t, notificationCountCmd.RunE(notificationCountCmd, []string{}))
+	assert.Equal(t, "7", strings.TrimSpace(buf.String()))
+}
+
 // ---------- notification read ----------
 
 func TestNotificationReadCmd_Success(t *testing.T) {
@@ -205,6 +235,20 @@ func TestNotificationReadCmd_Success(t *testing.T) {
 	buf := setupStackTestCmd(t, server.URL)
 	require.NoError(t, notificationReadCmd.RunE(notificationReadCmd, []string{"n1"}))
 	assert.Contains(t, buf.String(), "Marked notification n1 as read")
+}
+
+func TestNotificationReadCmd_QuietPrintsID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	require.NoError(t, notificationReadCmd.RunE(notificationReadCmd, []string{"n1"}))
+	assert.Equal(t, "n1", strings.TrimSpace(buf.String()))
+	assert.NotContains(t, buf.String(), "Marked")
 }
 
 func TestNotificationReadCmd_404(t *testing.T) {
@@ -236,6 +280,23 @@ func TestNotificationReadAllCmd_Success(t *testing.T) {
 	assert.Contains(t, buf.String(), "Marked all notifications as read")
 }
 
+// TestNotificationReadAllCmd_QuietSilent locks in the documented quiet
+// contract for read-all: there's no list of identifiers to emit, so quiet
+// mode suppresses the human-readable confirmation entirely. The empty
+// stdout is the signal — scripts rely on $? for success.
+func TestNotificationReadAllCmd_QuietSilent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	require.NoError(t, notificationReadAllCmd.RunE(notificationReadAllCmd, []string{}))
+	assert.Empty(t, strings.TrimSpace(buf.String()))
+}
+
 // ---------- notification prefs get ----------
 
 func TestNotificationPrefsGetCmd_TableOutput(t *testing.T) {
@@ -254,6 +315,38 @@ func TestNotificationPrefsGetCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "EVENT TYPE")
 	assert.Contains(t, out, "stack.deploy.failed")
 	assert.Contains(t, out, "in_app")
+}
+
+func TestNotificationPrefsGetCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(samplePrefs())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	require.NoError(t, notificationPrefsGetCmd.RunE(notificationPrefsGetCmd, []string{}))
+
+	var got []types.NotificationPreference
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 2)
+	assert.Equal(t, "stack.deploy.failed", got[0].EventType)
+}
+
+func TestNotificationPrefsGetCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(samplePrefs())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	require.NoError(t, notificationPrefsGetCmd.RunE(notificationPrefsGetCmd, []string{}))
+	out := buf.String()
+	assert.Contains(t, out, "event_type: stack.deploy.failed")
+	assert.Contains(t, out, "channel: in_app")
 }
 
 func TestNotificationPrefsGetCmd_QuietPrintsEventTypes(t *testing.T) {
@@ -314,6 +407,112 @@ func TestNotificationPrefsSetCmd_FromFile(t *testing.T) {
 	require.NoError(t, json.Unmarshal(gotBody, &sent))
 	require.Len(t, sent, 1)
 	assert.Equal(t, "stack.deploy.failed", sent[0].EventType)
+}
+
+func TestNotificationPrefsSetCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(samplePrefs())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetNotificationFlagsForTest()
+	defer resetNotificationFlagsForTest()
+	printer.Format = output.FormatJSON
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prefs.json")
+	require.NoError(t, os.WriteFile(path, []byte(`[{"event_type":"x","enabled":true}]`), 0600))
+	notifPrefsFlagFile = path
+
+	require.NoError(t, notificationPrefsSetCmd.RunE(notificationPrefsSetCmd, []string{}))
+	var got []types.NotificationPreference
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 2)
+	// JSON mode must return the server's updated list, NOT the "Updated N…" message.
+	assert.NotContains(t, buf.String(), "Updated")
+}
+
+func TestNotificationPrefsSetCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(samplePrefs())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetNotificationFlagsForTest()
+	defer resetNotificationFlagsForTest()
+	printer.Format = output.FormatYAML
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prefs.json")
+	require.NoError(t, os.WriteFile(path, []byte(`[{"event_type":"x","enabled":true}]`), 0600))
+	notifPrefsFlagFile = path
+
+	require.NoError(t, notificationPrefsSetCmd.RunE(notificationPrefsSetCmd, []string{}))
+	out := buf.String()
+	assert.Contains(t, out, "event_type: stack.deploy.failed")
+	assert.NotContains(t, out, "Updated")
+}
+
+func TestNotificationPrefsSetCmd_QuietPrintsEventTypes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(samplePrefs())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetNotificationFlagsForTest()
+	defer resetNotificationFlagsForTest()
+	printer.Quiet = true
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prefs.json")
+	require.NoError(t, os.WriteFile(path, []byte(`[{"event_type":"x","enabled":true}]`), 0600))
+	notifPrefsFlagFile = path
+
+	require.NoError(t, notificationPrefsSetCmd.RunE(notificationPrefsSetCmd, []string{}))
+	got := strings.TrimSpace(buf.String())
+	assert.Equal(t, "stack.deploy.failed\nstack.deploy.succeeded", got)
+}
+
+// ---------- list pagination validation ----------
+
+func TestNotificationListCmd_NegativeLimitRejected(t *testing.T) {
+	var called bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	resetNotificationFlagsForTest()
+	defer resetNotificationFlagsForTest()
+	notifFlagLimit = -1
+	err := notificationListCmd.RunE(notificationListCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--limit")
+	assert.False(t, called, "API must not be called when --limit is negative")
+}
+
+func TestNotificationListCmd_NegativeOffsetRejected(t *testing.T) {
+	var called bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	resetNotificationFlagsForTest()
+	defer resetNotificationFlagsForTest()
+	notifFlagOffset = -5
+	err := notificationListCmd.RunE(notificationListCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--offset")
+	assert.False(t, called, "API must not be called when --offset is negative")
 }
 
 func TestNotificationPrefsSetCmd_RequiresFlag(t *testing.T) {
