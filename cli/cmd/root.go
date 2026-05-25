@@ -109,6 +109,13 @@ func SetOut(w io.Writer) {
 	rootCmd.SetOut(w)
 }
 
+// SetIn redirects the root command input reader. Subcommands that read
+// passwords or confirmation responses use cmd.InOrStdin(), which inherits
+// the root setting. Intended for integration tests.
+func SetIn(r io.Reader) {
+	rootCmd.SetIn(r)
+}
+
 // ResetFlagsForTest resets all persistent flag variables to their default
 // values. Cobra does not reset flags between in-process Execute calls, so
 // integration tests that mix flag values across subtests must call this

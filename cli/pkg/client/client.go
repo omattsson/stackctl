@@ -1270,3 +1270,61 @@ func (c *Client) RunCleanupPolicy(id string, dryRun bool) ([]types.CleanupResult
 	}
 	return results, nil
 }
+
+// Register creates a new user account. Requires an authenticated caller —
+// the backend rejects with 403 when self-registration is disabled and the
+// caller is not an admin. The Role and ServiceAccount fields on the request
+// are silently overridden by the server unless the caller is admin.
+//
+// @see POST /api/v1/auth/register
+func (c *Client) Register(req *types.RegisterRequest) (*types.User, error) {
+	var user types.User
+	if err := c.Post("/api/v1/auth/register", req, &user); err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// ListUsers returns every user account on the server. Admin-only.
+//
+// @see GET /api/v1/users
+func (c *Client) ListUsers() ([]types.User, error) {
+	var users []types.User
+	if err := c.Get("/api/v1/users", &users); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// DeleteUser permanently removes a user account by ID. Admin-only. The
+// backend rejects with 400 when the caller tries to delete its own account.
+//
+// @see DELETE /api/v1/users/:id
+func (c *Client) DeleteUser(id string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/users/%s", id))
+}
+
+// DisableUser marks a user account as disabled. All active sessions and API
+// keys are revoked server-side. Admin-only. The backend rejects with 400
+// when the caller tries to disable its own account.
+//
+// @see PUT /api/v1/users/:id/disable
+func (c *Client) DisableUser(id string) error {
+	return c.Put(fmt.Sprintf("/api/v1/users/%s/disable", id), nil, nil)
+}
+
+// EnableUser re-enables a previously disabled user account. Admin-only.
+//
+// @see PUT /api/v1/users/:id/enable
+func (c *Client) EnableUser(id string) error {
+	return c.Put(fmt.Sprintf("/api/v1/users/%s/enable", id), nil, nil)
+}
+
+// ResetUserPassword sets a new password for a local user account. Admin-only.
+// The backend rejects with 400 for passwords shorter than 8 characters and
+// for users with a non-local AuthProvider.
+//
+// @see PUT /api/v1/users/:id/password
+func (c *Client) ResetUserPassword(id, password string) error {
+	return c.Put(fmt.Sprintf("/api/v1/users/%s/password", id), &types.ResetPasswordRequest{Password: password}, nil)
+}

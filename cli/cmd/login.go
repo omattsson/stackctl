@@ -68,10 +68,15 @@ Environment variables:
 		}
 
 		if password == "" {
+			// loginCmd intentionally tolerates non-TTY stdin without a flag
+			// for backward compatibility — scripts have been piping passwords
+			// to `stackctl login` since day one. New destructive commands
+			// (auth register, user reset-password) use the stricter
+			// readPassword helper which requires --password-stdin.
 			fmt.Fprint(cmd.ErrOrStderr(), "Password: ")
 			if f, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 				raw, err := term.ReadPassword(int(f.Fd()))
-				fmt.Fprintln(cmd.ErrOrStderr()) // newline after hidden input
+				fmt.Fprintln(cmd.ErrOrStderr())
 				if err != nil {
 					return fmt.Errorf("reading password: %w", err)
 				}
@@ -320,12 +325,124 @@ func parseJWTExpiry(token string) (time.Time, error) {
 	return time.Unix(claims.Exp, 0), nil
 }
 
+// readPassword reads a password from stdin. When fromStdin is true the
+// caller is opting into pipe-based input — read the full piped line(s) and
+// strip the trailing newline. Otherwise, prompt on stderr and read silently
+// from the terminal.
+//
+// If stdin is NOT a TTY and the caller didn't pass --password-stdin, this
+// returns an error rather than silently slurping inherited/redirected stdin
+// (which would proceed past the visible prompt with arbitrary content).
+// Mirrors the `docker login --password-stdin` contract.
+//
+// Tests inject input via cmd.SetIn(strings.NewReader(...)); they must pass
+// fromStdin=true to opt into the line-mode path.
+func readPassword(cmd *cobra.Command, prompt string, fromStdin bool) (string, error) {
+	if !fromStdin {
+		f, ok := cmd.InOrStdin().(*os.File)
+		if !ok || !term.IsTerminal(int(f.Fd())) {
+			return "", fmt.Errorf("stdin is not a terminal; use --password-stdin to read the password from a pipe or file")
+		}
+		fmt.Fprint(cmd.ErrOrStderr(), prompt)
+		raw, err := term.ReadPassword(int(f.Fd()))
+		fmt.Fprintln(cmd.ErrOrStderr()) // newline after hidden input
+		if err != nil {
+			return "", fmt.Errorf("reading password: %w", err)
+		}
+		return string(raw), nil
+	}
+	reader := bufio.NewReader(cmd.InOrStdin())
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("reading password: %w", err)
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+var authCmd = &cobra.Command{
+	Use:   "auth",
+	Short: "Authentication commands",
+	Long: `Authentication commands.
+
+Note: the day-to-day verbs login/logout/whoami live at the top level
+(stackctl login, stackctl logout, stackctl whoami) for ergonomics. The
+'auth' group hosts the less-frequent admin-only register flow.`,
+}
+
+var authRegisterCmd = &cobra.Command{
+	Use:   "register",
+	Short: "Register a new user account (admin only unless self-registration is enabled)",
+	Long: `Create a new user account on the server.
+
+The endpoint requires an authenticated caller. Non-admin callers can only
+register if the server has self-registration enabled. Only admin callers can
+set --role or --service-account (the server silently overrides them for
+non-admin callers).
+
+The password is read interactively by default. Use --password-stdin to read
+the password from stdin (recommended for scripting); the entire piped
+content is treated as the password with the trailing newline stripped.
+
+Note: the backend's register endpoint does not accept an email address.
+Email-on-create is not supported at this time.
+
+Examples:
+  stackctl auth register --username alice
+  stackctl auth register --username svc-ci --service-account --role user \
+      --password-stdin < /run/secrets/svc-ci.password`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		username, _ := cmd.Flags().GetString("username")
+		if username == "" {
+			return fmt.Errorf("--username is required")
+		}
+		displayName, _ := cmd.Flags().GetString("display-name")
+		role, _ := cmd.Flags().GetString("role")
+		serviceAccount, _ := cmd.Flags().GetBool("service-account")
+		fromStdin, _ := cmd.Flags().GetBool("password-stdin")
+
+		password, err := readPassword(cmd, "Password: ", fromStdin)
+		if err != nil {
+			return err
+		}
+		if len(password) < 8 {
+			return fmt.Errorf("password must be at least 8 characters")
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		user, err := c.Register(&types.RegisterRequest{
+			Username:       username,
+			Password:       password,
+			DisplayName:    displayName,
+			Role:           role,
+			ServiceAccount: serviceAccount,
+		})
+		if err != nil {
+			return err
+		}
+		return printUser(user)
+	},
+}
+
 func init() {
 	loginCmd.Flags().String("username", "", "Username for authentication")
 	loginCmd.Flags().String("password", "", "Password for authentication")
 	loginCmd.Flags().Bool("sso", false, "Authenticate via SSO (opens browser)")
 
+	authRegisterCmd.Flags().String("username", "", "Username for the new account (required)")
+	authRegisterCmd.Flags().String("display-name", "", "Optional display name; defaults to username on the server")
+	authRegisterCmd.Flags().String("role", "", "Role to assign (admin only; ignored from non-admin callers)")
+	authRegisterCmd.Flags().Bool("service-account", false, "Create a service account (admin only)")
+	authRegisterCmd.Flags().Bool("password-stdin", false, "Read the password from stdin (one line, trailing newline stripped)")
+	_ = authRegisterCmd.MarkFlagRequired("username")
+
+	authCmd.AddCommand(authRegisterCmd)
+
 	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(logoutCmd)
 	rootCmd.AddCommand(whoamiCmd)
+	rootCmd.AddCommand(authCmd)
 }
