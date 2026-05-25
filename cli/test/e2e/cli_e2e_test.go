@@ -2449,7 +2449,10 @@ func startE2EAPIKeyMockServer(t *testing.T) *httptest.Server {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 			return
 		}
-		parts := strings.SplitN(trimmed, "/", 3)
+		// Use unbounded Split so a request like /users/u/api-keys/k/garbage
+		// yields len(parts) == 4 and reaches the unknown-path 404 branch
+		// below, rather than being absorbed as a delete on key-id "k/garbage".
+		parts := strings.Split(trimmed, "/")
 		if len(parts) < 2 || parts[1] != "api-keys" {
 			w.WriteHeader(http.StatusNotFound)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})

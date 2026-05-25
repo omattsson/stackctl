@@ -244,14 +244,17 @@ Examples:
 }
 
 // resolveAPIKeyUserID returns the user ID to use for the api-keys/* request:
-// the --user flag value when set, otherwise the caller's own user ID
-// resolved via GET /api/v1/auth/me. The latter is cached for the duration
-// of a single command invocation but not across invocations.
+// the --user flag value when explicitly set, otherwise the caller's own
+// user ID resolved via GET /api/v1/auth/me. The latter is cached for the
+// duration of a single command invocation but not across invocations.
 //
-// When --user is set, it's run through parseID() to trim whitespace and
-// reject empty values before going into a /users/:id/... path.
+// "Explicitly set" is detected with cmd.Flags().Changed("user"); passing
+// --user with a whitespace-only value (e.g. --user "   ") routes through
+// parseID() which returns a clear empty-ID error rather than silently
+// falling back to /auth/me.
 func resolveAPIKeyUserID(cmd *cobra.Command, c *client.Client) (string, error) {
-	if u, _ := cmd.Flags().GetString("user"); strings.TrimSpace(u) != "" {
+	if cmd.Flags().Changed("user") {
+		u, _ := cmd.Flags().GetString("user")
 		return parseID(u)
 	}
 	me, err := c.Whoami()
