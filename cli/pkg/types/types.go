@@ -318,16 +318,21 @@ type PaginatedAuditLogs struct {
 // rejects any other format with HTTP 400. The CLI translates --since/--until
 // shorthand (e.g. "24h") to absolute RFC3339 timestamps before populating this
 // struct.
+//
+// The struct is never sent as a body — fields are flattened to URL query
+// parameters by client.auditLogParamsToQuery. The json/yaml tags are present
+// for consistency with the cli/pkg/types convention (every exported field has
+// both tags) and so the struct can be safely printed by debugging code.
 type AuditLogListParams struct {
-	StartDate  *time.Time
-	EndDate    *time.Time
-	UserID     string
-	EntityType string
-	EntityID   string
-	Action     string
-	Cursor     string
-	Limit      int
-	Offset     int
+	StartDate  *time.Time `json:"start_date,omitempty" yaml:"start_date,omitempty"`
+	EndDate    *time.Time `json:"end_date,omitempty" yaml:"end_date,omitempty"`
+	UserID     string     `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+	EntityType string     `json:"entity_type,omitempty" yaml:"entity_type,omitempty"`
+	EntityID   string     `json:"entity_id,omitempty" yaml:"entity_id,omitempty"`
+	Action     string     `json:"action,omitempty" yaml:"action,omitempty"`
+	Cursor     string     `json:"cursor,omitempty" yaml:"cursor,omitempty"`
+	Limit      int        `json:"limit,omitempty" yaml:"limit,omitempty"`
+	Offset     int        `json:"offset,omitempty" yaml:"offset,omitempty"`
 }
 
 // CreateStackRequest is the request body for POST /api/v1/stack-instances.

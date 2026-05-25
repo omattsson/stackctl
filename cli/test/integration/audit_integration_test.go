@@ -145,8 +145,18 @@ func TestAuditCobra_ListAndExport(t *testing.T) {
 
 	var buf bytes.Buffer
 
+	// resetAll wraps the standard root flag reset with the audit-specific
+	// reset because ResetFlagsForTest only touches rootCmd's persistent
+	// flags — the persistent filter flags on `audit log` (--user/--since/…)
+	// would otherwise leak from one Execute() call to the next within a
+	// single test process.
+	resetAll := func() {
+		cmd.ResetFlagsForTest()
+		cmd.ResetAuditFlagsForTest()
+	}
+
 	// audit log list — default table output
-	cmd.ResetFlagsForTest()
+	resetAll()
 	buf.Reset()
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"audit", "log", "list"})
@@ -156,15 +166,17 @@ func TestAuditCobra_ListAndExport(t *testing.T) {
 
 	// audit log list --user u-1 (filter forwarding; we only assert success
 	// here — the unit tests verify the wire format).
-	cmd.ResetFlagsForTest()
+	resetAll()
 	buf.Reset()
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"audit", "log", "list", "--user", "u-1", "--since", "24h"})
 	require.NoError(t, cmd.Execute())
 
-	// audit log export → CSV to file
+	// audit log export → CSV to file. The previous Execute set --user and
+	// --since; without resetAll, those would persist into the export call
+	// and silently filter the CSV server-side.
 	csvPath := filepath.Join(t.TempDir(), "audit.csv")
-	cmd.ResetFlagsForTest()
+	resetAll()
 	buf.Reset()
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"audit", "log", "export", "--format", "csv", "--output-file", csvPath})
@@ -193,6 +205,7 @@ func TestAuditCobra_ExportForbiddenForDevops(t *testing.T) {
 
 	var buf bytes.Buffer
 	cmd.ResetFlagsForTest()
+	cmd.ResetAuditFlagsForTest()
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"audit", "log", "export", "--format", "json"})
 	err := cmd.Execute()

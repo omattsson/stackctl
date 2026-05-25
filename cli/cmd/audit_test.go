@@ -78,6 +78,7 @@ func TestParseTimeFlag(t *testing.T) {
 		{name: "empty_after_trim", input: "   ", wantErr: true},
 	}
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := parseTimeFlag(tc.input, now)
 			if tc.wantErr {

@@ -56,9 +56,10 @@ var auditLogListCmd = &cobra.Command{
 	Long: `List audit log entries with optional filters and pagination.
 
 Time filters (--since / --until) accept either an absolute RFC3339 timestamp
-(e.g. 2026-05-01T00:00:00Z) or a Go duration relative to now (e.g. 24h, 7d).
-Relative values are negated and added to time.Now() before being sent to the
-backend as RFC3339.
+(e.g. 2026-05-01T00:00:00Z) or a Go duration relative to now (e.g. 24h, 168h
+for 7 days). Day/week units ("7d", "1w") are NOT accepted — Go's standard
+time.ParseDuration only understands ns/us/ms/s/m/h. Relative values are
+negated and added to time.Now() before being sent to the backend as RFC3339.
 
 Examples:
   stackctl audit log list
@@ -306,10 +307,16 @@ func init() {
 	rootCmd.AddCommand(auditCmd)
 }
 
-// resetAuditFlagsForTest clears the package-level audit flag vars between
-// in-process Cobra invocations in tests. Subcommand flags are NOT reset by
-// ResetFlagsForTest (which only handles persistent flags on rootCmd).
-func resetAuditFlagsForTest() {
+// ResetAuditFlagsForTest clears the package-level audit flag vars between
+// in-process Cobra invocations in tests. The persistent filter flags on
+// `audit log` are NOT reset by ResetFlagsForTest (which only handles
+// persistent flags on rootCmd), so integration tests that exercise multiple
+// audit subcommands within one process MUST call this between Execute()s to
+// avoid filter leakage from a previous call.
+//
+// Exported so the integration_test package can call it; the lowercase alias
+// remains available within the cmd package itself.
+func ResetAuditFlagsForTest() {
 	auditFlagUser = ""
 	auditFlagAction = ""
 	auditFlagEntityType = ""
@@ -322,4 +329,8 @@ func resetAuditFlagsForTest() {
 	auditFlagFormat = "json"
 	auditFlagOutputFile = ""
 }
+
+// resetAuditFlagsForTest is the in-package alias retained so existing cmd-
+// package test files don't need updating.
+func resetAuditFlagsForTest() { ResetAuditFlagsForTest() }
 
