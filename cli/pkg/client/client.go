@@ -1328,3 +1328,44 @@ func (c *Client) EnableUser(id string) error {
 func (c *Client) ResetUserPassword(id, password string) error {
 	return c.Put(fmt.Sprintf("/api/v1/users/%s/password", id), &types.ResetPasswordRequest{Password: password}, nil)
 }
+
+// ListAPIKeys returns every API key configured for the given user. Callers
+// must be the target user OR have the admin role; the backend returns 403
+// otherwise. The raw key value is NEVER returned by this endpoint — only
+// the prefix is available for visual identification.
+//
+// @see GET /api/v1/users/:id/api-keys
+func (c *Client) ListAPIKeys(userID string) ([]types.APIKey, error) {
+	var keys []types.APIKey
+	if err := c.Get(fmt.Sprintf("/api/v1/users/%s/api-keys", userID), &keys); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+// CreateAPIKey creates a new API key for the given user. Callers must be the
+// target user OR have the admin role.
+//
+// The returned response carries the plaintext key in RawKey (prefixed with
+// "sk_") — this is the ONLY time the raw key is available and it cannot be
+// retrieved again. Callers must surface it immediately and must not persist
+// it to config files. The client's debug logging is configured to log only
+// the request line and a small set of HEADERS (with masking), never the
+// request or response body, so debug-mode runs do not leak the key.
+//
+// @see POST /api/v1/users/:id/api-keys
+func (c *Client) CreateAPIKey(userID string, req *types.CreateAPIKeyRequest) (*types.CreateAPIKeyResponse, error) {
+	var resp types.CreateAPIKeyResponse
+	if err := c.Post(fmt.Sprintf("/api/v1/users/%s/api-keys", userID), req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// DeleteAPIKey revokes the given API key. Callers must be the target user OR
+// have the admin role; the backend returns 403 otherwise.
+//
+// @see DELETE /api/v1/users/:id/api-keys/:keyId
+func (c *Client) DeleteAPIKey(userID, keyID string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/users/%s/api-keys/%s", userID, keyID))
+}
