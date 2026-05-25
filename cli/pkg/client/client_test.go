@@ -3251,6 +3251,173 @@ func TestAuditLogsClient_APIErrorMatrix(t *testing.T) {
 	}
 }
 
+// ---------- notifications ----------
+
+func TestListNotifications_NoFilters(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/notifications", r.URL.Path)
+		assert.Empty(t, r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.PaginatedNotifications{
+			Notifications: []types.Notification{{ID: "n1", Type: "stack.deploy.failed"}},
+			Total:         1, UnreadCount: 1,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.ListNotifications(NotificationListParams{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), got.UnreadCount)
+	require.Len(t, got.Notifications, 1)
+	assert.Equal(t, "n1", got.Notifications[0].ID)
+}
+
+func TestListNotifications_ForwardsFilters(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		assert.Equal(t, "true", q.Get("unread_only"))
+		assert.Equal(t, "50", q.Get("limit"))
+		assert.Equal(t, "10", q.Get("offset"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	_, err := c.ListNotifications(NotificationListParams{UnreadOnly: true, Limit: 50, Offset: 10})
+	require.NoError(t, err)
+}
+
+func TestCountUnreadNotifications_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/notifications/count", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"unread_count":42}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.CountUnreadNotifications()
+	require.NoError(t, err)
+	assert.Equal(t, int64(42), got)
+}
+
+func TestMarkNotificationAsRead_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/notifications/n1/read", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.MarkNotificationAsRead("n1"))
+}
+
+func TestMarkAllNotificationsAsRead_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/notifications/read-all", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.MarkAllNotificationsAsRead())
+}
+
+func TestGetNotificationPreferences_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/notifications/preferences", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.NotificationPreference{
+			{EventType: "stack.deploy.failed", Enabled: true, Channel: "in_app"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.GetNotificationPreferences()
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "stack.deploy.failed", got[0].EventType)
+}
+
+func TestUpdateNotificationPreferences_RoundTrip(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/notifications/preferences", r.URL.Path)
+		var got []types.NotificationPreference
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		require.Len(t, got, 1)
+		assert.Equal(t, "stack.deploy.failed", got[0].EventType)
+		assert.True(t, got[0].Enabled)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(got)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	updated, err := c.UpdateNotificationPreferences([]types.NotificationPreference{
+		{EventType: "stack.deploy.failed", Enabled: true, Channel: "in_app"},
+	})
+	require.NoError(t, err)
+	require.Len(t, updated, 1)
+}
+
+func TestNotificationsClient_APIErrorMatrix(t *testing.T) {
+	t.Parallel()
+	statuses := []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError}
+	calls := []struct {
+		name string
+		call func(c *Client) error
+	}{
+		{"List", func(c *Client) error { _, err := c.ListNotifications(NotificationListParams{}); return err }},
+		{"Count", func(c *Client) error { _, err := c.CountUnreadNotifications(); return err }},
+		{"MarkAsRead", func(c *Client) error { return c.MarkNotificationAsRead("n1") }},
+		{"MarkAllAsRead", func(c *Client) error { return c.MarkAllNotificationsAsRead() }},
+		{"GetPrefs", func(c *Client) error { _, err := c.GetNotificationPreferences(); return err }},
+		{"UpdatePrefs", func(c *Client) error {
+			_, err := c.UpdateNotificationPreferences([]types.NotificationPreference{{EventType: "x", Enabled: true}})
+			return err
+		}},
+	}
+	for _, call := range calls {
+		call := call
+		for _, status := range statuses {
+			status := status
+			t.Run(fmt.Sprintf("%s_%d", call.name, status), func(t *testing.T) {
+				t.Parallel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "x"})
+				}))
+				defer server.Close()
+				c := New(server.URL)
+				err := call.call(c)
+				require.Error(t, err)
+				var apiErr *APIError
+				require.ErrorAs(t, err, &apiErr)
+				assert.Equal(t, status, apiErr.StatusCode)
+			})
+		}
+	}
+}
+
 // ---------- shared values ----------
 
 func TestListSharedValues_Success(t *testing.T) {

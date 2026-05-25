@@ -335,6 +335,57 @@ type AuditLogListParams struct {
 	Offset     int        `json:"offset,omitempty" yaml:"offset,omitempty"`
 }
 
+// Notification is one in-app notification. Mirrors backend models.Notification.
+//
+// Population: only returned on HTTP 200 (list endpoint).
+//
+// Field declaration order is alphabetical by json tag so encoding/json
+// emits keys in stable alphabetical order — required for golden-file
+// JSON comparisons in tests. Do not reorder.
+type Notification struct {
+	CreatedAt  time.Time `json:"created_at" yaml:"created_at"`
+	EntityID   string    `json:"entity_id,omitempty" yaml:"entity_id,omitempty"`
+	EntityType string    `json:"entity_type,omitempty" yaml:"entity_type,omitempty"`
+	ID         string    `json:"id" yaml:"id"`
+	IsRead     bool      `json:"is_read" yaml:"is_read"`
+	Message    string    `json:"message" yaml:"message"`
+	Title      string    `json:"title" yaml:"title"`
+	Type       string    `json:"type" yaml:"type"`
+	UserID     string    `json:"user_id" yaml:"user_id"`
+}
+
+// PaginatedNotifications is the success-path response of GET /api/v1/notifications.
+// Mirrors backend models.PaginatedNotifications.
+//
+// Field declaration order is alphabetical by json tag (see Notification).
+type PaginatedNotifications struct {
+	Notifications []Notification `json:"notifications" yaml:"notifications"`
+	Total         int64          `json:"total" yaml:"total"`
+	UnreadCount   int64          `json:"unread_count" yaml:"unread_count"`
+}
+
+// NotificationPreference is one row in the user's notification preferences.
+// Mirrors backend models.NotificationPreference.
+//
+// The Channel field is optional in PUT requests — the backend defaults it
+// to "in_app" when omitted. On GET responses Channel is always populated.
+//
+// Field declaration order is alphabetical by json tag (see Notification).
+type NotificationPreference struct {
+	Channel   string `json:"channel,omitempty" yaml:"channel,omitempty"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	EventType string `json:"event_type" yaml:"event_type"`
+	ID        string `json:"id,omitempty" yaml:"id,omitempty"`
+	UserID    string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+}
+
+// UnreadCountResponse is the success-path response of GET /api/v1/notifications/count.
+// The endpoint returns a single key {"unread_count": N} rather than a wrapped
+// object — modelled as a struct so JSON/YAML decode cleanly.
+type UnreadCountResponse struct {
+	UnreadCount int64 `json:"unread_count" yaml:"unread_count"`
+}
+
 // CreateStackRequest is the request body for POST /api/v1/stack-instances.
 // It contains only the writable fields — server-owned fields like ID, owner,
 // namespace, status are excluded to avoid backend validation errors.
