@@ -43,6 +43,9 @@ reviews:
             cluster utilization → namespace names
             cluster health → derived status label (healthy/degraded/unknown)
             cluster test-connection → connection status string (success/error)
+            notification prefs get/set → event_type names (the (user_id,
+              event_type) tuple is the backend primary key; opaque UUID IDs
+              are useless for scripting like `prefs get -q | grep failed`)
         - Destructive commands require --yes flag and stderr confirmation prompt
         - All API calls go through pkg/client via newClient()
         - parseID() for sub-resource IDs; resolveStackID() (and the

@@ -2614,6 +2614,47 @@ func TestE2EAnalyticsOverviewJSONParses(t *testing.T) {
 	assert.Equal(t, 7, got.TotalTemplates)
 }
 
+// startE2ENotificationMockServer serves a deterministic notification list
+// so the e2e JSON contract can be diffed across runs.
+func startE2ENotificationMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/notifications":
+			_, _ = w.Write([]byte(
+				`{"notifications":[{"id":"n1","type":"stack.deploy.failed","title":"Deploy failed","is_read":false,"created_at":"2026-05-01T10:00:00Z","user_id":"u1"}],"total":1,"unread_count":1}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+		}
+	}))
+}
+
+// TestE2ENotificationListJSON proves `stackctl notification list -o json`
+// produces parseable JSON the operator can pipe to jq.
+func TestE2ENotificationListJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ENotificationMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, stderr, err := runStackctl(t, dir, "notification", "list", "-o", "json")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+
+	var got types.PaginatedNotifications
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, int64(1), got.UnreadCount)
+	require.Len(t, got.Notifications, 1)
+	assert.Equal(t, "stack.deploy.failed", got.Notifications[0].Type)
+}
+
 // startE2EAuditMockServer serves a deterministic audit log list and a CSV
 // export crafted to exercise CSV quoting rules (commas + newlines).
 func startE2EAuditMockServer(t *testing.T) *httptest.Server {

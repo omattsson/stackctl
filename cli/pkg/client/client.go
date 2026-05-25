@@ -1502,3 +1502,85 @@ func encodeQueryParams(params map[string]string) string {
 	}
 	return q.Encode()
 }
+
+// NotificationListParams holds the optional query parameters for
+// ListNotifications. Empty / zero fields are omitted from the wire request.
+type NotificationListParams struct {
+	UnreadOnly bool
+	Limit      int
+	Offset     int
+}
+
+// ListNotifications returns a page of the authenticated user's notifications.
+// Backend defaults: limit=20 (max 100), offset=0, unread_only=false.
+//
+// @see GET /api/v1/notifications
+func (c *Client) ListNotifications(p NotificationListParams) (*types.PaginatedNotifications, error) {
+	q := map[string]string{}
+	if p.UnreadOnly {
+		q["unread_only"] = "true"
+	}
+	if p.Limit > 0 {
+		q["limit"] = strconv.Itoa(p.Limit)
+	}
+	if p.Offset > 0 {
+		q["offset"] = strconv.Itoa(p.Offset)
+	}
+	var resp types.PaginatedNotifications
+	if err := c.GetWithQuery("/api/v1/notifications", q, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CountUnreadNotifications returns the unread count for badge display.
+//
+// @see GET /api/v1/notifications/count
+func (c *Client) CountUnreadNotifications() (int64, error) {
+	var resp types.UnreadCountResponse
+	if err := c.Get("/api/v1/notifications/count", &resp); err != nil {
+		return 0, err
+	}
+	return resp.UnreadCount, nil
+}
+
+// MarkNotificationAsRead marks a single notification as read. The backend
+// verifies ownership and returns 404 if the notification belongs to another
+// user (or does not exist).
+//
+// @see POST /api/v1/notifications/{id}/read
+func (c *Client) MarkNotificationAsRead(id string) error {
+	return c.Post(fmt.Sprintf("/api/v1/notifications/%s/read", id), nil, nil)
+}
+
+// MarkAllNotificationsAsRead marks every notification for the authenticated
+// user as read in a single request.
+//
+// @see POST /api/v1/notifications/read-all
+func (c *Client) MarkAllNotificationsAsRead() error {
+	return c.Post("/api/v1/notifications/read-all", nil, nil)
+}
+
+// GetNotificationPreferences returns the user's notification preferences.
+//
+// @see GET /api/v1/notifications/preferences
+func (c *Client) GetNotificationPreferences() ([]types.NotificationPreference, error) {
+	var prefs []types.NotificationPreference
+	if err := c.Get("/api/v1/notifications/preferences", &prefs); err != nil {
+		return nil, err
+	}
+	return prefs, nil
+}
+
+// UpdateNotificationPreferences sends an array of preference updates and
+// returns the full updated preference list on success. The backend rejects
+// the request if any element has an empty event_type.
+//
+// @see PUT /api/v1/notifications/preferences
+func (c *Client) UpdateNotificationPreferences(prefs []types.NotificationPreference) ([]types.NotificationPreference, error) {
+	var resp []types.NotificationPreference
+	if err := c.Put("/api/v1/notifications/preferences", prefs, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
