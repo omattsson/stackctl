@@ -51,6 +51,13 @@ reviews:
           falling back to a list+filter — do NOT suggest replacing this
           short-circuit with parseID(); it would force an extra API call
           on every command invocation that already has the ID.
+        - The Args field on cobra.Command is set ONLY when positional args
+          are required (e.g. Args: cobra.ExactArgs(1) for "delete <id>").
+          Commands that take no positional args (list, create with flags,
+          analytics subcommands, etc.) deliberately OMIT Args — matches
+          the established convention in clusterListCmd, templateListCmd,
+          userListCmd, etc. Do NOT suggest adding Args: cobra.NoArgs or
+          cobra.ExactArgs(0) to these commands.
 
     - path: "cli/pkg/client/**"
       instructions: |

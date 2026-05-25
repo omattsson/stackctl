@@ -227,6 +227,23 @@ func TestAnalyticsTemplatesCmd_JSONFieldOrderAlphabetical(t *testing.T) {
 	}
 }
 
+func TestAnalyticsTemplatesCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleAnalyticsTemplates())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	require.NoError(t, analyticsTemplatesCmd.RunE(analyticsTemplatesCmd, []string{}))
+
+	var got []types.TemplateStats
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 2)
+	assert.Equal(t, "nginx", got[0].TemplateName)
+}
+
 func TestAnalyticsTemplatesCmd_QuietOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -287,6 +304,23 @@ func TestAnalyticsUsersCmd_JSONOutput(t *testing.T) {
 	require.Len(t, got, 2)
 	assert.Equal(t, "alice", got[0].Username)
 	assert.Nil(t, got[1].LastActive, "users with no activity must serialize last_active as nil/absent")
+}
+
+func TestAnalyticsUsersCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleAnalyticsUsers())
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	require.NoError(t, analyticsUsersCmd.RunE(analyticsUsersCmd, []string{}))
+
+	var got []types.UserStats
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 2)
+	assert.Equal(t, "alice", got[0].Username)
 }
 
 func TestAnalyticsUsersCmd_QuietOutput(t *testing.T) {

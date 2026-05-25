@@ -3035,6 +3035,7 @@ func TestGetAnalyticsTemplates_Success(t *testing.T) {
 func TestGetAnalyticsUsers_AdminForbidden(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/v1/analytics/users", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -3054,6 +3055,8 @@ func TestGetAnalyticsUsers_AdminForbidden(t *testing.T) {
 func TestGetAnalyticsUsers_Success(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/analytics/users", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]types.UserStats{
 			{UserID: "u1", Username: "alice", InstanceCount: 3, DeployCount: 12},
