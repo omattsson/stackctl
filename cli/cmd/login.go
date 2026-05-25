@@ -326,9 +326,10 @@ func parseJWTExpiry(token string) (time.Time, error) {
 }
 
 // readPassword reads a password from stdin. When fromStdin is true the
-// caller is opting into pipe-based input — read the full piped line(s) and
-// strip the trailing newline. Otherwise, prompt on stderr and read silently
-// from the terminal.
+// caller is opting into pipe-based input — read one line from stdin (up to
+// the first newline, or EOF) and strip the trailing CR/LF. Embedded newlines
+// are not supported. Otherwise, prompt on stderr and read silently from the
+// terminal.
 //
 // If stdin is NOT a TTY and the caller didn't pass --password-stdin, this
 // returns an error rather than silently slurping inherited/redirected stdin
@@ -380,8 +381,9 @@ set --role or --service-account (the server silently overrides them for
 non-admin callers).
 
 The password is read interactively by default. Use --password-stdin to read
-the password from stdin (recommended for scripting); the entire piped
-content is treated as the password with the trailing newline stripped.
+the password from stdin (recommended for scripting); one line is read (up to
+the first newline, or EOF) and the trailing CR/LF is stripped. Embedded
+newlines in the password are not supported.
 
 Note: the backend's register endpoint does not accept an email address.
 Email-on-create is not supported at this time.

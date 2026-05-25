@@ -139,8 +139,9 @@ The new password must be at least 8 characters. The backend rejects users
 whose AuthProvider is not "local" (e.g. OIDC-federated users).
 
 The password is read interactively by default. Use --password-stdin to read
-the password from stdin (recommended for scripting); the entire piped
-content is treated as the password with the trailing newline stripped.
+the password from stdin (recommended for scripting); one line is read (up to
+the first newline, or EOF) and the trailing CR/LF is stripped. Embedded
+newlines in the password are not supported.
 
 Examples:
   stackctl user reset-password <uuid>

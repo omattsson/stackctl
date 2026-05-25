@@ -109,13 +109,13 @@ type UpdateClusterRequest struct {
 	ImagePullSecretName *string `json:"image_pull_secret_name,omitempty" yaml:"image_pull_secret_name,omitempty"`
 }
 
-// User represents a user account.
 // User represents a user account on the server. Returned by
-// GET /api/v1/auth/me (single) and GET /api/v1/users (list, admin-only).
+// GET /api/v1/auth/me (200, single), GET /api/v1/users (200, list,
+// admin-only), and POST /api/v1/auth/register (201, single).
 //
-// Population: only returned on HTTP 200. On non-2xx the client surfaces an
-// APIError and the struct is left zero-valued by the caller. Backend never
-// serialises the password hash (json:"-" on the server side).
+// Population: only returned on a 2xx response. On non-2xx the client
+// surfaces an APIError and the struct is left zero-valued by the caller.
+// Backend never serialises the password hash (json:"-" on the server side).
 //
 // Field semantics:
 //   - AuthProvider — "local" (password) or an external IdP name (e.g. "oidc").
