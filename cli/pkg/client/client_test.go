@@ -3105,6 +3105,152 @@ func TestAnalyticsClient_APIErrorMatrix(t *testing.T) {
 	}
 }
 
+// ---------- audit logs ----------
+
+func TestListAuditLogs_NoFilters(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/audit-logs", r.URL.Path)
+		assert.Empty(t, r.URL.RawQuery, "no filters → no query string")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.PaginatedAuditLogs{
+			Data:  []types.AuditLogEntry{{ID: "a1", Action: "stack.deploy"}},
+			Total: 1, Limit: 25,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.ListAuditLogs(types.AuditLogListParams{})
+	require.NoError(t, err)
+	require.Len(t, got.Data, 1)
+	assert.Equal(t, "a1", got.Data[0].ID)
+}
+
+func TestListAuditLogs_ForwardsFilters(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		assert.Equal(t, "u-1", q.Get("user_id"))
+		assert.Equal(t, "stack.deploy", q.Get("action"))
+		assert.Equal(t, "stack", q.Get("entity_type"))
+		assert.Equal(t, "s-9", q.Get("entity_id"))
+		assert.Equal(t, "cur-x", q.Get("cursor"))
+		assert.Equal(t, "100", q.Get("limit"))
+		assert.Equal(t, "50", q.Get("offset"))
+		assert.Equal(t, start.Format(time.RFC3339), q.Get("start_date"))
+		assert.Equal(t, end.Format(time.RFC3339), q.Get("end_date"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	_, err := c.ListAuditLogs(types.AuditLogListParams{
+		UserID: "u-1", Action: "stack.deploy", EntityType: "stack", EntityID: "s-9",
+		Cursor: "cur-x", Limit: 100, Offset: 50,
+		StartDate: &start, EndDate: &end,
+	})
+	require.NoError(t, err)
+}
+
+func TestExportAuditLogs_CSVStreamsRawBody(t *testing.T) {
+	t.Parallel()
+	// Build a CSV that exercises the standard CSV quoting tokens: embedded
+	// commas, embedded newlines, embedded double quotes. The client must
+	// return the body byte-for-byte so the on-disk CSV remains valid.
+	csv := "ID,Details\r\n" +
+		"a1,\"value,with,commas\"\r\n" +
+		"a2,\"line1\nline2\"\r\n" +
+		"a3,\"quote\"\"inside\"\r\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/audit-logs/export", r.URL.Path)
+		assert.Equal(t, "csv", r.URL.Query().Get("format"))
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = w.Write([]byte(csv))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.ExportAuditLogs("csv", types.AuditLogListParams{})
+	require.NoError(t, err)
+	assert.Equal(t, csv, string(got), "client must stream raw bytes — no re-encoding")
+}
+
+func TestExportAuditLogs_JSONStreamsRawBody(t *testing.T) {
+	t.Parallel()
+	body := []byte(`[{"id":"a1","action":"stack.deploy"},{"id":"a2","action":"stack.stop"}]`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "json", r.URL.Query().Get("format"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.ExportAuditLogs("json", types.AuditLogListParams{})
+	require.NoError(t, err)
+	assert.Equal(t, body, got)
+}
+
+func TestExportAuditLogs_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "csv", r.URL.Query().Get("format"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	data, err := c.ExportAuditLogs("csv", types.AuditLogListParams{})
+	require.Error(t, err)
+	assert.Nil(t, data)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
+func TestAuditLogsClient_APIErrorMatrix(t *testing.T) {
+	t.Parallel()
+	statuses := []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError}
+	calls := []struct {
+		name string
+		call func(c *Client) error
+	}{
+		{"List", func(c *Client) error { _, err := c.ListAuditLogs(types.AuditLogListParams{}); return err }},
+		{"ExportJSON", func(c *Client) error { _, err := c.ExportAuditLogs("json", types.AuditLogListParams{}); return err }},
+		{"ExportCSV", func(c *Client) error { _, err := c.ExportAuditLogs("csv", types.AuditLogListParams{}); return err }},
+	}
+	for _, call := range calls {
+		call := call
+		for _, status := range statuses {
+			status := status
+			t.Run(fmt.Sprintf("%s_%d", call.name, status), func(t *testing.T) {
+				t.Parallel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "x"})
+				}))
+				defer server.Close()
+				c := New(server.URL)
+				err := call.call(c)
+				require.Error(t, err)
+				var apiErr *APIError
+				require.ErrorAs(t, err, &apiErr)
+				assert.Equal(t, status, apiErr.StatusCode)
+			})
+		}
+	}
+}
+
 // ---------- shared values ----------
 
 func TestListSharedValues_Success(t *testing.T) {
