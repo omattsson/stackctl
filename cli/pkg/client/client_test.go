@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -2579,6 +2580,228 @@ func TestDeleteCleanupPolicy_NotFound(t *testing.T) {
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+// ---------- users + auth register ----------
+
+func TestRegister_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/auth/register", r.URL.Path)
+		var got types.RegisterRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		assert.Equal(t, "alice", got.Username)
+		assert.Equal(t, "strongpass!", got.Password)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(types.User{
+			Base: types.Base{ID: "new-id"}, Username: got.Username, Role: "user",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	user, err := c.Register(&types.RegisterRequest{Username: "alice", Password: "strongpass!"})
+	require.NoError(t, err)
+	assert.Equal(t, "new-id", user.ID)
+}
+
+func TestRegister_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Registration is disabled"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	user, err := c.Register(&types.RegisterRequest{Username: "alice", Password: "strongpass!"})
+	require.Error(t, err)
+	assert.Nil(t, user)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
+func TestListUsers_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/users", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.User{
+			{Base: types.Base{ID: "u1"}, Username: "alice", Role: "admin"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	users, err := c.ListUsers()
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, "alice", users[0].Username)
+}
+
+func TestListUsers_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	users, err := c.ListUsers()
+	require.Error(t, err)
+	assert.Nil(t, users)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
+func TestDeleteUser_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/users/u1", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.DeleteUser("u1"))
+}
+
+func TestDeleteUser_SelfRejected(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Cannot delete your own account"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteUser("self-id")
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+}
+
+func TestDisableUser_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/users/u1/disable", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "ok"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.DisableUser("u1"))
+}
+
+func TestEnableUser_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/users/u1/enable", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "ok"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.EnableUser("u1"))
+}
+
+func TestResetUserPassword_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/users/u1/password", r.URL.Path)
+		var got types.ResetPasswordRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		assert.Equal(t, "strongpass!", got.Password)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "ok"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.ResetUserPassword("u1", "strongpass!"))
+}
+
+func TestResetUserPassword_NonLocalRejected(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Cannot reset password for non-local user"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.ResetUserPassword("u1", "strongpass!")
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+}
+
+// TestUserAuthClient_APIErrorMatrix asserts every new user/auth client
+// method surfaces 401/404/500 as a *APIError with the right StatusCode.
+// Genuinely homogeneous error-mapping cases — table-driven is the right
+// fit per tests.instructions.md.
+func TestUserAuthClient_APIErrorMatrix(t *testing.T) {
+	t.Parallel()
+	statuses := []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError}
+	calls := []struct {
+		name string
+		call func(c *Client) error
+	}{
+		{"Register", func(c *Client) error {
+			_, err := c.Register(&types.RegisterRequest{Username: "x", Password: "strongpass!"})
+			return err
+		}},
+		{"ListUsers", func(c *Client) error {
+			_, err := c.ListUsers()
+			return err
+		}},
+		{"DeleteUser", func(c *Client) error { return c.DeleteUser("u1") }},
+		{"DisableUser", func(c *Client) error { return c.DisableUser("u1") }},
+		{"EnableUser", func(c *Client) error { return c.EnableUser("u1") }},
+		{"ResetUserPassword", func(c *Client) error { return c.ResetUserPassword("u1", "strongpass!") }},
+	}
+
+	for _, call := range calls {
+		call := call
+		for _, status := range statuses {
+			status := status
+			name := fmt.Sprintf("%s_%d", call.name, status)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "x"})
+				}))
+				defer server.Close()
+
+				c := New(server.URL)
+				err := call.call(c)
+				require.Error(t, err, "%s: expected non-nil error for status %d", name, status)
+				var apiErr *APIError
+				require.ErrorAs(t, err, &apiErr, "%s: error must wrap *APIError", name)
+				assert.Equal(t, status, apiErr.StatusCode, "%s: status code mismatch", name)
+			})
+		}
+	}
 }
 
 // ---------- shared values ----------

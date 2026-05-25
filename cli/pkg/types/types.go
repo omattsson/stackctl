@@ -109,11 +109,57 @@ type UpdateClusterRequest struct {
 	ImagePullSecretName *string `json:"image_pull_secret_name,omitempty" yaml:"image_pull_secret_name,omitempty"`
 }
 
-// User represents a user account.
+// User represents a user account on the server. Returned by
+// GET /api/v1/auth/me (200, single), GET /api/v1/users (200, list,
+// admin-only), and POST /api/v1/auth/register (201, single).
+//
+// Population: only returned on a 2xx response. On non-2xx the client
+// surfaces an APIError and the struct is left zero-valued by the caller.
+// Backend never serialises the password hash (json:"-" on the server side).
+//
+// Field semantics:
+//   - AuthProvider — "local" (password) or an external IdP name (e.g. "oidc").
+//     Reset-password only applies when AuthProvider == "local".
+//   - ExternalID — set only for federated users; nil for local accounts.
+//   - Disabled — when true, all sessions and API keys for this user have
+//     been revoked and any new authentication attempt is rejected.
+//   - ServiceAccount — when true, this is a non-interactive identity used
+//     by CI/automation; only admins can create these.
 type User struct {
 	Base
-	Username string `json:"username" yaml:"username"`
-	Role     string `json:"role" yaml:"role"`
+	Username       string  `json:"username" yaml:"username"`
+	DisplayName    string  `json:"display_name,omitempty" yaml:"display_name,omitempty"`
+	Email          string  `json:"email,omitempty" yaml:"email,omitempty"`
+	Role           string  `json:"role" yaml:"role"`
+	AuthProvider   string  `json:"auth_provider,omitempty" yaml:"auth_provider,omitempty"`
+	ExternalID     *string `json:"external_id,omitempty" yaml:"external_id,omitempty"`
+	Disabled       bool    `json:"disabled" yaml:"disabled"`
+	ServiceAccount bool    `json:"service_account" yaml:"service_account"`
+}
+
+// RegisterRequest is the body for POST /api/v1/auth/register.
+//
+// The endpoint requires an authenticated caller. Non-admin callers can only
+// register if self-registration is enabled server-side; admins can always
+// register and are the only callers permitted to set Role or ServiceAccount.
+//
+// Field semantics:
+//   - Username, Password — required.
+//   - DisplayName — optional; defaults to Username server-side when empty.
+//   - Role — admin-only; ignored from non-admin callers (server forces "user").
+//   - ServiceAccount — admin-only; ignored from non-admin callers.
+type RegisterRequest struct {
+	Username       string `json:"username" yaml:"username"`
+	Password       string `json:"password" yaml:"password"`
+	DisplayName    string `json:"display_name,omitempty" yaml:"display_name,omitempty"`
+	Role           string `json:"role,omitempty" yaml:"role,omitempty"`
+	ServiceAccount bool   `json:"service_account,omitempty" yaml:"service_account,omitempty"`
+}
+
+// ResetPasswordRequest is the body for PUT /api/v1/users/:id/password.
+// Backend rejects passwords shorter than 8 characters.
+type ResetPasswordRequest struct {
+	Password string `json:"password" yaml:"password"`
 }
 
 // CreateStackRequest is the request body for POST /api/v1/stack-instances.

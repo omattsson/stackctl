@@ -2269,3 +2269,148 @@ func TestE2ECleanupPolicyRunDryRun(t *testing.T) {
 	assert.Contains(t, stdout, "success")
 	assert.Contains(t, stdout, "1 success")
 }
+
+// startE2EUserMockServer is an in-memory backend for the auth-register / user
+// admin e2e tests. Implements POST /api/v1/auth/register + GET /api/v1/users
+// + DELETE /:id + PUT /:id/{disable,enable}.
+func startE2EUserMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	type user struct {
+		ID             string `json:"id"`
+		Username       string `json:"username"`
+		DisplayName    string `json:"display_name,omitempty"`
+		Role           string `json:"role"`
+		AuthProvider   string `json:"auth_provider,omitempty"`
+		Disabled       bool   `json:"disabled"`
+		ServiceAccount bool   `json:"service_account"`
+	}
+	var (
+		mu     sync.Mutex
+		nextID = 1
+		users  = map[string]*user{}
+	)
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/v1/auth/register" && r.Method == http.MethodPost:
+			var body struct {
+				Username       string `json:"username"`
+				Password       string `json:"password"`
+				DisplayName    string `json:"display_name"`
+				Role           string `json:"role"`
+				ServiceAccount bool   `json:"service_account"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+				return
+			}
+			if body.Username == "" || body.Password == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "username and password required"})
+				return
+			}
+			mu.Lock()
+			id := fmt.Sprintf("u-%d", nextID)
+			nextID++
+			u := &user{
+				ID: id, Username: body.Username, DisplayName: body.DisplayName,
+				Role: "user", AuthProvider: "local", ServiceAccount: body.ServiceAccount,
+			}
+			users[id] = u
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(u)
+
+		case r.URL.Path == "/api/v1/users" && r.Method == http.MethodGet:
+			mu.Lock()
+			out := make([]user, 0, len(users))
+			for _, u := range users {
+				out = append(out, *u)
+			}
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(out)
+
+		default:
+			trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/users/")
+			if trimmed == r.URL.Path || trimmed == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+				return
+			}
+			id := trimmed
+			action := ""
+			if i := strings.Index(id, "/"); i >= 0 {
+				id, action = id[:i], id[i+1:]
+			}
+			mu.Lock()
+			u, exists := users[id]
+			mu.Unlock()
+			if !exists {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+				return
+			}
+
+			switch action {
+			case "":
+				if r.Method != http.MethodDelete {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				mu.Lock()
+				delete(users, id)
+				mu.Unlock()
+				w.WriteHeader(http.StatusNoContent)
+			case "disable":
+				if r.Method != http.MethodPut {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				mu.Lock()
+				u.Disabled = true
+				mu.Unlock()
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": "User disabled successfully"})
+			case "enable":
+				if r.Method != http.MethodPut {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				mu.Lock()
+				u.Disabled = false
+				mu.Unlock()
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": "User enabled successfully"})
+			default:
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "unknown action: " + action})
+			}
+		}
+	}))
+}
+
+func TestE2EAuthRegisterAndUserList(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EUserMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// auth register --username alice --password-stdin
+	stdout, _, err := runStackctlWithStdin(t, dir, "strongpass!\n",
+		"auth", "register", "--username", "alice", "--password-stdin")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "alice")
+
+	// user list now contains alice
+	stdout, _, err = runStackctl(t, dir, "user", "list")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "alice")
+}
