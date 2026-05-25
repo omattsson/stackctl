@@ -275,6 +275,61 @@ type UserStats struct {
 	Username      string     `json:"username" yaml:"username"`
 }
 
+// AuditLogEntry is one row in the audit log. Mirrors backend models.AuditLog.
+//
+// Population: only returned on HTTP 200 (list endpoint). The export endpoint
+// returns the same shape inside a top-level JSON array, or as a CSV with the
+// header order documented in the export godoc — not this struct.
+//
+// Field declaration order is ALPHABETICAL by json tag so encoding/json
+// emits keys in stable alphabetical order — required for golden-file
+// JSON comparisons in tests. Do not reorder.
+type AuditLogEntry struct {
+	Action     string    `json:"action" yaml:"action"`
+	Details    string    `json:"details" yaml:"details"`
+	EntityID   string    `json:"entity_id" yaml:"entity_id"`
+	EntityType string    `json:"entity_type" yaml:"entity_type"`
+	ID         string    `json:"id" yaml:"id"`
+	Timestamp  time.Time `json:"timestamp" yaml:"timestamp"`
+	UserID     string    `json:"user_id" yaml:"user_id"`
+	Username   string    `json:"username" yaml:"username"`
+}
+
+// PaginatedAuditLogs is the success-path response of GET /api/v1/audit-logs.
+// Mirrors backend models.PaginatedAuditLogs.
+//
+// Population: only returned on HTTP 200. NextCursor is empty when no more
+// pages exist; offset-based pagination is also supported via Limit/Offset.
+//
+// Field declaration order is alphabetical by json tag (see AuditLogEntry).
+type PaginatedAuditLogs struct {
+	Data       []AuditLogEntry `json:"data" yaml:"data"`
+	Limit      int             `json:"limit" yaml:"limit"`
+	NextCursor string          `json:"next_cursor,omitempty" yaml:"next_cursor,omitempty"`
+	Offset     int             `json:"offset" yaml:"offset"`
+	Total      int64           `json:"total" yaml:"total"`
+}
+
+// AuditLogListParams holds the query parameters accepted by GET /api/v1/audit-logs
+// and GET /api/v1/audit-logs/export. The client forwards only the fields the
+// caller sets — empty strings and zero ints are omitted from the wire request.
+//
+// StartDate / EndDate are formatted as RFC3339 before being sent — the backend
+// rejects any other format with HTTP 400. The CLI translates --since/--until
+// shorthand (e.g. "24h") to absolute RFC3339 timestamps before populating this
+// struct.
+type AuditLogListParams struct {
+	StartDate  *time.Time
+	EndDate    *time.Time
+	UserID     string
+	EntityType string
+	EntityID   string
+	Action     string
+	Cursor     string
+	Limit      int
+	Offset     int
+}
+
 // CreateStackRequest is the request body for POST /api/v1/stack-instances.
 // It contains only the writable fields — server-owned fields like ID, owner,
 // namespace, status are excluded to avoid backend validation errors.

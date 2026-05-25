@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -2609,4 +2612,93 @@ func TestE2EAnalyticsOverviewJSONParses(t *testing.T) {
 	assert.Equal(t, 3, got.RunningInstances)
 	assert.Equal(t, 42, got.TotalDeploys)
 	assert.Equal(t, 7, got.TotalTemplates)
+}
+
+// startE2EAuditMockServer serves a deterministic audit log list and a CSV
+// export crafted to exercise CSV quoting rules (commas + newlines).
+func startE2EAuditMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/audit-logs":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(
+				`{"data":[{"id":"a1","action":"stack.deploy","entity_type":"stack","entity_id":"s-1","user_id":"u1","username":"alice","timestamp":"2026-05-01T10:00:00Z"}],"total":1,"limit":25,"offset":0}`))
+		case "/api/v1/audit-logs/export":
+			switch r.URL.Query().Get("format") {
+			case "csv":
+				w.Header().Set("Content-Type", "text/csv")
+				_, _ = w.Write([]byte(
+					"ID,Timestamp,Action,Details\r\n" +
+						"a1,2026-05-01T10:00:00Z,stack.deploy,\"value,with,commas\"\r\n"))
+			default:
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`[{"id":"a1","action":"stack.deploy"}]`))
+			}
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+		}
+	}))
+}
+
+// TestE2EAuditLogExportCSVProducesValidFile builds the binary, runs
+// `stackctl audit log export --format csv --output-file …`, and asserts the
+// file on disk parses as well-formed CSV (i.e. embedded commas/newlines are
+// quoted correctly per RFC 4180).
+func TestE2EAuditLogExportCSVProducesValidFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EAuditMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	csvPath := filepath.Join(dir, "audit.csv")
+	stdout, stderr, err := runStackctl(t, dir,
+		"audit", "log", "export",
+		"--format", "csv",
+		"--output-file", csvPath,
+	)
+	require.NoError(t, err, "stderr=%q stdout=%q", stderr, stdout)
+
+	written, err := os.ReadFile(csvPath)
+	require.NoError(t, err)
+
+	// Real CSV parser: if quoting is wrong (e.g. value,with,commas split
+	// across three columns) this fails.
+	records, err := csv.NewReader(bytes.NewReader(written)).ReadAll()
+	require.NoError(t, err, "exported file must be valid CSV: %q", string(written))
+	require.GreaterOrEqual(t, len(records), 2, "header + ≥1 row")
+	dataRow := records[1]
+	// "value,with,commas" must arrive as ONE field, not three.
+	assert.Contains(t, dataRow, "value,with,commas",
+		"quoted comma field must survive round-trip; got row %v", dataRow)
+}
+
+// TestE2EAuditLogListJSON proves the list command produces valid JSON the
+// operator can pipe to jq.
+func TestE2EAuditLogListJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EAuditMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, stderr, err := runStackctl(t, dir, "audit", "log", "list", "-o", "json")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+
+	var got types.PaginatedAuditLogs
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	require.Len(t, got.Data, 1)
+	assert.Equal(t, "stack.deploy", got.Data[0].Action)
 }

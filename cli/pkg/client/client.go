@@ -1406,3 +1406,99 @@ func (c *Client) GetAnalyticsUsers() ([]types.UserStats, error) {
 	}
 	return stats, nil
 }
+
+// auditLogParamsToQuery converts the typed filter struct into the
+// backend's expected query-param shape. Empty / zero fields are omitted.
+// Time fields are formatted as RFC3339 — the only format the backend accepts.
+func auditLogParamsToQuery(p types.AuditLogListParams) map[string]string {
+	q := map[string]string{}
+	if p.UserID != "" {
+		q["user_id"] = p.UserID
+	}
+	if p.EntityType != "" {
+		q["entity_type"] = p.EntityType
+	}
+	if p.EntityID != "" {
+		q["entity_id"] = p.EntityID
+	}
+	if p.Action != "" {
+		q["action"] = p.Action
+	}
+	if p.Cursor != "" {
+		q["cursor"] = p.Cursor
+	}
+	if p.StartDate != nil {
+		q["start_date"] = p.StartDate.UTC().Format(time.RFC3339)
+	}
+	if p.EndDate != nil {
+		q["end_date"] = p.EndDate.UTC().Format(time.RFC3339)
+	}
+	if p.Limit > 0 {
+		q["limit"] = strconv.Itoa(p.Limit)
+	}
+	if p.Offset > 0 {
+		q["offset"] = strconv.Itoa(p.Offset)
+	}
+	return q
+}
+
+// ListAuditLogs returns a page of audit log entries matching the filters.
+// All filter fields are optional; an empty struct returns the default page
+// (limit=25, offset=0). Backend supports cursor pagination via NextCursor.
+//
+// @see GET /api/v1/audit-logs
+func (c *Client) ListAuditLogs(p types.AuditLogListParams) (*types.PaginatedAuditLogs, error) {
+	var resp types.PaginatedAuditLogs
+	if err := c.GetWithQuery("/api/v1/audit-logs", auditLogParamsToQuery(p), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ExportAuditLogs returns the raw body of the audit log export endpoint.
+// Format must be "json" or "csv"; the backend rejects anything else with 400.
+// Admin-gated — non-admin callers (including devops) receive APIError 403.
+//
+// The body is returned untouched so the CLI can stream the server's CSV
+// (with its own quoting rules) directly to disk without re-encoding.
+//
+// @see GET /api/v1/audit-logs/export
+func (c *Client) ExportAuditLogs(format string, p types.AuditLogListParams) ([]byte, error) {
+	q := auditLogParamsToQuery(p)
+	q["format"] = format
+	path := "/api/v1/audit-logs/export"
+	if encoded := encodeQueryParams(q); encoded != "" {
+		path = path + "?" + encoded
+	}
+	resp, err := c.doWithRetry(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	// Server caps the export at 10,000 rows; with realistic row sizes that
+	// fits comfortably inside 25MB. Use a LimitReader as a defense against
+	// a misconfigured/compromised backend streaming an unbounded body.
+	const maxAuditExportSize = 25 * 1024 * 1024 // 25MB
+	limited := io.LimitReader(resp.Body, maxAuditExportSize+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+	if int64(len(data)) > maxAuditExportSize {
+		return nil, fmt.Errorf("audit export response exceeds maximum size of %d bytes", maxAuditExportSize)
+	}
+	return data, nil
+}
+
+// encodeQueryParams builds a stable-ordered URL-encoded query string from a
+// map of non-empty values. Identical to the body of GetWithQuery but factored
+// out because ExportAuditLogs needs the raw URL (not doJSON).
+func encodeQueryParams(params map[string]string) string {
+	q := url.Values{}
+	for k, v := range params {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	return q.Encode()
+}
