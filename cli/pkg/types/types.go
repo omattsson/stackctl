@@ -162,6 +162,58 @@ type ResetPasswordRequest struct {
 	Password string `json:"password" yaml:"password"`
 }
 
+// APIKey is one entry in the response of GET /api/v1/users/:id/api-keys.
+// Mirrors backend models.APIKey.
+//
+// Population: only returned on a 2xx response. On non-2xx the client surfaces
+// an APIError and the struct is left zero-valued by the caller. The KeyHash
+// is tagged json:"-" on the server side and is never present in any
+// response; the raw key is only ever returned by Create (see
+// CreateAPIKeyResponse) and is non-retrievable thereafter.
+//
+// Field semantics:
+//   - Prefix — first 16 chars of the raw key, safe to display and used for
+//     quick visual identification.
+//   - LastUsedAt — nil until the key has authenticated at least one request.
+//   - ExpiresAt — always present in responses (the backend rejects creation
+//     without an expiry), modelled as pointer to allow zero-value omission
+//     in JSON tooling.
+type APIKey struct {
+	ID         string     `json:"id" yaml:"id"`
+	UserID     string     `json:"user_id" yaml:"user_id"`
+	Name       string     `json:"name" yaml:"name"`
+	Prefix     string     `json:"prefix" yaml:"prefix"`
+	CreatedAt  time.Time  `json:"created_at" yaml:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+}
+
+// CreateAPIKeyRequest is the body for POST /api/v1/users/:id/api-keys.
+// The backend requires an expiry — exactly one of ExpiresAt or ExpiresInDays
+// must be set. Setting both returns 400. ExpiresAt accepts RFC3339 or
+// YYYY-MM-DD; the latter is treated as 23:59:59 UTC of that day. The expiry
+// must be strictly in the future and may be capped by the server's
+// API_KEY_MAX_LIFETIME_DAYS setting.
+type CreateAPIKeyRequest struct {
+	Name          string  `json:"name" yaml:"name"`
+	ExpiresAt     *string `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+	ExpiresInDays *int    `json:"expires_in_days,omitempty" yaml:"expires_in_days,omitempty"`
+}
+
+// CreateAPIKeyResponse is returned ONCE by POST /api/v1/users/:id/api-keys
+// (HTTP 201). The RawKey field carries the plaintext key prefixed with
+// "sk_" — it is never persisted server-side and cannot be retrieved again.
+// Callers must surface it immediately (typically to stdout for piping) and
+// must not store it in config files.
+type CreateAPIKeyResponse struct {
+	ID        string     `json:"id" yaml:"id"`
+	Name      string     `json:"name" yaml:"name"`
+	Prefix    string     `json:"prefix" yaml:"prefix"`
+	RawKey    string     `json:"raw_key" yaml:"raw_key"`
+	CreatedAt time.Time  `json:"created_at" yaml:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+}
+
 // CreateStackRequest is the request body for POST /api/v1/stack-instances.
 // It contains only the writable fields — server-owned fields like ID, owner,
 // namespace, status are excluded to avoid backend validation errors.

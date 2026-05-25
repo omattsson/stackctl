@@ -2414,3 +2414,147 @@ func TestE2EAuthRegisterAndUserList(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "alice")
 }
+
+// startE2EAPIKeyMockServer is an in-memory backend for the apikey e2e tests.
+// Implements /auth/me + the api-keys CRUD surface for one caller user.
+func startE2EAPIKeyMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	const callerID = "caller-uuid"
+	type key struct {
+		ID        string `json:"id"`
+		UserID    string `json:"user_id"`
+		Name      string `json:"name"`
+		Prefix    string `json:"prefix"`
+		CreatedAt string `json:"created_at"`
+		ExpiresAt string `json:"expires_at,omitempty"`
+	}
+	var (
+		mu     sync.Mutex
+		nextID = 1
+		keys   = map[string]*key{}
+	)
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.URL.Path == "/api/v1/auth/me" && r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": callerID, "username": "me", "role": "user",
+			})
+			return
+		}
+
+		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/users/")
+		if trimmed == r.URL.Path {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		// Use unbounded Split so a request like /users/u/api-keys/k/garbage
+		// yields len(parts) == 4 and reaches the unknown-path 404 branch
+		// below, rather than being absorbed as a delete on key-id "k/garbage".
+		parts := strings.Split(trimmed, "/")
+		if len(parts) < 2 || parts[1] != "api-keys" {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			return
+		}
+		userID := parts[0]
+
+		switch {
+		case len(parts) == 2 && r.Method == http.MethodGet:
+			mu.Lock()
+			out := make([]key, 0, len(keys))
+			for _, k := range keys {
+				if k.UserID == userID {
+					out = append(out, *k)
+				}
+			}
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(out)
+
+		case len(parts) == 2 && r.Method == http.MethodPost:
+			var body struct {
+				Name          string  `json:"name"`
+				ExpiresAt     *string `json:"expires_at"`
+				ExpiresInDays *int    `json:"expires_in_days"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+				return
+			}
+			hasAt := body.ExpiresAt != nil
+			hasDays := body.ExpiresInDays != nil
+			if body.Name == "" || (!hasAt && !hasDays) || (hasAt && hasDays) {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": "name and exactly one of expires_at or expires_in_days are required",
+				})
+				return
+			}
+			mu.Lock()
+			id := fmt.Sprintf("key-%d", nextID)
+			nextID++
+			k := &key{
+				ID: id, UserID: userID, Name: body.Name,
+				Prefix: "abcdef0123456789", CreatedAt: "2026-05-01T12:00:00Z",
+			}
+			keys[id] = k
+			mu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": k.ID, "name": k.Name, "prefix": k.Prefix,
+				"raw_key": "sk_" + id + "-raw", "created_at": k.CreatedAt,
+			})
+
+		case len(parts) == 3 && r.Method == http.MethodDelete:
+			keyID := parts[2]
+			mu.Lock()
+			_, exists := keys[keyID]
+			if exists {
+				delete(keys, keyID)
+			}
+			mu.Unlock()
+			if !exists {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "API key not found"})
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		case len(parts) >= 4:
+			// e.g. /users/:id/api-keys/:keyId/<garbage> — not a real route;
+			// 404 matches the cleanup-policy mock convention and avoids
+			// misleading 405 responses for routes that don't exist.
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+}
+
+func TestE2EAPIKeyCreateQuietBootstrap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EAPIKeyMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// stackctl apikey create --name ci --expires-in-days 90 --quiet
+	// Verifies the documented CI-bootstrap contract: stdout is EXACTLY the
+	// raw key followed by a single newline — pipeable into a token file
+	// with no extra bytes. The mock generates IDs as key-1, key-2, ...
+	// and returns "sk_<id>-raw" so the first call yields "sk_key-1-raw".
+	stdout, stderr, err := runStackctl(t, dir,
+		"apikey", "create", "--name", "ci", "--expires-in-days", "90", "--quiet")
+	require.NoError(t, err)
+	assert.Equal(t, "sk_key-1-raw\n", stdout,
+		"quiet stdout must be EXACTLY the raw key plus one newline — no other bytes")
+	assert.Empty(t, stderr, "quiet mode must produce no stderr noise")
+}

@@ -2804,6 +2804,174 @@ func TestUserAuthClient_APIErrorMatrix(t *testing.T) {
 	}
 }
 
+// ---------- api keys ----------
+
+func TestListAPIKeys_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/users/u1/api-keys", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.APIKey{
+			{ID: "k1", UserID: "u1", Name: "ci", Prefix: "0123456789abcdef"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	keys, err := c.ListAPIKeys("u1")
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	assert.Equal(t, "ci", keys[0].Name)
+	assert.Equal(t, "0123456789abcdef", keys[0].Prefix)
+}
+
+func TestCreateAPIKey_ReturnsRawKeyOnce(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/users/u1/api-keys", r.URL.Path)
+		var got types.CreateAPIKeyRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		assert.Equal(t, "ci", got.Name)
+		require.NotNil(t, got.ExpiresInDays)
+		assert.Equal(t, 90, *got.ExpiresInDays)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(types.CreateAPIKeyResponse{
+			ID:     "new-id",
+			Name:   got.Name,
+			Prefix: "abcdef0123456789",
+			RawKey: "sk_deadbeefcafebabe",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	days := 90
+	resp, err := c.CreateAPIKey("u1", &types.CreateAPIKeyRequest{Name: "ci", ExpiresInDays: &days})
+	require.NoError(t, err)
+	assert.Equal(t, "new-id", resp.ID)
+	assert.Equal(t, "sk_deadbeefcafebabe", resp.RawKey, "raw key must be surfaced on create")
+}
+
+func TestCreateAPIKey_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Forbidden"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	days := 30
+	resp, err := c.CreateAPIKey("other-user", &types.CreateAPIKeyRequest{Name: "x", ExpiresInDays: &days})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
+func TestDeleteAPIKey_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/users/u1/api-keys/k1", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.DeleteAPIKey("u1", "k1"))
+}
+
+func TestDeleteAPIKey_NotFound(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "API key not found"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	err := c.DeleteAPIKey("u1", "missing")
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+}
+
+// TestAPIKeyClient_DoesNotLogRawKey asserts the documented security contract:
+// the debug writer never sees the raw API key, even when the create response
+// includes it in the body. The current do() implementation logs only the
+// request line + a small set of headers (with masking), never the body.
+func TestAPIKeyClient_DoesNotLogRawKey(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(types.CreateAPIKeyResponse{
+			ID: "id", Name: "n", Prefix: "p", RawKey: "sk_secret-should-never-leak",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	var dbg strings.Builder
+	c.Debug = true
+	c.DebugWriter = &dbg
+
+	days := 30
+	resp, err := c.CreateAPIKey("u1", &types.CreateAPIKeyRequest{Name: "n", ExpiresInDays: &days})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotContains(t, dbg.String(), "sk_secret-should-never-leak",
+		"debug log must NEVER contain the raw API key")
+	assert.NotContains(t, dbg.String(), "secret-should-never-leak",
+		"debug log must not contain any part of the raw key")
+}
+
+func TestAPIKeyClient_APIErrorMatrix(t *testing.T) {
+	t.Parallel()
+	statuses := []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError}
+	days := 30
+	calls := []struct {
+		name string
+		call func(c *Client) error
+	}{
+		{"List", func(c *Client) error { _, err := c.ListAPIKeys("u1"); return err }},
+		{"Create", func(c *Client) error {
+			_, err := c.CreateAPIKey("u1", &types.CreateAPIKeyRequest{Name: "x", ExpiresInDays: &days})
+			return err
+		}},
+		{"Delete", func(c *Client) error { return c.DeleteAPIKey("u1", "k1") }},
+	}
+	for _, call := range calls {
+		call := call
+		for _, status := range statuses {
+			status := status
+			t.Run(fmt.Sprintf("%s_%d", call.name, status), func(t *testing.T) {
+				t.Parallel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "x"})
+				}))
+				defer server.Close()
+				c := New(server.URL)
+				err := call.call(c)
+				require.Error(t, err)
+				var apiErr *APIError
+				require.ErrorAs(t, err, &apiErr)
+				assert.Equal(t, status, apiErr.StatusCode)
+			})
+		}
+	}
+}
+
 // ---------- shared values ----------
 
 func TestListSharedValues_Success(t *testing.T) {
