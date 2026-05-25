@@ -7,7 +7,7 @@ applyTo: "cli/cmd/**"
 ## Required Patterns
 - Use `RunE` (not `Run`) to return errors properly
 - Set `SilenceUsage: true` on all commands that take arguments
-- Use `cobra.ExactArgs(N)` for fixed argument counts
+- Use `cobra.ExactArgs(N)` ONLY when positional args are required (e.g. `Args: cobra.ExactArgs(1)` for `delete <id>`). Commands that take no positional args (list, create-with-flags, analytics subcommands, etc.) deliberately OMIT the `Args` field — see `clusterListCmd`, `templateListCmd`, `userListCmd`. Do not add `Args: cobra.NoArgs` / `cobra.ExactArgs(0)` to these commands.
 - Register subcommands in `init()` using `parentCmd.AddCommand(childCmd)`
 
 ## Output Handling

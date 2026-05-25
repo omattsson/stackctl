@@ -214,6 +214,67 @@ type CreateAPIKeyResponse struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
 }
 
+// AnalyticsOverview is the success-path response of GET /api/v1/analytics/overview.
+// Mirrors backend handlers.OverviewStats.
+//
+// Population: only returned on HTTP 200. On non-2xx the client surfaces an
+// APIError and the struct is left zero-valued by the caller. Devops-gated.
+//
+// Field declaration order is ALPHABETICAL by json tag so encoding/json
+// emits keys in stable, alphabetical order — required for golden-file
+// JSON comparisons in tests and for downstream tooling that diffs the
+// output. Do not reorder.
+type AnalyticsOverview struct {
+	RunningInstances int `json:"running_instances" yaml:"running_instances"`
+	TotalDefinitions int `json:"total_definitions" yaml:"total_definitions"`
+	TotalDeploys     int `json:"total_deploys" yaml:"total_deploys"`
+	TotalInstances   int `json:"total_instances" yaml:"total_instances"`
+	TotalTemplates   int `json:"total_templates" yaml:"total_templates"`
+	TotalUsers       int `json:"total_users" yaml:"total_users"`
+}
+
+// TemplateStats is one element in the success-path response of
+// GET /api/v1/analytics/templates. Mirrors backend handlers.TemplateStats.
+//
+// Population: only returned on HTTP 200. Devops-gated.
+//
+// Field declaration order is alphabetical by json tag (see AnalyticsOverview).
+//
+// Field semantics:
+//   - SuccessRate is a percentage (0.0–100.0) computed server-side as
+//     success_count/deploy_count*100; backend returns 0.0 when deploy_count
+//     is zero. Treat as informational; tests use a tolerance for float
+//     comparisons.
+type TemplateStats struct {
+	Category        string  `json:"category" yaml:"category"`
+	DefinitionCount int     `json:"definition_count" yaml:"definition_count"`
+	DeployCount     int     `json:"deploy_count" yaml:"deploy_count"`
+	ErrorCount      int     `json:"error_count" yaml:"error_count"`
+	InstanceCount   int     `json:"instance_count" yaml:"instance_count"`
+	IsPublished     bool    `json:"is_published" yaml:"is_published"`
+	SuccessCount    int     `json:"success_count" yaml:"success_count"`
+	SuccessRate     float64 `json:"success_rate" yaml:"success_rate"`
+	TemplateID      string  `json:"template_id" yaml:"template_id"`
+	TemplateName    string  `json:"template_name" yaml:"template_name"`
+}
+
+// UserStats is one element in the success-path response of
+// GET /api/v1/analytics/users. Mirrors backend handlers.UserStats.
+//
+// Population: only returned on HTTP 200. Admin-gated.
+//
+// Field declaration order is alphabetical by json tag (see AnalyticsOverview).
+//
+// Field semantics:
+//   - LastActive is nil for users who have never deployed anything.
+type UserStats struct {
+	DeployCount   int        `json:"deploy_count" yaml:"deploy_count"`
+	InstanceCount int        `json:"instance_count" yaml:"instance_count"`
+	LastActive    *time.Time `json:"last_active,omitempty" yaml:"last_active,omitempty"`
+	UserID        string     `json:"user_id" yaml:"user_id"`
+	Username      string     `json:"username" yaml:"username"`
+}
+
 // CreateStackRequest is the request body for POST /api/v1/stack-instances.
 // It contains only the writable fields — server-owned fields like ID, owner,
 // namespace, status are excluded to avoid backend validation errors.

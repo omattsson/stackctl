@@ -1369,3 +1369,40 @@ func (c *Client) CreateAPIKey(userID string, req *types.CreateAPIKeyRequest) (*t
 func (c *Client) DeleteAPIKey(userID, keyID string) error {
 	return c.Delete(fmt.Sprintf("/api/v1/users/%s/api-keys/%s", userID, keyID))
 }
+
+// GetAnalyticsOverview returns platform-wide aggregate counts. Devops-gated;
+// non-devops callers receive APIError with status 403. Response is cached
+// server-side for ~30s.
+//
+// @see GET /api/v1/analytics/overview
+func (c *Client) GetAnalyticsOverview() (*types.AnalyticsOverview, error) {
+	var overview types.AnalyticsOverview
+	if err := c.Get("/api/v1/analytics/overview", &overview); err != nil {
+		return nil, err
+	}
+	return &overview, nil
+}
+
+// GetAnalyticsTemplates returns per-template usage statistics. Devops-gated.
+// Response is cached server-side for ~30s.
+//
+// @see GET /api/v1/analytics/templates
+func (c *Client) GetAnalyticsTemplates() ([]types.TemplateStats, error) {
+	var stats []types.TemplateStats
+	if err := c.Get("/api/v1/analytics/templates", &stats); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+// GetAnalyticsUsers returns per-user usage statistics. Admin-only — non-admin
+// callers (including devops) receive APIError with status 403.
+//
+// @see GET /api/v1/analytics/users
+func (c *Client) GetAnalyticsUsers() ([]types.UserStats, error) {
+	var stats []types.UserStats
+	if err := c.Get("/api/v1/analytics/users", &stats); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}

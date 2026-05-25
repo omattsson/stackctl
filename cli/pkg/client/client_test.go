@@ -2972,6 +2972,139 @@ func TestAPIKeyClient_APIErrorMatrix(t *testing.T) {
 	}
 }
 
+// ---------- analytics ----------
+
+func TestGetAnalyticsOverview_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/analytics/overview", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.AnalyticsOverview{
+			RunningInstances: 3, TotalDefinitions: 5, TotalDeploys: 42,
+			TotalInstances: 10, TotalTemplates: 7, TotalUsers: 4,
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.GetAnalyticsOverview()
+	require.NoError(t, err)
+	assert.Equal(t, 42, got.TotalDeploys)
+	assert.Equal(t, 7, got.TotalTemplates)
+}
+
+func TestGetAnalyticsOverview_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "devops role required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	overview, err := c.GetAnalyticsOverview()
+	require.Error(t, err)
+	assert.Nil(t, overview)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
+func TestGetAnalyticsTemplates_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/analytics/templates", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.TemplateStats{
+			{TemplateID: "t1", TemplateName: "nginx", DeployCount: 8, SuccessCount: 7, SuccessRate: 87.5},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	stats, err := c.GetAnalyticsTemplates()
+	require.NoError(t, err)
+	require.Len(t, stats, 1)
+	assert.Equal(t, "nginx", stats[0].TemplateName)
+	assert.InDelta(t, 87.5, stats[0].SuccessRate, 0.001)
+}
+
+func TestGetAnalyticsUsers_AdminForbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/analytics/users", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	stats, err := c.GetAnalyticsUsers()
+	require.Error(t, err)
+	assert.Nil(t, stats)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
+func TestGetAnalyticsUsers_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/analytics/users", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.UserStats{
+			{UserID: "u1", Username: "alice", InstanceCount: 3, DeployCount: 12},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	stats, err := c.GetAnalyticsUsers()
+	require.NoError(t, err)
+	require.Len(t, stats, 1)
+	assert.Equal(t, "alice", stats[0].Username)
+}
+
+func TestAnalyticsClient_APIErrorMatrix(t *testing.T) {
+	t.Parallel()
+	statuses := []int{http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError}
+	calls := []struct {
+		name string
+		call func(c *Client) error
+	}{
+		{"Overview", func(c *Client) error { _, err := c.GetAnalyticsOverview(); return err }},
+		{"Templates", func(c *Client) error { _, err := c.GetAnalyticsTemplates(); return err }},
+		{"Users", func(c *Client) error { _, err := c.GetAnalyticsUsers(); return err }},
+	}
+	for _, call := range calls {
+		call := call
+		for _, status := range statuses {
+			status := status
+			t.Run(fmt.Sprintf("%s_%d", call.name, status), func(t *testing.T) {
+				t.Parallel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "x"})
+				}))
+				defer server.Close()
+				c := New(server.URL)
+				err := call.call(c)
+				require.Error(t, err)
+				var apiErr *APIError
+				require.ErrorAs(t, err, &apiErr)
+				assert.Equal(t, status, apiErr.StatusCode)
+			})
+		}
+	}
+}
+
 // ---------- shared values ----------
 
 func TestListSharedValues_Success(t *testing.T) {
