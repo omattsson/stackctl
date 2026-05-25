@@ -2558,3 +2558,55 @@ func TestE2EAPIKeyCreateQuietBootstrap(t *testing.T) {
 		"quiet stdout must be EXACTLY the raw key plus one newline — no other bytes")
 	assert.Empty(t, stderr, "quiet mode must produce no stderr noise")
 }
+
+// startE2EAnalyticsMockServer serves deterministic analytics responses so
+// the e2e JSON contract can be diffed across runs.
+func startE2EAnalyticsMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/analytics/overview":
+			_ = json.NewEncoder(w).Encode(map[string]int{
+				"running_instances": 3,
+				"total_definitions": 5,
+				"total_deploys":     42,
+				"total_instances":   10,
+				"total_templates":   7,
+				"total_users":       4,
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	}))
+}
+
+func TestE2EAnalyticsOverviewJSONParses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EAnalyticsMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, stderr, err := runStackctl(t, dir, "analytics", "overview", "-o", "json")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+
+	// jq-style check: parse the JSON, assert known KPIs surface with the
+	// expected values. Locks the wire contract on the CLI side.
+	var got struct {
+		RunningInstances int `json:"running_instances"`
+		TotalDeploys     int `json:"total_deploys"`
+		TotalTemplates   int `json:"total_templates"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got),
+		"analytics overview -o json must produce parseable JSON, got %q", stdout)
+	assert.Equal(t, 3, got.RunningInstances)
+	assert.Equal(t, 42, got.TotalDeploys)
+	assert.Equal(t, 7, got.TotalTemplates)
+}
