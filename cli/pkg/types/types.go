@@ -741,6 +741,29 @@ type CreateCleanupPolicyRequest struct {
 	DryRun    bool   `json:"dry_run" yaml:"dry_run"`
 }
 
+// CleanupResult is one entry in the response of
+// POST /api/v1/admin/cleanup-policies/:id/run. Mirrors backend
+// scheduler.CleanupResult.
+//
+// Population: only returned on HTTP 200. On non-2xx the client surfaces an
+// APIError and the result slice is left nil by the caller.
+//
+// Field semantics:
+//   - Status — "success" (action applied), "error" (action attempted and
+//     failed), or "dry_run" (matched, no action taken). Callers should treat
+//     "dry_run" as informational and "error" as the partial-failure signal.
+//   - Error — populated only when Status == "error"; carries the per-instance
+//     failure reason.
+type CleanupResult struct {
+	InstanceID   string `json:"instance_id" yaml:"instance_id"`
+	InstanceName string `json:"instance_name" yaml:"instance_name"`
+	Namespace    string `json:"namespace" yaml:"namespace"`
+	OwnerID      string `json:"owner_id" yaml:"owner_id"`
+	Action       string `json:"action" yaml:"action"`
+	Status       string `json:"status" yaml:"status"`
+	Error        string `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
 // UpdateCleanupPolicyRequest is the body for PUT /api/v1/admin/cleanup-policies/:id
 // (admin-only). Same shape as CreateCleanupPolicyRequest: PUT is a full
 // upsert, so all fields must be provided.

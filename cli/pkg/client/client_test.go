@@ -2508,6 +2508,62 @@ func TestDeleteCleanupPolicy_Success(t *testing.T) {
 	require.NoError(t, c.DeleteCleanupPolicy("1"))
 }
 
+func TestRunCleanupPolicy_DryRun(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/admin/cleanup-policies/1/run", r.URL.Path)
+		assert.Equal(t, "true", r.URL.Query().Get("dry_run"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.CleanupResult{
+			{InstanceID: "i1", Action: "stop", Status: "dry_run"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	results, err := c.RunCleanupPolicy("1", true)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "dry_run", results[0].Status)
+}
+
+func TestRunCleanupPolicy_RealRun(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.URL.Query().Get("dry_run"), "real run must omit dry_run query param")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.CleanupResult{
+			{InstanceID: "i1", Action: "stop", Status: "success"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	results, err := c.RunCleanupPolicy("1", false)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "success", results[0].Status)
+}
+
+func TestRunCleanupPolicy_Forbidden(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "admin role required"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	results, err := c.RunCleanupPolicy("1", false)
+	require.Error(t, err)
+	assert.Nil(t, results)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+}
+
 func TestDeleteCleanupPolicy_NotFound(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

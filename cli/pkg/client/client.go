@@ -1247,3 +1247,26 @@ func (c *Client) UpdateCleanupPolicy(id string, req *types.UpdateCleanupPolicyRe
 func (c *Client) DeleteCleanupPolicy(id string) error {
 	return c.Delete(fmt.Sprintf("/api/v1/admin/cleanup-policies/%s", id))
 }
+
+// RunCleanupPolicy executes a cleanup policy immediately. When dryRun is true
+// the scheduler only logs the matched instances; otherwise it applies the
+// policy's action. Admin-only. The dry-run flag is sent as a query parameter,
+// matching the backend handler which reads c.Query("dry_run").
+//
+// Returns one CleanupResult per matched instance — never nil, may be empty if
+// nothing matched. A successful HTTP response can still contain results with
+// Status == "error" (partial failure on a per-instance basis); callers should
+// inspect each result rather than relying on the absence of an error return.
+//
+// @see POST /api/v1/admin/cleanup-policies/:id/run
+func (c *Client) RunCleanupPolicy(id string, dryRun bool) ([]types.CleanupResult, error) {
+	path := fmt.Sprintf("/api/v1/admin/cleanup-policies/%s/run", id)
+	if dryRun {
+		path += "?dry_run=true"
+	}
+	var results []types.CleanupResult
+	if err := c.Post(path, nil, &results); err != nil {
+		return nil, err
+	}
+	return results, nil
+}

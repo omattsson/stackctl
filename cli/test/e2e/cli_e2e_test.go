@@ -2089,9 +2089,42 @@ func startE2ECleanupPolicyMockServer(t *testing.T) *httptest.Server {
 				return
 			}
 			id := trimmed
+			action := ""
+			if i := strings.Index(id, "/"); i >= 0 {
+				id, action = id[:i], id[i+1:]
+			}
 			mu.Lock()
 			existing, exists := policies[id]
 			mu.Unlock()
+
+			// POST /api/v1/admin/cleanup-policies/:id/run
+			if action == "run" && r.Method == http.MethodPost {
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": "cleanup policy not found"})
+					return
+				}
+				dryRun := r.URL.Query().Get("dry_run") == "true"
+				status := "success"
+				if dryRun {
+					status = "dry_run"
+				}
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+					{"instance_id": "i-" + id + "-1", "instance_name": "app-1", "namespace": "stack-app-1", "owner_id": "alice", "action": existing.Action, "status": status},
+				})
+				return
+			}
+
+			// If the path carried an action segment we didn't explicitly handle
+			// (e.g. /:id/unknown), reject before falling through to PUT/DELETE
+			// on the base policy — otherwise the mock would silently mutate
+			// /:id when the caller asked for /:id/<something-else>.
+			if action != "" {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "unknown action: " + action})
+				return
+			}
 
 			switch r.Method {
 			case http.MethodPut:
@@ -2198,4 +2231,41 @@ func TestE2ECleanupPolicyCRUDRoundTrip(t *testing.T) {
 	// delete
 	_, _, err = runStackctl(t, dir, "cleanup-policy", "delete", got.ID, "--yes")
 	require.NoError(t, err)
+}
+
+func TestE2ECleanupPolicyRunDryRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2ECleanupPolicyMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	// Seed a policy first.
+	policyFile := filepath.Join(dir, "policy.json")
+	require.NoError(t, os.WriteFile(policyFile, []byte(`{
+		"name": "nightly-stop",
+		"cluster_id": "all",
+		"action": "stop",
+		"condition": "idle_days:7",
+		"schedule": "0 2 * * *",
+		"enabled": true
+	}`), 0o600))
+	_, _, err := runStackctl(t, dir, "cleanup-policy", "create", "--from-file", policyFile)
+	require.NoError(t, err)
+
+	// run --dry-run — exit 0, output shows the dry-run status.
+	stdout, _, err := runStackctl(t, dir, "cleanup-policy", "run", "1", "--dry-run")
+	require.NoError(t, err, "dry-run must exit 0")
+	assert.Contains(t, stdout, "dry_run")
+	assert.Contains(t, stdout, "1 dry-run")
+
+	// Real run also exits 0 when every instance reports success.
+	stdout, _, err = runStackctl(t, dir, "cleanup-policy", "run", "1")
+	require.NoError(t, err, "all-success real run must exit 0")
+	assert.Contains(t, stdout, "success")
+	assert.Contains(t, stdout, "1 success")
 }

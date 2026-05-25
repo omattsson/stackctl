@@ -258,6 +258,116 @@ Examples:
 	},
 }
 
+var cleanupPolicyRunCmd = &cobra.Command{
+	Use:   "run <id-or-name>",
+	Short: "Execute a cleanup policy immediately (admin only)",
+	Long: `Trigger a one-off run of a cleanup policy, outside its normal schedule.
+
+Use --dry-run to preview the affected stack instances without applying the
+policy's action (stop/clean/delete). Without --dry-run the backend applies
+the action and returns one result per matched instance.
+
+The command exits non-zero when the backend reports any per-instance error,
+even if other instances succeeded — partial failures are surfaced so scripts
+can branch on the exit code.
+
+When the argument is a name (not an ID), this command issues a list+filter
+round-trip to resolve the ID before sending the run request.
+
+Examples:
+  stackctl cleanup-policy run 1 --dry-run
+  stackctl cleanup-policy run nightly-stop
+  stackctl cleanup-policy run 1 -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		id, err := resolveCleanupPolicyID(c, args[0])
+		if err != nil {
+			return err
+		}
+
+		results, err := c.RunCleanupPolicy(id, dryRun)
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			for _, r := range results {
+				fmt.Fprintln(printer.Writer, r.InstanceID)
+			}
+			return runExitOnPartialFailure(results)
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			if err := printer.PrintJSON(results); err != nil {
+				return err
+			}
+		case output.FormatYAML:
+			if err := printer.PrintYAML(results); err != nil {
+				return err
+			}
+		default:
+			if len(results) == 0 {
+				printer.PrintMessage("No instances matched policy %s.", args[0])
+			} else {
+				headers := []string{"INSTANCE ID", "INSTANCE", "NAMESPACE", "OWNER", "ACTION", "STATUS", "ERROR"}
+				rows := make([][]string, len(results))
+				for i, r := range results {
+					rows[i] = []string{r.InstanceID, r.InstanceName, r.Namespace, r.OwnerID, r.Action, r.Status, r.Error}
+				}
+				if err := printer.PrintTable(headers, rows); err != nil {
+					return err
+				}
+			}
+			success, errored, dry := cleanupResultCounts(results)
+			printer.PrintMessage("Summary: %d success, %d error, %d dry-run.", success, errored, dry)
+		}
+
+		return runExitOnPartialFailure(results)
+	},
+}
+
+// cleanupResultCounts buckets the results by Status. Anything outside the
+// three documented statuses ("success", "error", "dry_run") is ignored for
+// counting — unknown statuses still appear in the table.
+func cleanupResultCounts(results []types.CleanupResult) (success, errored, dryRun int) {
+	for _, r := range results {
+		switch r.Status {
+		case "success":
+			success++
+		case "error":
+			errored++
+		case "dry_run":
+			dryRun++
+		}
+	}
+	return
+}
+
+// runExitOnPartialFailure returns a non-nil error (which Cobra turns into a
+// non-zero exit code) when at least one result reports Status == "error".
+// SilenceUsage on the command keeps cobra from printing the usage banner.
+func runExitOnPartialFailure(results []types.CleanupResult) error {
+	n := 0
+	for _, r := range results {
+		if r.Status == "error" {
+			n++
+		}
+	}
+	if n > 0 {
+		return fmt.Errorf("cleanup policy reported %d per-instance failure(s); see results above", n)
+	}
+	return nil
+}
+
 // readPolicyFile loads a JSON or YAML file containing a cleanup-policy payload.
 // `..` segments in the path are rejected to match the convention used by
 // `cluster create`, `cluster update`, `definition create`, etc.
@@ -389,11 +499,14 @@ func init() {
 	cleanupPolicyDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
 	cleanupPolicyDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
 
+	cleanupPolicyRunCmd.Flags().Bool("dry-run", false, "Preview the affected stack instances without applying the policy's action")
+
 	cleanupPolicyCmd.AddCommand(cleanupPolicyListCmd)
 	cleanupPolicyCmd.AddCommand(cleanupPolicyGetCmd)
 	cleanupPolicyCmd.AddCommand(cleanupPolicyCreateCmd)
 	cleanupPolicyCmd.AddCommand(cleanupPolicyUpdateCmd)
 	cleanupPolicyCmd.AddCommand(cleanupPolicyDeleteCmd)
+	cleanupPolicyCmd.AddCommand(cleanupPolicyRunCmd)
 
 	rootCmd.AddCommand(cleanupPolicyCmd)
 }
