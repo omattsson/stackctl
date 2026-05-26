@@ -1054,6 +1054,15 @@ Examples:
 			}
 		}
 		idMode := len(normIDs) > 0
+
+		// Reject --id + non-terminal --status: the status filter would
+		// drop the very events the loop needs to drain `pending`, so the
+		// watch would hang until the user Ctrl-C's it. Fail fast with a
+		// pointer to the valid statuses so the user can fix the invocation.
+		if idMode && statusFilter != "" && !stackWatchTerminalStatuses[statusFilter] {
+			return fmt.Errorf("--status must be a terminal status (running, stopped, draft, error, failed) when used with --id; got %q which would never let watch exit", statusFilter)
+		}
+
 		pending := map[string]bool{}
 		for _, id := range normIDs {
 			pending[id] = true

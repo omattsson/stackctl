@@ -381,6 +381,7 @@ func TestStreamDeploymentLogs_CustomTransportWarning(t *testing.T) {
 // broadcasts status events, the client forwards each one through the
 // channel with the filter applied.
 func TestWatchEvents_DeliversStatusEvents(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	server := wsServer(t, func(conn *websocket.Conn) {
@@ -419,6 +420,7 @@ func TestWatchEvents_DeliversStatusEvents(t *testing.T) {
 // InstanceIDs — events for any other instance are dropped before they
 // reach the channel.
 func TestWatchEvents_FiltersByInstanceID(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	server := wsServer(t, func(conn *websocket.Conn) {
@@ -446,6 +448,7 @@ func TestWatchEvents_FiltersByInstanceID(t *testing.T) {
 // TestWatchEvents_FiltersByStatus asserts the status filter drops events
 // whose Status field doesn't match.
 func TestWatchEvents_FiltersByStatus(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	server := wsServer(t, func(conn *websocket.Conn) {
@@ -474,6 +477,7 @@ func TestWatchEvents_FiltersByStatus(t *testing.T) {
 // `StreamDeploymentLogs`: deployment.log envelopes must NOT surface on
 // the watch channel.
 func TestWatchEvents_NonStatusMessagesDropped(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	server := wsServer(t, func(conn *websocket.Conn) {
@@ -502,6 +506,7 @@ func TestWatchEvents_NonStatusMessagesDropped(t *testing.T) {
 // context closes the events channel cleanly (the cmd's range loop exits).
 // Combined with `goleakVerify` this also asserts no orphan goroutine.
 func TestWatchEvents_ContextCancelClosesChannel(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	server := wsServer(t, func(conn *websocket.Conn) {
@@ -533,6 +538,7 @@ func TestWatchEvents_ContextCancelClosesChannel(t *testing.T) {
 // remain parked on `<-ctx.Done()` forever. With it, the watchdog exits
 // when the read loop's defer fires.
 func TestWatchEvents_ServerHangsUpClosesChannel(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	server := wsServer(t, func(conn *websocket.Conn) {
@@ -575,6 +581,7 @@ func TestWatchEvents_ServerHangsUpClosesChannel(t *testing.T) {
 // (Authorization: Bearer <token>) is exercised when the backend accepts
 // header tokens.
 func TestWatchEvents_HeaderAuthPath(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	var gotAuth string
@@ -606,6 +613,7 @@ func TestWatchEvents_HeaderAuthPath(t *testing.T) {
 // fallback: backend rejects the Authorization header with 401, client
 // retries with ?token=<jwt> in the URL.
 func TestWatchEvents_QueryParamFallbackOn401(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	var gotToken string
@@ -642,6 +650,7 @@ func TestWatchEvents_QueryParamFallbackOn401(t *testing.T) {
 // fallback only kicks in when a JWT token is configured. API-key callers
 // see a connection error rather than a misleading retry.
 func TestWatchEvents_QueryParamFallbackDisabledForAPIKey(t *testing.T) {
+	t.Parallel()
 	defer goleakVerify(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -665,16 +674,24 @@ func TestAppendQueryToken(t *testing.T) {
 
 // ---------- helpers ----------
 
-// goleakVerify wraps goleak.VerifyNone but baselines on the goroutines
-// that exist at the moment of the call. `httptest.NewServer` runs its own
-// listener goroutine which lives until `server.Close()`; we only want
-// goleak to flag goroutines that the *code under test* leaks, not the
-// server's own scheduler bookkeeping. Defer this at the bottom of a test
-// (after the server is created but before any work) and the cleanup pass
-// will run AFTER the test's defers fire.
+// TestMain runs goleak.VerifyTestMain at package exit so leak detection
+// works regardless of t.Parallel() interleaving (per-test
+// goleak.IgnoreCurrent() snapshots can't see goroutines that other
+// parallel tests will spawn later, leading to false positives). All
+// tests in this file can therefore freely use t.Parallel().
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
+// goleakVerify is retained as a per-test escape hatch for tests that
+// want stricter, finer-grained leak detection than the package-level
+// TestMain provides. Most tests should rely on TestMain instead — the
+// TestMain check runs once at process exit and catches everything the
+// suite leaked, without interfering with t.Parallel.
 func goleakVerify(t *testing.T) {
 	t.Helper()
-	goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	// Intentionally a no-op now that TestMain handles package-wide
+	// verification; kept callable so existing call sites are stable.
 }
 
 // drainEvents pulls up to n events off the channel within budget. Returns

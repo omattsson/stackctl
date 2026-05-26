@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // Tests in this file are NOT parallelized because they mutate package-level
@@ -1991,6 +1992,45 @@ func TestStackWatchCmd_JSONOutput(t *testing.T) {
 	assert.Equal(t, "42", ev.InstanceID)
 	assert.Equal(t, "running", ev.Status)
 	assert.Equal(t, "deployment.status", ev.Type)
+}
+
+// TestStackWatchCmd_YAMLOutput rounds out the output-mode matrix
+// (table/JSON/YAML/quiet) for stack watch. One YAML doc per event.
+func TestStackWatchCmd_YAMLOutput(t *testing.T) {
+	server := startWatchWSServer(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "running"},
+	})
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	require.NoError(t, stackWatchCmd.Flags().Set("id", "42"))
+	t.Cleanup(func() { _ = stackWatchCmd.Flags().Set("id", "") })
+
+	require.NoError(t, stackWatchCmd.RunE(stackWatchCmd, []string{}))
+
+	var ev types.WatchEvent
+	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &ev))
+	assert.Equal(t, "42", ev.InstanceID)
+	assert.Equal(t, "running", ev.Status)
+	assert.Equal(t, "deployment.status", ev.Type)
+}
+
+// TestStackWatchCmd_IDWithNonTerminalStatusRejected locks the guard that
+// prevents `--id + --status deploying` from hanging forever (the filter
+// would drop the very events the loop needs to drain `pending`).
+func TestStackWatchCmd_IDWithNonTerminalStatusRejected(t *testing.T) {
+	_ = setupStackTestCmd(t, "http://unused")
+	require.NoError(t, stackWatchCmd.Flags().Set("id", "42"))
+	require.NoError(t, stackWatchCmd.Flags().Set("status", "deploying"))
+	t.Cleanup(func() {
+		_ = stackWatchCmd.Flags().Set("id", "")
+		_ = stackWatchCmd.Flags().Set("status", "")
+	})
+
+	err := stackWatchCmd.RunE(stackWatchCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "terminal status")
 }
 
 // TestStackWatchCmd_QuietPrintsIDs locks in the convention: --quiet
