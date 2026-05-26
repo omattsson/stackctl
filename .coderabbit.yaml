@@ -46,6 +46,8 @@ reviews:
             notification prefs get/set → event_type names (the (user_id,
               event_type) tuple is the backend primary key; opaque UUID IDs
               are useless for scripting like `prefs get -q | grep failed`)
+            git providers → provider type names (azure_devops, gitlab) —
+              the response shape has no ID field at all
         - Destructive commands require --yes flag and stderr confirmation prompt
         - All API calls go through pkg/client via newClient()
         - parseID() for sub-resource IDs; resolveStackID() (and the

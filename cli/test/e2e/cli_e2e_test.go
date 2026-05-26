@@ -2614,6 +2614,44 @@ func TestE2EAnalyticsOverviewJSONParses(t *testing.T) {
 	assert.Equal(t, 7, got.TotalTemplates)
 }
 
+// startE2EFavoriteMockServer serves a deterministic favorites list for the
+// `stackctl favorite list -o quiet` happy-path scenario.
+func startE2EFavoriteMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/favorites":
+			_, _ = w.Write([]byte(
+				`[{"id":"f1","entity_type":"definition","entity_id":"42","created_at":"2026-05-01T10:00:00Z"},` +
+					`{"id":"f2","entity_type":"template","entity_id":"9","created_at":"2026-05-01T10:00:00Z"}]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
+		}
+	}))
+}
+
+// TestE2EFavoriteListQuiet exercises the issue's happy-path acceptance
+// scenario: `stackctl favorite list --quiet` prints entity IDs only.
+func TestE2EFavoriteListQuiet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EFavoriteMockServer(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, stderr, err := runStackctl(t, dir, "favorite", "list", "--quiet")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Equal(t, "42\n9", strings.TrimSpace(stdout))
+	assert.NotContains(t, stdout, "ENTITY TYPE")
+}
+
 // startE2ENotificationMockServer serves a deterministic notification list
 // so the e2e JSON contract can be diffed across runs.
 func startE2ENotificationMockServer(t *testing.T) *httptest.Server {

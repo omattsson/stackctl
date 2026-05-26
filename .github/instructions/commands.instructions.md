@@ -40,6 +40,7 @@ default:
   - `cluster health <id>` → prints the derived status label (`healthy`/`degraded`/`unknown`) via `fmt.Fprintln(printer.Writer, deriveHealthStatus(health))`
   - `cluster test-connection <id>` → prints `result.Status` (only on 2xx responses; non-2xx surfaces as an `APIError` command error, nothing is printed to stdout) via `fmt.Fprintln(printer.Writer, result.Status)`
   - `notification prefs get` / `notification prefs set` → prints `event_type` for each preference. Preferences are keyed by `(user_id, event_type)` server-side, so `EventType` is the stable functional identifier; the database UUID `ID` field is opaque and unstable across resets, so scripting like `prefs get -q \| grep failed` requires the event type.
+  - `git providers` → prints provider `type` names (`azure_devops`, `gitlab`). The response shape (`gitprovider.ProviderStatus`) has no ID field at all — the provider type IS the identifier.
 
 ## Destructive Operations
 Commands that delete or clean resources must:
