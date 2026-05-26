@@ -966,7 +966,171 @@ func init() {
 	stackCmd.AddCommand(stackHistoryCmd)
 	stackCmd.AddCommand(stackRollbackCmd)
 	stackCmd.AddCommand(stackHistoryValuesCmd)
+	stackCmd.AddCommand(stackWatchCmd)
+
+	// stack watch flags
+	// Plain String (not StringSlice): pflag's StringSlice.Set APPENDS after
+	// the first call rather than replacing, so test-cleanup `Set("")` is a
+	// silent no-op and flag values leak across in-process invocations.
+	// Manual splitting in RunE keeps the test-reset story clean.
+	stackWatchCmd.Flags().String("id", "", "Filter to one or more instance IDs (comma-separated); exits when all listed IDs reach a terminal status (running or failed)")
+	stackWatchCmd.Flags().String("owner", "", "Filter to a single owner — NOT YET SUPPORTED (the /ws payload does not carry owner_id; see stackctl#75 follow-up)")
+	stackWatchCmd.Flags().String("status", "", "Filter to a single status value (e.g. running, deploying, failed); streams until Ctrl-C")
+
 	rootCmd.AddCommand(stackCmd)
+}
+
+// stackWatchTerminalStatuses lists the status values that count as a
+// terminal outcome for `stack watch --id`. Mirrors backend deployer state
+// transitions: "running" / "stopped" / "draft" → success-ish; "error" /
+// "failed" → failure (the backend uses "error" but issue #75 documents
+// "failed" — we accept both).
+var stackWatchTerminalStatuses = map[string]bool{
+	"running": true,
+	"stopped": true,
+	"draft":   true,
+	"error":   true,
+	"failed":  true,
+}
+
+// stackWatchFailedStatuses lists the terminal statuses that should cause
+// `stack watch --id` to exit with a non-zero exit code.
+var stackWatchFailedStatuses = map[string]bool{
+	"error":  true,
+	"failed": true,
+}
+
+var stackWatchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Watch stack lifecycle events over WebSocket",
+	Long: `Subscribe to /ws and render deploy/stop/clean/status events as they
+arrive.
+
+  --id <id1,id2,...>   Wait for the listed instance IDs to reach a
+                       terminal status (running/stopped/draft → exit 0;
+                       error/failed → exit 1). Exits as soon as every
+                       listed ID has reported terminal.
+  --status <state>     Filter to events with the given status; streams
+                       until Ctrl-C.
+  --owner <user>       NOT YET SUPPORTED — the /ws status payload does
+                       not carry owner_id, so a per-event REST lookup
+                       would be required. Returns an explicit error.
+
+Combining --id with --status suppresses intermediate progress events
+(the status filter drops "deploying"/"stopping" updates for the listed
+IDs, so you'll only see the moment they reach the target status).
+
+Authentication: reuses the HTTP client auth chain. JWT goes via the
+Authorization: Bearer header; if the WS upgrade is rejected with HTTP
+401 (e.g. a reverse proxy stripped the Authorization header), the
+dialer transparently retries with ?token=<jwt> in the query string,
+which the backend WS handler also accepts. API keys are sent as
+X-API-Key but the backend WS endpoint currently only honours JWTs;
+operators using --api-key should expect a 401.
+
+Ctrl-C exits cleanly with no orphan goroutines.
+
+Examples:
+  stackctl stack deploy 42 && stackctl stack watch --id 42
+  stackctl stack watch --id 42,43,44   # exits when all three reach terminal
+  stackctl stack watch --status deploying
+  stackctl stack watch -o json         # one JSON object per event`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		idsRaw, _ := cmd.Flags().GetString("id")
+		owner, _ := cmd.Flags().GetString("owner")
+		statusFilter, _ := cmd.Flags().GetString("status")
+
+		if owner != "" {
+			return fmt.Errorf("--owner is not yet supported; see stackctl#75 follow-up")
+		}
+
+		// Split + normalise --id values (trim whitespace, drop empties).
+		var normIDs []string
+		for _, raw := range strings.Split(idsRaw, ",") {
+			id := strings.TrimSpace(raw)
+			if id != "" {
+				normIDs = append(normIDs, id)
+			}
+		}
+		idMode := len(normIDs) > 0
+		pending := map[string]bool{}
+		for _, id := range normIDs {
+			pending[id] = true
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		// cmd.Context() returns nil when RunE is invoked directly (e.g. in
+		// unit tests that bypass Execute()). Fall back to Background so the
+		// signal-trap context is always rooted in a valid parent.
+		parentCtx := cmd.Context()
+		if parentCtx == nil {
+			parentCtx = context.Background()
+		}
+		ctx, stop := signal.NotifyContext(parentCtx, os.Interrupt)
+		defer stop()
+
+		events, err := c.WatchEvents(ctx, client.WatchFilter{
+			InstanceIDs: normIDs,
+			Status:      statusFilter,
+		})
+		if err != nil {
+			return err
+		}
+
+		var failedIDs []string
+		for ev := range events {
+			if err := printWatchEvent(ev); err != nil {
+				return err
+			}
+			if !idMode {
+				continue
+			}
+			if stackWatchTerminalStatuses[ev.Status] {
+				if stackWatchFailedStatuses[ev.Status] {
+					failedIDs = append(failedIDs, ev.InstanceID)
+				}
+				delete(pending, ev.InstanceID)
+				if len(pending) == 0 {
+					stop()
+					break
+				}
+			}
+		}
+
+		if len(failedIDs) > 0 {
+			return fmt.Errorf("instances reached a failed terminal status: %s", strings.Join(failedIDs, ", "))
+		}
+		return nil
+	},
+}
+
+// printWatchEvent renders one event in the operator's chosen output mode.
+// For table mode each event is one line ("[TIMESTAMP] INSTANCE STATUS …");
+// JSON/YAML emit one structured object per event (no array wrapper, so
+// the stream is grep- and jq-friendly).
+func printWatchEvent(ev types.WatchEvent) error {
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, ev.InstanceID)
+		return nil
+	}
+	switch printer.Format {
+	case output.FormatJSON:
+		return printer.PrintJSON(ev)
+	case output.FormatYAML:
+		return printer.PrintYAML(ev)
+	default:
+		msg := fmt.Sprintf("[%s] %s %s", ev.Timestamp.UTC().Format(time.RFC3339), ev.InstanceID, ev.Status)
+		if ev.ErrorMessage != "" {
+			msg += " — " + ev.ErrorMessage
+		}
+		fmt.Fprintln(printer.Writer, msg)
+		return nil
+	}
 }
 
 // parseID parses a string argument as a uint ID.

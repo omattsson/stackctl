@@ -940,6 +940,27 @@ type StreamResult struct {
 	ErrorMessage string
 }
 
+// WatchEvent is one render-ready event emitted by Client.WatchEvents.
+// Wraps the backend's "deployment.status" payload with a client-side
+// receipt timestamp so the CLI can show "when did this arrive" without
+// the backend needing to emit one.
+//
+// Population: every event sent on the channel is fully populated.
+// Timestamp is the client-side time.Now() at receipt — the backend
+// payload (gitprovider.ProviderStatus / deploymentStatusPayload) does
+// not carry one. Type is the WS envelope type ("deployment.status").
+//
+// Field declaration order is alphabetical by json tag (golden-file
+// contract — required for stable JSON output in tests).
+type WatchEvent struct {
+	ErrorMessage string    `json:"error_message,omitempty" yaml:"error_message,omitempty"`
+	InstanceID   string    `json:"instance_id" yaml:"instance_id"`
+	LogID        string    `json:"log_id,omitempty" yaml:"log_id,omitempty"`
+	Status       string    `json:"status" yaml:"status"`
+	Timestamp    time.Time `json:"timestamp" yaml:"timestamp"`
+	Type         string    `json:"type" yaml:"type"`
+}
+
 // CompareResult represents the comparison between two stack instances.
 type CompareResult struct {
 	Left  *StackInstance         `json:"left" yaml:"left"`

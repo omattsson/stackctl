@@ -14,6 +14,7 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
@@ -372,4 +373,342 @@ func TestStreamDeploymentLogs_CustomTransportWarning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "running", result.Status)
 	assert.Contains(t, warnBuf.String(), "Warning: custom HTTP transport detected")
+}
+
+// ---------- WatchEvents ----------
+
+// TestWatchEvents_DeliversStatusEvents covers the happy path: the server
+// broadcasts status events, the client forwards each one through the
+// channel with the filter applied.
+func TestWatchEvents_DeliversStatusEvents(t *testing.T) {
+	defer goleakVerify(t)
+
+	server := wsServer(t, func(conn *websocket.Conn) {
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{
+			InstanceID: "42", Status: "deploying",
+		})
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{
+			InstanceID: "42", Status: "running",
+		})
+		// Hold the connection open until the client closes it; otherwise
+		// the channel is never drained for the second event before the
+		// server-side defer fires.
+		_, _, _ = conn.ReadMessage()
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := New(server.URL)
+	events, err := c.WatchEvents(ctx, WatchFilter{})
+	require.NoError(t, err)
+
+	collected := drainEvents(t, events, 2, time.Second)
+	cancel()
+	drainRemaining(events, 100*time.Millisecond)
+
+	require.Len(t, collected, 2)
+	assert.Equal(t, "deploying", collected[0].Status)
+	assert.Equal(t, "running", collected[1].Status)
+	assert.Equal(t, "deployment.status", collected[0].Type)
+	assert.False(t, collected[0].Timestamp.IsZero(), "client-side timestamp must be populated")
+}
+
+// TestWatchEvents_FiltersByInstanceID asserts client-side filtering by
+// InstanceIDs — events for any other instance are dropped before they
+// reach the channel.
+func TestWatchEvents_FiltersByInstanceID(t *testing.T) {
+	defer goleakVerify(t)
+
+	server := wsServer(t, func(conn *websocket.Conn) {
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "other", Status: "running"})
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "running"})
+		_, _, _ = conn.ReadMessage()
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := New(server.URL)
+	events, err := c.WatchEvents(ctx, WatchFilter{InstanceIDs: []string{"42"}})
+	require.NoError(t, err)
+
+	collected := drainEvents(t, events, 1, time.Second)
+	cancel()
+	drainRemaining(events, 100*time.Millisecond)
+
+	require.Len(t, collected, 1)
+	assert.Equal(t, "42", collected[0].InstanceID)
+}
+
+// TestWatchEvents_FiltersByStatus asserts the status filter drops events
+// whose Status field doesn't match.
+func TestWatchEvents_FiltersByStatus(t *testing.T) {
+	defer goleakVerify(t)
+
+	server := wsServer(t, func(conn *websocket.Conn) {
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "deploying"})
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "running"})
+		_, _, _ = conn.ReadMessage()
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := New(server.URL)
+	events, err := c.WatchEvents(ctx, WatchFilter{Status: "running"})
+	require.NoError(t, err)
+
+	collected := drainEvents(t, events, 1, time.Second)
+	cancel()
+	drainRemaining(events, 100*time.Millisecond)
+
+	require.Len(t, collected, 1)
+	assert.Equal(t, "running", collected[0].Status)
+}
+
+// TestWatchEvents_NonStatusMessagesDropped guards against cross-talk with
+// `StreamDeploymentLogs`: deployment.log envelopes must NOT surface on
+// the watch channel.
+func TestWatchEvents_NonStatusMessagesDropped(t *testing.T) {
+	defer goleakVerify(t)
+
+	server := wsServer(t, func(conn *websocket.Conn) {
+		writeWSMessage(t, conn, "deployment.log", types.WSDeploymentLog{InstanceID: "42", Line: "noise"})
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "running"})
+		_, _, _ = conn.ReadMessage()
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := New(server.URL)
+	events, err := c.WatchEvents(ctx, WatchFilter{})
+	require.NoError(t, err)
+
+	collected := drainEvents(t, events, 1, time.Second)
+	cancel()
+	drainRemaining(events, 100*time.Millisecond)
+
+	require.Len(t, collected, 1)
+	assert.Equal(t, "running", collected[0].Status)
+}
+
+// TestWatchEvents_ContextCancelClosesChannel asserts that cancelling the
+// context closes the events channel cleanly (the cmd's range loop exits).
+// Combined with `goleakVerify` this also asserts no orphan goroutine.
+func TestWatchEvents_ContextCancelClosesChannel(t *testing.T) {
+	defer goleakVerify(t)
+
+	server := wsServer(t, func(conn *websocket.Conn) {
+		// Block forever — only the client's CloseMessage will end this.
+		_, _, _ = conn.ReadMessage()
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c := New(server.URL)
+	events, err := c.WatchEvents(ctx, WatchFilter{})
+	require.NoError(t, err)
+
+	cancel()
+	// Channel must close within a small time budget — anything longer
+	// indicates an orphan goroutine or a missed cleanup path.
+	select {
+	case _, ok := <-events:
+		assert.False(t, ok, "channel must close, not deliver an event")
+	case <-time.After(time.Second):
+		t.Fatal("events channel did not close after ctx cancel")
+	}
+}
+
+// TestWatchEvents_ServerHangsUpClosesChannel reproduces the
+// previously-leaked case: the server closes the connection on its own
+// (e.g. a backend restart or proxy timeout) while ctx is still alive.
+// Without the watchdog's `done` channel, the inner goroutine would
+// remain parked on `<-ctx.Done()` forever. With it, the watchdog exits
+// when the read loop's defer fires.
+func TestWatchEvents_ServerHangsUpClosesChannel(t *testing.T) {
+	defer goleakVerify(t)
+
+	server := wsServer(t, func(conn *websocket.Conn) {
+		// Send one event, then return — defer closes the connection,
+		// which surfaces as a ReadMessage error on the client side.
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "running"})
+	})
+	defer server.Close()
+
+	// Critically: NEVER cancel this ctx. If the watchdog goroutine is
+	// leaking, goleakVerify will catch it because it's still parked on
+	// <-ctx.Done() after the test body returns.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := New(server.URL)
+	events, err := c.WatchEvents(ctx, WatchFilter{})
+	require.NoError(t, err)
+
+	// Drain everything; channel must close after the server hangs up.
+	select {
+	case ev, ok := <-events:
+		if ok {
+			assert.Equal(t, "running", ev.Status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("did not receive the running event before timeout")
+	}
+	// Channel must close on its own (server hang-up → read loop returns
+	// → defer close(out) fires).
+	select {
+	case _, ok := <-events:
+		assert.False(t, ok, "channel must close after server hang-up")
+	case <-time.After(time.Second):
+		t.Fatal("events channel did not close after server hang-up")
+	}
+}
+
+// TestWatchEvents_HeaderAuthPath verifies the default auth path
+// (Authorization: Bearer <token>) is exercised when the backend accepts
+// header tokens.
+func TestWatchEvents_HeaderAuthPath(t *testing.T) {
+	defer goleakVerify(t)
+
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "running"})
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := New(server.URL)
+	c.Token = "tok-abc"
+	events, err := c.WatchEvents(ctx, WatchFilter{})
+	require.NoError(t, err)
+	drainEvents(t, events, 1, time.Second)
+	cancel()
+	drainRemaining(events, 100*time.Millisecond)
+
+	assert.Equal(t, "Bearer tok-abc", gotAuth, "header-auth path must send Authorization: Bearer")
+}
+
+// TestWatchEvents_QueryParamFallbackOn401 covers the documented K4
+// fallback: backend rejects the Authorization header with 401, client
+// retries with ?token=<jwt> in the URL.
+func TestWatchEvents_QueryParamFallbackOn401(t *testing.T) {
+	defer goleakVerify(t)
+
+	var gotToken string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// First attempt: header-only — reject.
+		if r.URL.Query().Get("token") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		gotToken = r.URL.Query().Get("token")
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "running"})
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := New(server.URL)
+	c.Token = "tok-fallback"
+	events, err := c.WatchEvents(ctx, WatchFilter{})
+	require.NoError(t, err)
+	drainEvents(t, events, 1, time.Second)
+	cancel()
+	drainRemaining(events, 100*time.Millisecond)
+
+	assert.Equal(t, "tok-fallback", gotToken, "401 on header path must trigger ?token= retry")
+}
+
+// TestWatchEvents_QueryParamFallbackDisabledForAPIKey ensures the 401
+// fallback only kicks in when a JWT token is configured. API-key callers
+// see a connection error rather than a misleading retry.
+func TestWatchEvents_QueryParamFallbackDisabledForAPIKey(t *testing.T) {
+	defer goleakVerify(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := New(server.URL)
+	c.APIKey = "key-abc"
+	_, err := c.WatchEvents(ctx, WatchFilter{})
+	require.Error(t, err)
+}
+
+func TestAppendQueryToken(t *testing.T) {
+	assert.Equal(t, "ws://h/ws?token=t", appendQueryToken("ws://h/ws", "t"))
+	assert.Equal(t, "ws://h/ws?x=1&token=t", appendQueryToken("ws://h/ws?x=1", "t"))
+}
+
+// ---------- helpers ----------
+
+// goleakVerify wraps goleak.VerifyNone but baselines on the goroutines
+// that exist at the moment of the call. `httptest.NewServer` runs its own
+// listener goroutine which lives until `server.Close()`; we only want
+// goleak to flag goroutines that the *code under test* leaks, not the
+// server's own scheduler bookkeeping. Defer this at the bottom of a test
+// (after the server is created but before any work) and the cleanup pass
+// will run AFTER the test's defers fire.
+func goleakVerify(t *testing.T) {
+	t.Helper()
+	goleak.VerifyNone(t, goleak.IgnoreCurrent())
+}
+
+// drainEvents pulls up to n events off the channel within budget. Returns
+// the slice of events received; the test asserts the count separately.
+func drainEvents(t *testing.T, events <-chan types.WatchEvent, n int, budget time.Duration) []types.WatchEvent {
+	t.Helper()
+	out := make([]types.WatchEvent, 0, n)
+	deadline := time.After(budget)
+	for len(out) < n {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				return out
+			}
+			out = append(out, ev)
+		case <-deadline:
+			t.Fatalf("drainEvents: only received %d of %d events within %s", len(out), n, budget)
+		}
+	}
+	return out
+}
+
+// drainRemaining drains everything left on the channel so the producing
+// goroutine isn't blocked on a backpressured send when the test exits.
+func drainRemaining(events <-chan types.WatchEvent, budget time.Duration) {
+	deadline := time.After(budget)
+	for {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			return
+		}
+	}
 }

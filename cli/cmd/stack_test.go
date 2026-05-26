@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/omattsson/stackctl/cli/pkg/config"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
@@ -1866,4 +1867,145 @@ func TestStackDeployCmd_DryRun(t *testing.T) {
 	err := stackDeployCmd.RunE(stackDeployCmd, []string{"42"})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Would deploy")
+}
+
+// ---------- stack watch ----------
+
+// startWatchWSServer spins up a websocket server that emits the supplied
+// sequence of (instance_id, status) pairs as "deployment.status" envelopes
+// then blocks on a ReadMessage so the client's close handshake completes
+// cleanly. Returns the *httptest.Server; the caller must call Close.
+func startWatchWSServer(t *testing.T, events []types.WSDeploymentStatus) *httptest.Server {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for _, ev := range events {
+			payload, _ := json.Marshal(ev)
+			msg, _ := json.Marshal(types.WSMessage{Type: "deployment.status", Data: payload})
+			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		}
+		// Hold the connection open until the client closes it.
+		_, _, _ = conn.ReadMessage()
+	}))
+}
+
+// TestStackWatchCmd_ExitsOnRunning covers the primary acceptance
+// criterion: `stack watch --id X` blocks until the instance reports a
+// terminal status and exits cleanly when that status is "running".
+func TestStackWatchCmd_ExitsOnRunning(t *testing.T) {
+	server := startWatchWSServer(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "deploying"},
+		{InstanceID: "42", Status: "running"},
+	})
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	require.NoError(t, stackWatchCmd.Flags().Set("id", "42"))
+	t.Cleanup(func() { _ = stackWatchCmd.Flags().Set("id", "") })
+
+	err := stackWatchCmd.RunE(stackWatchCmd, []string{})
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "42")
+	assert.Contains(t, out, "running")
+}
+
+// TestStackWatchCmd_NonZeroOnFailed verifies the documented exit-code
+// contract: a terminal "failed"/"error" status causes RunE to return a
+// non-nil error (which Cobra surfaces as a non-zero exit code).
+func TestStackWatchCmd_NonZeroOnFailed(t *testing.T) {
+	server := startWatchWSServer(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "deploying"},
+		{InstanceID: "42", Status: "error", ErrorMessage: "image pull backoff"},
+	})
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	require.NoError(t, stackWatchCmd.Flags().Set("id", "42"))
+	t.Cleanup(func() { _ = stackWatchCmd.Flags().Set("id", "") })
+
+	err := stackWatchCmd.RunE(stackWatchCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed")
+}
+
+// TestStackWatchCmd_MultiIDExitsOnAllTerminal covers the "wait for all
+// listed IDs" semantic: the loop must NOT exit until every listed ID
+// has reported a terminal status.
+func TestStackWatchCmd_MultiIDExitsOnAllTerminal(t *testing.T) {
+	server := startWatchWSServer(t, []types.WSDeploymentStatus{
+		{InstanceID: "1", Status: "running"},
+		{InstanceID: "2", Status: "deploying"},
+		{InstanceID: "2", Status: "running"},
+	})
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	require.NoError(t, stackWatchCmd.Flags().Set("id", "1,2"))
+	t.Cleanup(func() { _ = stackWatchCmd.Flags().Set("id", "") })
+
+	err := stackWatchCmd.RunE(stackWatchCmd, []string{})
+	require.NoError(t, err)
+}
+
+// TestStackWatchCmd_OwnerRejected documents that the --owner flag is
+// currently a no-op surface placeholder; using it returns a clear error
+// rather than silently dropping the filter.
+func TestStackWatchCmd_OwnerRejected(t *testing.T) {
+	_ = setupStackTestCmd(t, "http://unused")
+	require.NoError(t, stackWatchCmd.Flags().Set("owner", "alice"))
+	t.Cleanup(func() {
+		_ = stackWatchCmd.Flags().Set("owner", "")
+		_ = stackWatchCmd.Flags().Set("id", "")
+	})
+
+	err := stackWatchCmd.RunE(stackWatchCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--owner is not yet supported")
+}
+
+// TestStackWatchCmd_JSONOutput emits one JSON object per event in -o json
+// mode — a contract worth locking in because operators pipe this to jq.
+func TestStackWatchCmd_JSONOutput(t *testing.T) {
+	server := startWatchWSServer(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "running"},
+	})
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	require.NoError(t, stackWatchCmd.Flags().Set("id", "42"))
+	t.Cleanup(func() { _ = stackWatchCmd.Flags().Set("id", "") })
+
+	require.NoError(t, stackWatchCmd.RunE(stackWatchCmd, []string{}))
+
+	var ev types.WatchEvent
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &ev))
+	assert.Equal(t, "42", ev.InstanceID)
+	assert.Equal(t, "running", ev.Status)
+	assert.Equal(t, "deployment.status", ev.Type)
+}
+
+// TestStackWatchCmd_QuietPrintsIDs locks in the convention: --quiet
+// emits one instance ID per event.
+func TestStackWatchCmd_QuietPrintsIDs(t *testing.T) {
+	server := startWatchWSServer(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "running"},
+	})
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Quiet = true
+	require.NoError(t, stackWatchCmd.Flags().Set("id", "42"))
+	t.Cleanup(func() { _ = stackWatchCmd.Flags().Set("id", "") })
+
+	require.NoError(t, stackWatchCmd.RunE(stackWatchCmd, []string{}))
+	assert.Equal(t, "42", strings.TrimSpace(buf.String()))
 }

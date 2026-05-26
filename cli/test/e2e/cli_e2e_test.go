@@ -17,6 +17,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gorilla/websocket"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2612,6 +2613,73 @@ func TestE2EAnalyticsOverviewJSONParses(t *testing.T) {
 	assert.Equal(t, 3, got.RunningInstances)
 	assert.Equal(t, 42, got.TotalDeploys)
 	assert.Equal(t, 7, got.TotalTemplates)
+}
+
+// startE2EStackWatchWS serves a WebSocket upgrade at /ws that emits the
+// supplied event sequence then holds the connection open until the
+// client closes. Used by the stack watch e2e tests.
+func startE2EStackWatchWS(t *testing.T, events []types.WSDeploymentStatus) *httptest.Server {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for _, ev := range events {
+			payload, _ := json.Marshal(ev)
+			msg, _ := json.Marshal(types.WSMessage{Type: "deployment.status", Data: payload})
+			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		}
+		_, _, _ = conn.ReadMessage()
+	}))
+}
+
+// TestE2EStackWatchExitsZeroOnRunning builds the binary and runs
+// `stackctl stack watch --id 42` against a stub that sends a terminal
+// "running" event. Asserts exit code 0.
+func TestE2EStackWatchExitsZeroOnRunning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EStackWatchWS(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "running"},
+	})
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "stack", "watch", "--id", "42")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "running")
+}
+
+// TestE2EStackWatchExitsNonZeroOnFailed asserts the exit-code contract
+// for a terminal "error" status (exec.ExitError, exact integer not pinned).
+func TestE2EStackWatchExitsNonZeroOnFailed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EStackWatchWS(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "error", ErrorMessage: "image pull"},
+	})
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	_, _, err := runStackctl(t, dir, "stack", "watch", "--id", "42")
+	require.Error(t, err, "terminal error status must produce a non-zero exit")
 }
 
 // startE2EFavoriteMockServer serves a deterministic favorites list for the
