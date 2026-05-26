@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gorilla/websocket"
+	"github.com/omattsson/stackctl/cli/cmd"
 	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -599,4 +602,87 @@ func TestStackWorkflow_RollbackFlow(t *testing.T) {
 	rollbackResp, err = c.RollbackStack(id, &types.RollbackRequest{TargetLogID: "deploy-" + id})
 	require.NoError(t, err)
 	assert.Equal(t, "rollback-to-deploy-"+id, rollbackResp.LogID)
+}
+
+// ---------- stack watch ----------
+
+// startWatchIntegrationServer is the integration-layer equivalent of the
+// unit-test wsServer helper: a websocket upgrade endpoint at /ws that
+// emits the supplied event sequence then holds the connection open.
+func startWatchIntegrationServer(t *testing.T, events []types.WSDeploymentStatus) *httptest.Server {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for _, ev := range events {
+			payload, _ := json.Marshal(ev)
+			msg, _ := json.Marshal(types.WSMessage{Type: "deployment.status", Data: payload})
+			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		}
+		_, _, _ = conn.ReadMessage()
+	}))
+}
+
+// TestStackWatchCobra_ExitsOnRunning drives `stack watch --id X` through
+// the full cobra Execute() path against a real httptest WS server. Locks
+// the acceptance criterion: "stack watch --id X blocks until running or
+// failed; exit code reflects outcome." Success path → nil exit.
+func TestStackWatchCobra_ExitsOnRunning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	server := startWatchIntegrationServer(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "deploying"},
+		{InstanceID: "42", Status: "running"},
+	})
+	defer server.Close()
+
+	t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
+	t.Setenv("STACKCTL_API_URL", server.URL)
+
+	var buf bytes.Buffer
+	cmd.ResetFlagsForTest()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"stack", "watch", "--id", "42"})
+	require.NoError(t, cmd.Execute())
+	out := buf.String()
+	assert.Contains(t, out, "42")
+	assert.Contains(t, out, "running")
+}
+
+// TestStackWatchCobra_NonZeroOnFailed verifies a terminal "error" status
+// surfaces as a non-zero exit code (cobra.Execute returns the wrapped
+// error).
+func TestStackWatchCobra_NonZeroOnFailed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	server := startWatchIntegrationServer(t, []types.WSDeploymentStatus{
+		{InstanceID: "42", Status: "deploying"},
+		{InstanceID: "42", Status: "error", ErrorMessage: "image pull backoff"},
+	})
+	defer server.Close()
+
+	t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
+	t.Setenv("STACKCTL_API_URL", server.URL)
+
+	var buf bytes.Buffer
+	cmd.ResetFlagsForTest()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"stack", "watch", "--id", "42"})
+	err := cmd.Execute()
+	require.Error(t, err, "terminal error status must surface a non-zero exit")
+	assert.Contains(t, err.Error(), "failed")
 }
