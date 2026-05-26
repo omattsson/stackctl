@@ -118,13 +118,17 @@ Examples:
 		if err := validateFavoriteType(favoriteAddType); err != nil {
 			return err
 		}
+		id, err := parseID(favoriteAddID)
+		if err != nil {
+			return err
+		}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
 		fav, err := c.AddFavorite(types.AddFavoriteRequest{
 			EntityType: favoriteAddType,
-			EntityID:   favoriteAddID,
+			EntityID:   id,
 		})
 		if err != nil {
 			return err
@@ -161,18 +165,22 @@ Examples:
 		if err := validateFavoriteType(favoriteRemoveType); err != nil {
 			return err
 		}
+		id, err := parseID(favoriteRemoveID)
+		if err != nil {
+			return err
+		}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		if err := c.RemoveFavorite(favoriteRemoveType, favoriteRemoveID); err != nil {
+		if err := c.RemoveFavorite(favoriteRemoveType, id); err != nil {
 			return err
 		}
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, favoriteRemoveID)
+			fmt.Fprintln(printer.Writer, id)
 			return nil
 		}
-		printer.PrintMessage("Removed favorite %s %s.", favoriteRemoveType, favoriteRemoveID)
+		printer.PrintMessage("Removed favorite %s %s.", favoriteRemoveType, id)
 		return nil
 	},
 }

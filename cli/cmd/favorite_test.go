@@ -215,6 +215,36 @@ func TestFavoriteAddCmd_MissingFlagsRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "--type")
 }
 
+// TestFavoriteAddCmd_MarkFlagRequiredOnID exercises the Execute path so
+// cobra's MarkFlagRequired("id") fires. RunE-direct calls (above) bypass
+// flag parsing entirely, so the required-flag behaviour is only observable
+// through Execute().
+func TestFavoriteAddCmd_MarkFlagRequiredOnID(t *testing.T) {
+	_ = setupStackTestCmd(t, "http://unused")
+	resetFavoriteFlagsForTest()
+	defer resetFavoriteFlagsForTest()
+
+	// Snapshot + restore the rootCmd args/out so the rest of the suite is
+	// unaffected.
+	rootCmd.SetArgs([]string{"favorite", "add", "--type", "definition"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	err := rootCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"id"`, "cobra should reject the missing --id flag before RunE is called")
+}
+
+func TestFavoriteRemoveCmd_MarkFlagRequiredOnID(t *testing.T) {
+	_ = setupStackTestCmd(t, "http://unused")
+	resetFavoriteFlagsForTest()
+	defer resetFavoriteFlagsForTest()
+
+	rootCmd.SetArgs([]string{"favorite", "remove", "--type", "definition"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	err := rootCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"id"`)
+}
+
 // ---------- favorite remove ----------
 
 func TestFavoriteRemoveCmd_Success(t *testing.T) {
