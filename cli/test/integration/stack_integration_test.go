@@ -686,3 +686,57 @@ func TestStackWatchCobra_NonZeroOnFailed(t *testing.T) {
 	require.Error(t, err, "terminal error status must surface a non-zero exit")
 	assert.Contains(t, err.Error(), "failed")
 }
+
+// ---------- stack logs --follow ----------
+
+// startFollowLogsIntegrationWS is the integration-layer counterpart of
+// startFollowLogsWS from cmd tests: emits an optional log line + a
+// terminal-status event, then blocks on ReadMessage so the client's
+// close handshake completes cleanly.
+func startFollowLogsIntegrationWS(t *testing.T, status string, lines []string) *httptest.Server {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _, _ = conn.ReadMessage()
+		for _, l := range lines {
+			payload, _ := json.Marshal(types.WSDeploymentLog{InstanceID: "42", Line: l})
+			msg, _ := json.Marshal(types.WSMessage{Type: "deployment.log", Data: payload})
+			_ = conn.WriteMessage(websocket.TextMessage, msg)
+		}
+		statusPayload, _ := json.Marshal(types.WSDeploymentStatus{InstanceID: "42", Status: status})
+		statusMsg, _ := json.Marshal(types.WSMessage{Type: "deployment.status", Data: statusPayload})
+		_ = conn.WriteMessage(websocket.TextMessage, statusMsg)
+		_, _, _ = conn.ReadMessage()
+	}))
+}
+
+// TestStackLogsFollowCobra_CompletesOnTerminalStatus drives
+// `stack logs <id> --follow` through cobra.Execute() against a stub WS
+// server that sends a log line and a terminal "running" status. The
+// command must exit 0 within a few seconds.
+func TestStackLogsFollowCobra_CompletesOnTerminalStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	server := startFollowLogsIntegrationWS(t, "running", []string{"installing chart"})
+	defer server.Close()
+
+	t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
+	t.Setenv("STACKCTL_API_URL", server.URL)
+
+	var buf bytes.Buffer
+	cmd.ResetFlagsForTest()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"stack", "logs", "42", "--follow"})
+	require.NoError(t, cmd.Execute())
+}

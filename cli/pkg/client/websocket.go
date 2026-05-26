@@ -25,32 +25,9 @@ var terminalStatuses = map[string]bool{
 // log lines for the given instance to w. It blocks until a terminal status is
 // received, the context is cancelled, or the connection drops.
 func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w io.Writer, warnWriter io.Writer) (*types.StreamResult, error) {
-	wsURL, err := c.websocketURL("/ws")
+	conn, err := c.dialWS(ctx, "/ws", warnWriter)
 	if err != nil {
 		return nil, err
-	}
-
-	header := http.Header{}
-	if c.APIKey != "" {
-		header.Set("X-API-Key", c.APIKey)
-	} else if c.Token != "" {
-		header.Set("Authorization", "Bearer "+c.Token)
-	}
-
-	dialer := websocket.DefaultDialer
-	if c.HTTPClient != nil && c.HTTPClient.Transport != nil {
-		if t, ok := c.HTTPClient.Transport.(*http.Transport); ok {
-			d := *websocket.DefaultDialer
-			d.TLSClientConfig = t.TLSClientConfig
-			dialer = &d
-		} else if warnWriter != nil {
-			fmt.Fprintln(warnWriter, "Warning: custom HTTP transport detected; WebSocket TLS config may not be applied")
-		}
-	}
-
-	conn, _, err := dialer.DialContext(ctx, wsURL, header)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to WebSocket: %w", err)
 	}
 	defer conn.Close()
 
@@ -68,8 +45,14 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 	go func() {
 		select {
 		case <-ctx.Done():
-			conn.WriteMessage(websocket.CloseMessage,
+			// Send a close frame AND tear down the TCP connection: the
+			// WriteMessage alone leaves ReadMessage blocked until the
+			// server echoes the close, which a hung server may never do.
+			// Closing the conn surfaces a read error immediately so the
+			// loop unwinds within ctx-cancel latency. Mirrors WatchEvents.
+			_ = conn.WriteMessage(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			_ = conn.Close()
 		case <-done:
 		}
 	}()
@@ -128,6 +111,65 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 			}
 		}
 	}
+}
+
+// dialWS opens a WebSocket to the given path on the client's BaseURL with
+// the standard stackctl auth chain:
+//
+//   - X-API-Key when c.APIKey is set;
+//   - Authorization: Bearer when c.Token is set;
+//   - On HTTP 401 from the header path AND c.Token != "", a single retry
+//     with the JWT as a URL-escaped ?token= query param (the backend
+//     handler reads from either location — see handlers/websocket.go).
+//
+// Subprotocol auth is NOT attempted; the backend doesn't support it yet
+// (tracked as k8s-stack-manager K4).
+//
+// Custom HTTP transports have their TLS config copied to the dialer so
+// --insecure works for the WS upgrade. A non-*http.Transport custom
+// transport triggers a warning via warnWriter (when non-nil) because we
+// can't extract TLS settings safely.
+func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) (*websocket.Conn, error) {
+	wsURL, err := c.websocketURL(path)
+	if err != nil {
+		return nil, err
+	}
+
+	header := http.Header{}
+	if c.APIKey != "" {
+		header.Set("X-API-Key", c.APIKey)
+	} else if c.Token != "" {
+		header.Set("Authorization", "Bearer "+c.Token)
+	}
+
+	dialer := websocket.DefaultDialer
+	if c.HTTPClient != nil && c.HTTPClient.Transport != nil {
+		if t, ok := c.HTTPClient.Transport.(*http.Transport); ok {
+			d := *websocket.DefaultDialer
+			d.TLSClientConfig = t.TLSClientConfig
+			dialer = &d
+		} else if warnWriter != nil {
+			fmt.Fprintln(warnWriter, "Warning: custom HTTP transport detected; WebSocket TLS config may not be applied")
+		}
+	}
+
+	conn, resp, err := dialer.DialContext(ctx, wsURL, header)
+	if err == nil {
+		return conn, nil
+	}
+	// 401 → fall back to ?token= query param when a JWT is configured.
+	// The retry is gated on c.Token because an API-key-only caller has no
+	// token to fall back to. When BOTH APIKey and Token are set, this
+	// transparently switches to the JWT path (documented precedence).
+	if resp != nil && resp.StatusCode == http.StatusUnauthorized && c.Token != "" {
+		fallbackURL := appendQueryToken(wsURL, c.Token)
+		conn2, _, err2 := dialer.DialContext(ctx, fallbackURL, nil)
+		if err2 != nil {
+			return nil, fmt.Errorf("connecting to WebSocket (header auth failed with 401, query-param fallback also failed): %w", err2)
+		}
+		return conn2, nil
+	}
+	return nil, fmt.Errorf("connecting to WebSocket: %w", err)
 }
 
 func (c *Client) websocketURL(path string) (string, error) {
@@ -209,44 +251,9 @@ func (f WatchFilter) matches(s types.WSDeploymentStatus) bool {
 // be safely connected to the same /ws endpoint as StreamDeploymentLogs
 // without cross-talk.
 func (c *Client) WatchEvents(ctx context.Context, filter WatchFilter) (<-chan types.WatchEvent, error) {
-	wsURL, err := c.websocketURL("/ws")
+	conn, err := c.dialWS(ctx, "/ws", nil)
 	if err != nil {
 		return nil, err
-	}
-
-	header := http.Header{}
-	if c.APIKey != "" {
-		header.Set("X-API-Key", c.APIKey)
-	} else if c.Token != "" {
-		header.Set("Authorization", "Bearer "+c.Token)
-	}
-
-	dialer := websocket.DefaultDialer
-	if c.HTTPClient != nil && c.HTTPClient.Transport != nil {
-		if t, ok := c.HTTPClient.Transport.(*http.Transport); ok {
-			d := *websocket.DefaultDialer
-			d.TLSClientConfig = t.TLSClientConfig
-			dialer = &d
-		}
-	}
-
-	conn, resp, err := dialer.DialContext(ctx, wsURL, header)
-	if err != nil {
-		// 401 → fall back to ?token= query param. The backend WS handler
-		// (handlers/websocket.go) reads tokens from either location, so a
-		// 401 on the header path is the signal that the proxy stripped
-		// Authorization (a real-world failure mode for reverse proxies and
-		// browsers that we can recover from without operator intervention).
-		if resp != nil && resp.StatusCode == http.StatusUnauthorized && c.Token != "" {
-			fallbackURL := appendQueryToken(wsURL, c.Token)
-			conn2, _, err2 := dialer.DialContext(ctx, fallbackURL, nil)
-			if err2 != nil {
-				return nil, fmt.Errorf("connecting to WebSocket (header auth failed with 401, query-param fallback also failed): %w", err2)
-			}
-			conn = conn2
-		} else {
-			return nil, fmt.Errorf("connecting to WebSocket: %w", err)
-		}
 	}
 
 	// Buffer of 8 is roughly 2s of backpressure tolerance at the backend's

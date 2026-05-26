@@ -274,6 +274,85 @@ func TestStreamDeploymentLogs_NonTerminalStatusIgnored(t *testing.T) {
 	assert.Contains(t, buf.String(), "Still going...")
 }
 
+// TestStreamDeploymentLogs_QueryParamFallbackOn401 locks in K4 auth-chain
+// parity with WatchEvents: when the backend rejects the Authorization
+// header with HTTP 401, the dialer transparently retries with the JWT as
+// a URL-escaped ?token= query param.
+func TestStreamDeploymentLogs_QueryParamFallbackOn401(t *testing.T) {
+	t.Parallel()
+	var gotToken string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// First attempt: header-only → reject.
+		if r.URL.Query().Get("token") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		gotToken = r.URL.Query().Get("token")
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		defer conn.Close()
+		readSubscribe(t, conn, "42")
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{
+			InstanceID: "42", Status: "running", LogID: "log-1",
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.Token = "tok-logs-fallback"
+	var buf bytes.Buffer
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "running", result.Status)
+	assert.Equal(t, "tok-logs-fallback", gotToken, "401 on header path must trigger ?token= retry")
+}
+
+// TestStreamDeploymentLogs_QueryParamFallbackDisabledForAPIKey asserts the
+// retry is gated on c.Token. API-key-only callers must see a clean error
+// rather than a misleading retry that would never carry their credential.
+func TestStreamDeploymentLogs_QueryParamFallbackDisabledForAPIKey(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.APIKey = "key-only"
+	var buf bytes.Buffer
+	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
+	require.Error(t, err)
+}
+
+// TestStreamDeploymentLogs_GoleakOnTerminalClose is a regression test for
+// the "logs --follow polish" acceptance: the stream must close cleanly
+// when the server reports a terminal status, with no leaked goroutines.
+// The package-level TestMain runs goleak.VerifyTestMain at exit and
+// would surface any leak from this test path; explicit parallel test is
+// here to exercise the path with no ctx cancellation from the caller.
+func TestStreamDeploymentLogs_GoleakOnTerminalClose(t *testing.T) {
+	t.Parallel()
+	server := wsServer(t, func(conn *websocket.Conn) {
+		readSubscribe(t, conn, "42")
+		writeWSMessage(t, conn, "deployment.log", types.WSDeploymentLog{
+			InstanceID: "42", LogID: "log-1", Line: "starting",
+		})
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{
+			InstanceID: "42", Status: "running", LogID: "log-1",
+		})
+	})
+	defer server.Close()
+
+	c := New(server.URL)
+	var buf bytes.Buffer
+	// Use a never-cancelled context so the goroutine cleanup path under
+	// test is the terminal-status one (not the ctx-cancel one). Any leak
+	// here surfaces via TestMain's goleak.VerifyTestMain.
+	result, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "running", result.Status)
+}
+
 func TestStreamDeploymentLogs_ConnectionError(t *testing.T) {
 	t.Parallel()
 	c := New("http://localhost:1")

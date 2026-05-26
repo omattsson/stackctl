@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -1209,6 +1210,134 @@ func TestStackLogsCmd_NotFound(t *testing.T) {
 	err := stackLogsCmd.RunE(stackLogsCmd, []string{"999"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no logs found")
+}
+
+// ---------- stack logs --follow ----------
+
+// startFollowLogsWS spins up a websocket server that emits a log line +
+// terminal-status event, then blocks on ReadMessage so the client's
+// CloseMessage handshake completes cleanly. Reused across the follow
+// tests.
+func startFollowLogsWS(t *testing.T, status string, logLines []string) *httptest.Server {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// Read the subscribe message before sending anything (the client
+		// always subscribes immediately after the upgrade).
+		_, _, _ = conn.ReadMessage()
+		for _, line := range logLines {
+			payload, _ := json.Marshal(types.WSDeploymentLog{InstanceID: "42", Line: line})
+			msg, _ := json.Marshal(types.WSMessage{Type: "deployment.log", Data: payload})
+			_ = conn.WriteMessage(websocket.TextMessage, msg)
+		}
+		statusPayload, _ := json.Marshal(types.WSDeploymentStatus{InstanceID: "42", Status: status})
+		statusMsg, _ := json.Marshal(types.WSMessage{Type: "deployment.status", Data: statusPayload})
+		_ = conn.WriteMessage(websocket.TextMessage, statusMsg)
+		_, _, _ = conn.ReadMessage()
+	}))
+}
+
+// TestFollowLogsCtx_ExitsOnTerminalStatus locks acceptance criterion #1:
+// "Stream closes cleanly when deploy reaches terminal status." Driven
+// through the testable `followLogsCtx` so we can capture stdout.
+func TestFollowLogsCtx_ExitsOnTerminalStatus(t *testing.T) {
+	server := startFollowLogsWS(t, "running", []string{"hello", "world"})
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	c, err := newClient()
+	require.NoError(t, err)
+
+	var out, warn bytes.Buffer
+	require.NoError(t, followLogsCtx(context.Background(), c, "42", &out, &warn))
+	got := out.String()
+	assert.Contains(t, got, "hello")
+	assert.Contains(t, got, "world")
+}
+
+// TestFollowLogsCtx_ErrorStatusBubblesError verifies the documented
+// non-zero exit contract when the deployment ends with a terminal
+// "error" status — the wrapped error must mention "deployment failed".
+func TestFollowLogsCtx_ErrorStatusBubblesError(t *testing.T) {
+	server := startFollowLogsWS(t, "error", []string{"hint: image pull"})
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	c, err := newClient()
+	require.NoError(t, err)
+
+	var out, warn bytes.Buffer
+	err = followLogsCtx(context.Background(), c, "42", &out, &warn)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deployment failed")
+}
+
+// TestFollowLogsCtx_CtxCancelSurfacesAsCleanExit verifies the documented
+// Ctrl-C path: a cancelled context returns nil so the operator's
+// intentional interrupt doesn't look like a command failure. The
+// package-level goleak.VerifyTestMain check will catch any goroutine
+// leaked on this path.
+func TestFollowLogsCtx_CtxCancelSurfacesAsCleanExit(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// Read subscribe, then block — only Ctrl-C terminates this.
+		_, _, _ = conn.ReadMessage()
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	c, err := newClient()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel shortly after the call starts so the read loop unwinds via
+	// the ctx-cancel path.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	var out, warn bytes.Buffer
+	err = followLogsCtx(ctx, c, "42", &out, &warn)
+	assert.NoError(t, err, "ctx cancellation must surface as clean exit")
+}
+
+// TestStackLogsCmd_NoFollowRegression locks the documented acceptance
+// "No behavioural regression for --follow=false path" — the default
+// REST-fetch path must keep returning the most recent deployment log
+// without touching the WebSocket.
+func TestStackLogsCmd_NoFollowRegression(t *testing.T) {
+	var wsHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ws" {
+			wsHits++
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		require.Equal(t, "/api/v1/stack-instances/42/deploy-log", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.DeploymentLogResult{
+			Data:  []types.DeploymentLog{{ID: "1", InstanceID: "42", Action: "deploy", Status: "completed", Output: "ok"}},
+			Total: 1,
+		})
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	require.NoError(t, stackLogsCmd.RunE(stackLogsCmd, []string{"42"}))
+	assert.Contains(t, buf.String(), "ok")
+	assert.Equal(t, 0, wsHits, "--follow=false must NOT open a WebSocket")
 }
 
 // ---------- stack list: additional filter tests ----------
