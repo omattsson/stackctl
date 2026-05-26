@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"sort"
@@ -18,18 +19,36 @@ import (
 
 // followLogs streams deployment logs via WebSocket until a terminal status is
 // received. Returns an error if the deployment ended in error status.
+//
+// Installs an os.Interrupt signal handler for Ctrl-C; writes log lines to
+// os.Stdout and warnings to os.Stderr. Test code should call followLogsCtx
+// directly to inject a context + writers.
 func followLogs(c *client.Client, instanceID string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	return followLogsCtx(ctx, c, instanceID, os.Stdout, os.Stderr)
+}
 
-	result, err := c.StreamDeploymentLogs(ctx, instanceID, os.Stdout, os.Stderr)
+// followLogsCtx is the testable core of followLogs. It does NOT install a
+// signal handler — the caller owns ctx and is responsible for cancelling
+// it on shutdown. Returns nil when:
+//   - the deployment reaches a terminal non-error status (running,
+//     stopped, draft, "unknown" on graceful server close);
+//   - ctx is cancelled before any other error surfaces (Ctrl-C path).
+//
+// Returns a wrapped error for terminal "error" status, or the underlying
+// network/parse error otherwise.
+func followLogsCtx(ctx context.Context, c *client.Client, instanceID string, out, warn io.Writer) error {
+	result, err := c.StreamDeploymentLogs(ctx, instanceID, out, warn)
 	if err != nil {
 		if ctx.Err() != nil {
+			// Ctrl-C / parent cancellation — surface as clean exit so
+			// the operator's intentional interrupt doesn't look like a
+			// command failure.
 			return nil
 		}
 		return err
 	}
-
 	if result.Status == "error" {
 		if result.ErrorMessage != "" {
 			return fmt.Errorf("deployment failed: %s", result.ErrorMessage)

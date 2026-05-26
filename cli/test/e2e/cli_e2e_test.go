@@ -2615,6 +2615,55 @@ func TestE2EAnalyticsOverviewJSONParses(t *testing.T) {
 	assert.Equal(t, 7, got.TotalTemplates)
 }
 
+// startE2EStackLogsFollowWS serves a WebSocket upgrade at /ws that emits
+// a single log line and a terminal "running" status, then blocks on
+// ReadMessage so the client's close handshake completes cleanly. Used
+// by the `stack logs --follow` e2e test.
+func startE2EStackLogsFollowWS(t *testing.T) *httptest.Server {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// Drain the subscribe message before emitting events.
+		_, _, _ = conn.ReadMessage()
+		logPayload, _ := json.Marshal(types.WSDeploymentLog{InstanceID: "42", Line: "installing chart"})
+		logMsg, _ := json.Marshal(types.WSMessage{Type: "deployment.log", Data: logPayload})
+		_ = conn.WriteMessage(websocket.TextMessage, logMsg)
+		statusPayload, _ := json.Marshal(types.WSDeploymentStatus{InstanceID: "42", Status: "running"})
+		statusMsg, _ := json.Marshal(types.WSMessage{Type: "deployment.status", Data: statusPayload})
+		_ = conn.WriteMessage(websocket.TextMessage, statusMsg)
+		_, _, _ = conn.ReadMessage()
+	}))
+}
+
+// TestE2EStackLogsFollow_CompletesOnTerminalStatus builds the binary and
+// exec's `stackctl stack logs 42 --follow` against a stub WS server.
+// Locks the issue acceptance: stream closes cleanly on terminal status
+// and the process exits 0 within the test timeout.
+func TestE2EStackLogsFollow_CompletesOnTerminalStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	server := startE2EStackLogsFollowWS(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	setupE2EStackContext(t, dir, server.URL)
+
+	stdout, _, err := runStackctl(t, dir, "stack", "logs", "42", "--follow")
+	require.NoError(t, err, "stack logs --follow must exit 0 on terminal status within timeout")
+	assert.Contains(t, stdout, "installing chart")
+}
+
 // startE2EStackWatchWS serves a WebSocket upgrade at /ws that emits the
 // supplied event sequence then holds the connection open until the
 // client closes. Used by the stack watch e2e tests.
