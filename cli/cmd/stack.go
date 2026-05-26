@@ -1016,9 +1016,10 @@ arrive.
                        not carry owner_id, so a per-event REST lookup
                        would be required. Returns an explicit error.
 
-Combining --id with --status suppresses intermediate progress events
-(the status filter drops "deploying"/"stopping" updates for the listed
-IDs, so you'll only see the moment they reach the target status).
+--id takes precedence over --status: if both are set, --status is
+ignored (with a stderr warning) so the watch sees every status
+transition for the listed instances and can detect opposite-terminal
+states like "error" / "failed" reliably.
 
 Authentication: reuses the HTTP client auth chain. JWT goes via the
 Authorization: Bearer header; if the WS upgrade is rejected with HTTP
@@ -1055,12 +1056,17 @@ Examples:
 		}
 		idMode := len(normIDs) > 0
 
-		// Reject --id + non-terminal --status: the status filter would
-		// drop the very events the loop needs to drain `pending`, so the
-		// watch would hang until the user Ctrl-C's it. Fail fast with a
-		// pointer to the valid statuses so the user can fix the invocation.
-		if idMode && statusFilter != "" && !stackWatchTerminalStatuses[statusFilter] {
-			return fmt.Errorf("--status must be a terminal status (running, stopped, draft, error, failed) when used with --id; got %q which would never let watch exit", statusFilter)
+		// In --id mode the watch needs to see EVERY status transition for
+		// the listed instances so the terminal-status detector can drain
+		// `pending`. A --status filter (even one matching a terminal value
+		// like "running") would drop the opposite-terminal events
+		// (error/failed) and the watch would hang forever. Drop the
+		// filter and warn — surprising the user is better than hanging.
+		if idMode && statusFilter != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"Warning: ignoring --status %q because --id is set; --id mode shows every status transition so the watch can detect terminal states reliably\n",
+				statusFilter)
+			statusFilter = ""
 		}
 
 		pending := map[string]bool{}

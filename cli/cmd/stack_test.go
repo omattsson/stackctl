@@ -2016,21 +2016,38 @@ func TestStackWatchCmd_YAMLOutput(t *testing.T) {
 	assert.Equal(t, "deployment.status", ev.Type)
 }
 
-// TestStackWatchCmd_IDWithNonTerminalStatusRejected locks the guard that
-// prevents `--id + --status deploying` from hanging forever (the filter
-// would drop the very events the loop needs to drain `pending`).
-func TestStackWatchCmd_IDWithNonTerminalStatusRejected(t *testing.T) {
-	_ = setupStackTestCmd(t, "http://unused")
+// TestStackWatchCmd_IDIgnoresStatusFilter locks the documented
+// precedence: when --id is set the --status filter is ignored (with a
+// stderr warning) so the watch sees every transition for the listed
+// instances and can detect opposite-terminal states. The bug this test
+// guards against: --id 42 --status running, instance 42 fails — the
+// "error" event would be dropped by --status and the watch would hang.
+func TestStackWatchCmd_IDIgnoresStatusFilter(t *testing.T) {
+	server := startWatchWSServer(t, []types.WSDeploymentStatus{
+		// Instance fails. With the bug, the status filter "running"
+		// would drop this event and the watch would never exit.
+		{InstanceID: "42", Status: "error", ErrorMessage: "boom"},
+	})
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
 	require.NoError(t, stackWatchCmd.Flags().Set("id", "42"))
-	require.NoError(t, stackWatchCmd.Flags().Set("status", "deploying"))
+	require.NoError(t, stackWatchCmd.Flags().Set("status", "running"))
 	t.Cleanup(func() {
 		_ = stackWatchCmd.Flags().Set("id", "")
 		_ = stackWatchCmd.Flags().Set("status", "")
 	})
 
+	// Capture the warning to stderr so the test asserts the user-visible
+	// signal that --status was suppressed.
+	var stderr bytes.Buffer
+	stackWatchCmd.SetErr(&stderr)
+	t.Cleanup(func() { stackWatchCmd.SetErr(nil) })
+
 	err := stackWatchCmd.RunE(stackWatchCmd, []string{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "terminal status")
+	require.Error(t, err, "instance error must surface as a non-zero exit even when --status is set")
+	assert.Contains(t, err.Error(), "failed terminal status")
+	assert.Contains(t, stderr.String(), "ignoring --status")
 }
 
 // TestStackWatchCmd_QuietPrintsIDs locks in the convention: --quiet
