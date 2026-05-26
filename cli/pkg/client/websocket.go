@@ -45,13 +45,16 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 	go func() {
 		select {
 		case <-ctx.Done():
-			// Send a close frame AND tear down the TCP connection: the
-			// WriteMessage alone leaves ReadMessage blocked until the
-			// server echoes the close, which a hung server may never do.
-			// Closing the conn surfaces a read error immediately so the
-			// loop unwinds within ctx-cancel latency. Mirrors WatchEvents.
-			_ = conn.WriteMessage(websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			// Send a close frame AND tear down the TCP connection. Use
+			// WriteControl with an explicit deadline rather than the
+			// blocking WriteMessage — a stalled connection could pin the
+			// goroutine on WriteMessage forever, preventing conn.Close
+			// from ever running. With WriteControl + 1s deadline + Close,
+			// ReadMessage in the read loop unwinds within ctx-cancel
+			// latency regardless of network state. Mirrors WatchEvents.
+			_ = conn.WriteControl(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+				time.Now().Add(time.Second))
 			_ = conn.Close()
 		case <-done:
 		}
@@ -277,12 +280,15 @@ func (c *Client) WatchEvents(ctx context.Context, filter WatchFilter) (<-chan ty
 		// Watchdog: closes the connection when ctx is cancelled so the
 		// blocking ReadMessage below returns and the read loop exits;
 		// returns on its own when `done` closes so a server-initiated
-		// hang-up doesn't leak this goroutine.
+		// hang-up doesn't leak this goroutine. WriteControl with a write
+		// deadline is used instead of WriteMessage so a stalled TCP
+		// connection can't pin the goroutine forever and block conn.Close.
 		go func() {
 			select {
 			case <-ctx.Done():
-				_ = conn.WriteMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				_ = conn.WriteControl(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+					time.Now().Add(time.Second))
 				_ = conn.Close()
 			case <-done:
 			}

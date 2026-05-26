@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -307,12 +308,21 @@ func TestStreamDeploymentLogs_QueryParamFallbackOn401(t *testing.T) {
 	assert.Equal(t, "tok-logs-fallback", gotToken, "401 on header path must trigger ?token= retry")
 }
 
-// TestStreamDeploymentLogs_QueryParamFallbackDisabledForAPIKey asserts the
-// retry is gated on c.Token. API-key-only callers must see a clean error
-// rather than a misleading retry that would never carry their credential.
+// TestStreamDeploymentLogs_QueryParamFallbackDisabledForAPIKey asserts
+// the retry is gated on c.Token. API-key-only callers must see a clean
+// error rather than a misleading retry — both that the dial is NOT
+// repeated AND that the API key isn't accidentally surfaced as a query
+// param. `require.Error` alone is too weak: a buggy implementation that
+// retried with no token would still return an error from the second 401.
 func TestStreamDeploymentLogs_QueryParamFallbackDisabledForAPIKey(t *testing.T) {
 	t.Parallel()
+	var hits int32
+	var sawToken int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if r.URL.Query().Has("token") {
+			atomic.StoreInt32(&sawToken, 1)
+		}
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer server.Close()
@@ -322,6 +332,8 @@ func TestStreamDeploymentLogs_QueryParamFallbackDisabledForAPIKey(t *testing.T) 
 	var buf bytes.Buffer
 	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
 	require.Error(t, err)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&hits), "API-key-only auth must NOT retry with query token")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&sawToken), "no ?token= parameter should ever appear on an API-key request")
 }
 
 // TestStreamDeploymentLogs_GoleakOnTerminalClose is a regression test for
