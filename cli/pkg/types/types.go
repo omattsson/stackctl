@@ -397,6 +397,53 @@ type UnreadCountResponse struct {
 	UnreadCount int64 `json:"unread_count" yaml:"unread_count"`
 }
 
+// Favorite is one row in the authenticated user's favorites collection.
+// Mirrors backend models.UserFavorite.
+//
+// Population: returned on HTTP 200/201 from GET /api/v1/favorites and POST
+// /api/v1/favorites. On non-2xx the client surfaces an APIError.
+//
+// Field semantics:
+//   - EntityType is one of "definition", "instance", "template" (validated
+//     server-side).
+//   - EntityID is the target entity's ID — there is no name-or-ID
+//     resolution at this endpoint.
+//   - ID and UserID are server-assigned and only populated in responses.
+//
+// Field declaration order is alphabetical by json tag (golden-file
+// contract — required for stable JSON output).
+type Favorite struct {
+	CreatedAt  time.Time `json:"created_at" yaml:"created_at"`
+	EntityID   string    `json:"entity_id" yaml:"entity_id"`
+	EntityType string    `json:"entity_type" yaml:"entity_type"`
+	ID         string    `json:"id,omitempty" yaml:"id,omitempty"`
+	UserID     string    `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+}
+
+// AddFavoriteRequest is the request body for POST /api/v1/favorites.
+//
+// Both fields are required; the backend rejects an empty EntityType or
+// EntityID with HTTP 400. EntityType must be one of "definition",
+// "instance", or "template".
+type AddFavoriteRequest struct {
+	EntityID   string `json:"entity_id" yaml:"entity_id"`
+	EntityType string `json:"entity_type" yaml:"entity_type"`
+}
+
+// GitProvider is the status of one configured Git provider returned by
+// GET /api/v1/git/providers. Mirrors backend gitprovider.ProviderStatus.
+//
+// Population: only returned on HTTP 200. The backend reports availability
+// based on whether the provider was configured at server start; it does
+// NOT perform a live connectivity check at request time (see the registry
+// HealthCheck for that).
+//
+// Field declaration order is alphabetical by json tag.
+type GitProvider struct {
+	Available bool   `json:"available" yaml:"available"`
+	Type      string `json:"type" yaml:"type"`
+}
+
 // CreateStackRequest is the request body for POST /api/v1/stack-instances.
 // It contains only the writable fields — server-owned fields like ID, owner,
 // namespace, status are excluded to avoid backend validation errors.

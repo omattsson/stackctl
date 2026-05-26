@@ -1584,3 +1584,56 @@ func (c *Client) UpdateNotificationPreferences(prefs []types.NotificationPrefere
 	}
 	return resp, nil
 }
+
+// ListFavorites returns the authenticated user's favorited entities.
+//
+// @see GET /api/v1/favorites
+func (c *Client) ListFavorites() ([]types.Favorite, error) {
+	var favs []types.Favorite
+	if err := c.Get("/api/v1/favorites", &favs); err != nil {
+		return nil, err
+	}
+	return favs, nil
+}
+
+// AddFavorite adds an entity to the user's favorites. Idempotent on the
+// backend — re-adding the same (user_id, entity_type, entity_id) tuple
+// returns 201 with the existing row (no duplicate-key error).
+//
+// @see POST /api/v1/favorites
+func (c *Client) AddFavorite(req types.AddFavoriteRequest) (*types.Favorite, error) {
+	var fav types.Favorite
+	if err := c.Post("/api/v1/favorites", req, &fav); err != nil {
+		return nil, err
+	}
+	return &fav, nil
+}
+
+// RemoveFavorite removes an entity from the user's favorites. The backend
+// returns 204 No Content; idempotent — removing a non-existent favorite
+// also succeeds rather than returning 404.
+//
+// entityID is user-supplied free text; url.PathEscape guards against odd
+// characters (slashes, control chars) silently splitting the path. The
+// allowlisted entityType doesn't need escaping but goes through the same
+// helper for consistency.
+//
+// @see DELETE /api/v1/favorites/{entityType}/{entityId}
+func (c *Client) RemoveFavorite(entityType, entityID string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/favorites/%s/%s",
+		url.PathEscape(entityType), url.PathEscape(entityID)))
+}
+
+// ListGitProviders returns the status of all configured Git providers
+// (azure_devops, gitlab). Status reflects whether the provider was
+// configured at server start; it does NOT perform a live connectivity
+// check.
+//
+// @see GET /api/v1/git/providers
+func (c *Client) ListGitProviders() ([]types.GitProvider, error) {
+	var providers []types.GitProvider
+	if err := c.Get("/api/v1/git/providers", &providers); err != nil {
+		return nil, err
+	}
+	return providers, nil
+}

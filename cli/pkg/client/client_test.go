@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3416,6 +3417,173 @@ func TestNotificationsClient_APIErrorMatrix(t *testing.T) {
 			})
 		}
 	}
+}
+
+// ---------- favorites ----------
+
+func TestListFavorites_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/favorites", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.Favorite{
+			{ID: "f1", EntityType: "definition", EntityID: "42"},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.ListFavorites()
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "definition", got[0].EntityType)
+}
+
+func TestAddFavorite_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/favorites", r.URL.Path)
+		var req types.AddFavoriteRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		assert.Equal(t, "definition", req.EntityType)
+		assert.Equal(t, "42", req.EntityID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(types.Favorite{ID: "f1", EntityType: req.EntityType, EntityID: req.EntityID})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.AddFavorite(types.AddFavoriteRequest{EntityType: "definition", EntityID: "42"})
+	require.NoError(t, err)
+	assert.Equal(t, "f1", got.ID)
+}
+
+// TestAddFavorite_IdempotentReAdd locks in the acceptance criterion: the
+// backend returns 201 + existing row for a duplicate add (no 409/500),
+// and the client surfaces that as nil error.
+func TestAddFavorite_IdempotentReAdd(t *testing.T) {
+	t.Parallel()
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(types.Favorite{ID: "f1", EntityType: "definition", EntityID: "42"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	for i := 0; i < 3; i++ {
+		_, err := c.AddFavorite(types.AddFavoriteRequest{EntityType: "definition", EntityID: "42"})
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+}
+
+func TestRemoveFavorite_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v1/favorites/definition/42", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.RemoveFavorite("definition", "42"))
+}
+
+// TestRemoveFavorite_IdempotentMissing covers the backend's documented
+// behaviour of returning 204 even when the row doesn't exist.
+func TestRemoveFavorite_IdempotentMissing(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	require.NoError(t, c.RemoveFavorite("definition", "missing"))
+}
+
+func TestFavoritesClient_APIErrorMatrix(t *testing.T) {
+	t.Parallel()
+	statuses := []int{http.StatusUnauthorized, http.StatusBadRequest, http.StatusInternalServerError}
+	calls := []struct {
+		name string
+		call func(c *Client) error
+	}{
+		{"List", func(c *Client) error { _, err := c.ListFavorites(); return err }},
+		{"Add", func(c *Client) error {
+			_, err := c.AddFavorite(types.AddFavoriteRequest{EntityType: "definition", EntityID: "1"})
+			return err
+		}},
+		{"Remove", func(c *Client) error { return c.RemoveFavorite("definition", "1") }},
+	}
+	for _, call := range calls {
+		call := call
+		for _, status := range statuses {
+			status := status
+			t.Run(fmt.Sprintf("%s_%d", call.name, status), func(t *testing.T) {
+				t.Parallel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: "x"})
+				}))
+				defer server.Close()
+				c := New(server.URL)
+				err := call.call(c)
+				require.Error(t, err)
+				var apiErr *APIError
+				require.ErrorAs(t, err, &apiErr)
+				assert.Equal(t, status, apiErr.StatusCode)
+			})
+		}
+	}
+}
+
+// ---------- git providers ----------
+
+func TestListGitProviders_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/git/providers", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]types.GitProvider{
+			{Type: "azure_devops", Available: true},
+			{Type: "gitlab", Available: false},
+		})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	got, err := c.ListGitProviders()
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "azure_devops", got[0].Type)
+	assert.True(t, got[0].Available)
+	assert.False(t, got[1].Available)
+}
+
+func TestListGitProviders_APIError(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"db down"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	_, err := c.ListGitProviders()
+	require.Error(t, err)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
 }
 
 // ---------- shared values ----------

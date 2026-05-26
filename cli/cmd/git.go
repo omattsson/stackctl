@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"strconv"
+
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/spf13/cobra"
 )
@@ -9,6 +12,58 @@ var gitCmd = &cobra.Command{
 	Use:   "git",
 	Short: "Git repository operations",
 	Long:  "List branches and validate branch names for git repositories.",
+}
+
+var gitProvidersCmd = &cobra.Command{
+	Use:   "providers",
+	Short: "List configured git providers and their availability",
+	Long: `List the status of all Git providers configured on the backend
+(azure_devops, gitlab). Availability reflects whether each provider was
+configured at server start; it is NOT a live connectivity check.
+
+Examples:
+  stackctl git providers
+  stackctl git providers -o json
+  stackctl git providers --quiet  # prints provider type names only`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		providers, err := c.ListGitProviders()
+		if err != nil {
+			return err
+		}
+
+		if printer.Quiet {
+			// Provider "type" (azure_devops, gitlab) is the stable functional
+			// identifier; the response carries no UUID. Documented in
+			// .coderabbit.yaml alongside the other quiet-mode exceptions.
+			for _, p := range providers {
+				fmt.Fprintln(printer.Writer, p.Type)
+			}
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(providers)
+		case output.FormatYAML:
+			return printer.PrintYAML(providers)
+		default:
+			if len(providers) == 0 {
+				printer.PrintMessage("No git providers configured.")
+				return nil
+			}
+			headers := []string{"TYPE", "AVAILABLE"}
+			rows := make([][]string, len(providers))
+			for i, p := range providers {
+				rows[i] = []string{p.Type, strconv.FormatBool(p.Available)}
+			}
+			return printer.PrintTable(headers, rows)
+		}
+	},
 }
 
 var gitBranchesCmd = &cobra.Command{
@@ -106,5 +161,6 @@ func init() {
 
 	gitCmd.AddCommand(gitBranchesCmd)
 	gitCmd.AddCommand(gitValidateCmd)
+	gitCmd.AddCommand(gitProvidersCmd)
 	rootCmd.AddCommand(gitCmd)
 }

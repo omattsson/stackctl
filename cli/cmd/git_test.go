@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/omattsson/stackctl/cli/pkg/output"
@@ -285,4 +286,106 @@ func TestGitValidateCmd_YAMLOutput(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "valid: true")
 	assert.Contains(t, out, "branch: main")
+}
+
+// ---------- git providers ----------
+
+func sampleGitProviders() []types.GitProvider {
+	return []types.GitProvider{
+		{Type: "azure_devops", Available: true},
+		{Type: "gitlab", Available: false},
+	}
+}
+
+func TestGitProvidersCmd_TableOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/api/v1/git/providers", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleGitProviders())
+	}))
+	defer server.Close()
+
+	buf := setupGitTestCmd(t, server.URL)
+	require.NoError(t, gitProvidersCmd.RunE(gitProvidersCmd, []string{}))
+
+	out := buf.String()
+	assert.Contains(t, out, "TYPE")
+	assert.Contains(t, out, "AVAILABLE")
+	assert.Contains(t, out, "azure_devops")
+	assert.Contains(t, out, "true")
+	assert.Contains(t, out, "gitlab")
+	assert.Contains(t, out, "false")
+}
+
+func TestGitProvidersCmd_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleGitProviders())
+	}))
+	defer server.Close()
+
+	buf := setupGitTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	require.NoError(t, gitProvidersCmd.RunE(gitProvidersCmd, []string{}))
+
+	var got []types.GitProvider
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 2)
+	assert.Equal(t, "azure_devops", got[0].Type)
+	assert.True(t, got[0].Available)
+}
+
+func TestGitProvidersCmd_YAMLOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleGitProviders())
+	}))
+	defer server.Close()
+
+	buf := setupGitTestCmd(t, server.URL)
+	printer.Format = output.FormatYAML
+	require.NoError(t, gitProvidersCmd.RunE(gitProvidersCmd, []string{}))
+	out := buf.String()
+	assert.Contains(t, out, "type: azure_devops")
+	assert.Contains(t, out, "available: true")
+}
+
+func TestGitProvidersCmd_QuietPrintsTypes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleGitProviders())
+	}))
+	defer server.Close()
+
+	buf := setupGitTestCmd(t, server.URL)
+	printer.Quiet = true
+	require.NoError(t, gitProvidersCmd.RunE(gitProvidersCmd, []string{}))
+	assert.Equal(t, "azure_devops\ngitlab", strings.TrimSpace(buf.String()))
+	assert.NotContains(t, buf.String(), "TYPE")
+}
+
+func TestGitProvidersCmd_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+
+	buf := setupGitTestCmd(t, server.URL)
+	require.NoError(t, gitProvidersCmd.RunE(gitProvidersCmd, []string{}))
+	assert.Contains(t, buf.String(), "No git providers configured.")
+}
+
+func TestGitProvidersCmd_APIError500(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"db down"}`))
+	}))
+	defer server.Close()
+
+	_ = setupGitTestCmd(t, server.URL)
+	err := gitProvidersCmd.RunE(gitProvidersCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Server error")
 }
