@@ -88,6 +88,7 @@ type CreateClusterRequest struct {
 	UseInCluster        bool   `json:"use_in_cluster,omitempty" yaml:"use_in_cluster,omitempty"`
 	RegistryURL         string `json:"registry_url,omitempty" yaml:"registry_url,omitempty"`
 	RegistryUsername    string `json:"registry_username,omitempty" yaml:"registry_username,omitempty"`
+	RegistryPassword    string `json:"registry_password,omitempty" yaml:"registry_password,omitempty"`
 	ImagePullSecretName string `json:"image_pull_secret_name,omitempty" yaml:"image_pull_secret_name,omitempty"`
 }
 
@@ -106,6 +107,7 @@ type UpdateClusterRequest struct {
 	UseInCluster        *bool   `json:"use_in_cluster,omitempty" yaml:"use_in_cluster,omitempty"`
 	RegistryURL         *string `json:"registry_url,omitempty" yaml:"registry_url,omitempty"`
 	RegistryUsername    *string `json:"registry_username,omitempty" yaml:"registry_username,omitempty"`
+	RegistryPassword    *string `json:"registry_password,omitempty" yaml:"registry_password,omitempty"`
 	ImagePullSecretName *string `json:"image_pull_secret_name,omitempty" yaml:"image_pull_secret_name,omitempty"`
 }
 

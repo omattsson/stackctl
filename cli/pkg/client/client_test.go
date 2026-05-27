@@ -4752,6 +4752,67 @@ func TestUpdateCluster_Error(t *testing.T) {
 	assert.Nil(t, cluster)
 }
 
+// Registry credentials (URL / username / password / pull-secret) must round-trip
+// intact through both CreateCluster and UpdateCluster — kvk-k8s-dev's ACR
+// bootstrap relies on stackctl carrying registry_password, which used to fall
+// out of the request body because the wire types omitted it.
+func TestCreateCluster_RegistryCredentialsRoundTrip(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "acr.example.io", body["registry_url"])
+		assert.Equal(t, "ci-token", body["registry_username"])
+		assert.Equal(t, "s3cret-pw", body["registry_password"])
+		assert.Equal(t, "registry-pull-secret", body["image_pull_secret_name"])
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(types.Cluster{Base: types.Base{ID: "7"}, Name: "acr-cluster", Status: "online"})
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	_, err := c.CreateCluster(&types.CreateClusterRequest{
+		Name:                "acr-cluster",
+		RegistryURL:         "acr.example.io",
+		RegistryUsername:    "ci-token",
+		RegistryPassword:    "s3cret-pw",
+		ImagePullSecretName: "registry-pull-secret",
+	})
+	require.NoError(t, err)
+}
+
+func TestUpdateCluster_RegistryCredentialsRoundTrip(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "acr.example.io", body["registry_url"])
+		assert.Equal(t, "ci-token", body["registry_username"])
+		assert.Equal(t, "rotated-pw", body["registry_password"])
+		assert.Equal(t, "registry-pull-secret", body["image_pull_secret_name"])
+		// Untouched fields stay out of the request — verifies omitempty on pointers.
+		_, hasName := body["name"]
+		assert.False(t, hasName)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(types.Cluster{Base: types.Base{ID: "3"}, Name: "acr-cluster", Status: "online"})
+	}))
+	defer server.Close()
+
+	url := "acr.example.io"
+	user := "ci-token"
+	pw := "rotated-pw"
+	secret := "registry-pull-secret"
+
+	c := New(server.URL)
+	_, err := c.UpdateCluster("3", &types.UpdateClusterRequest{
+		RegistryURL:         &url,
+		RegistryUsername:    &user,
+		RegistryPassword:    &pw,
+		ImagePullSecretName: &secret,
+	})
+	require.NoError(t, err)
+}
+
 func TestDeleteCluster_Success(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
