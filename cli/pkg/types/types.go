@@ -52,16 +52,24 @@ type StackTemplate struct {
 	DefinitionCount int           `json:"definition_count,omitempty" yaml:"definition_count,omitempty"`
 }
 
-// ChartConfig represents a Helm chart configuration within a definition or template.
+// ChartConfig represents a Helm chart configuration within a definition or
+// template. Field set is the union of backend models.ChartConfig (definition
+// charts) and models.TemplateChartConfig (template charts) — LockedValues and
+// Required are populated only on template-chart responses.
 type ChartConfig struct {
 	Base
-	Name          string `json:"name" yaml:"name"`
-	RepoURL       string `json:"repository_url" yaml:"repository_url"`
-	SourceRepoURL string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
-	ChartName     string `json:"chart_name" yaml:"chart_name"`
-	ChartVersion  string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
-	ReleaseName   string `json:"release_name,omitempty" yaml:"release_name,omitempty"`
-	DefaultValues string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
+	Name            string `json:"name" yaml:"name"`
+	RepoURL         string `json:"repository_url" yaml:"repository_url"`
+	SourceRepoURL   string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
+	ChartName       string `json:"chart_name" yaml:"chart_name"`
+	ChartPath       string `json:"chart_path,omitempty" yaml:"chart_path,omitempty"`
+	ChartVersion    string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
+	ReleaseName     string `json:"release_name,omitempty" yaml:"release_name,omitempty"`
+	DefaultValues   string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
+	LockedValues    string `json:"locked_values,omitempty" yaml:"locked_values,omitempty"`
+	DeployOrder     int    `json:"deploy_order,omitempty" yaml:"deploy_order,omitempty"`
+	Required        bool   `json:"required,omitempty" yaml:"required,omitempty"`
+	BuildPipelineID string `json:"build_pipeline_id,omitempty" yaml:"build_pipeline_id,omitempty"`
 }
 
 // Cluster represents a registered Kubernetes cluster.

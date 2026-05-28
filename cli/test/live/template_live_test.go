@@ -43,8 +43,17 @@ func TestLiveTemplate_CreateWithInlineCharts(t *testing.T) {
 		Name:        name,
 		Description: "live-test fixture — safe to delete",
 		Charts: []types.ChartConfig{
-			{ChartName: "noop-a", RepoURL: "", ChartVersion: "0.1.0"},
-			{ChartName: "noop-b", RepoURL: "", ChartVersion: "0.1.0"},
+			{
+				ChartName:       "noop-a",
+				RepoURL:         "",
+				ChartVersion:    "0.1.0",
+				ChartPath:       "charts/noop-a",
+				DeployOrder:     1,
+				Required:        true,
+				LockedValues:    "image:\n  tag: pinned",
+				BuildPipelineID: "live-test-pipeline",
+			},
+			{ChartName: "noop-b", RepoURL: "", ChartVersion: "0.1.0", DeployOrder: 2},
 		},
 	})
 	require.NoError(t, err, "create template with inline charts")
@@ -55,13 +64,28 @@ func TestLiveTemplate_CreateWithInlineCharts(t *testing.T) {
 	// includes the persisted charts. Before k8s-stack-manager#264 the
 	// inline charts array was silently dropped by gin's bind, so the
 	// re-read returned 0 charts.
-	//
-	// Note: stackctl's ChartConfig type intentionally omits backend-only
-	// fields like chart_path / locked_values / deploy_order / required —
-	// we only assert presence + the fields the client maps.
 	detail, err := c.GetTemplate(created.ID)
 	require.NoError(t, err, "get template by ID")
 	require.Len(t, detail.Charts, 2, "GET must return both inline-created charts")
+
+	// Regression for the 5-field ChartConfig gap: prior to this fix,
+	// stackctl's ChartConfig had no JSON tags for chart_path / deploy_order
+	// / required / locked_values / build_pipeline_id, so backend-set values
+	// were silently dropped on decode. Locate chart-A by name and assert
+	// every union field round-trips.
+	var noopA *types.ChartConfig
+	for i := range detail.Charts {
+		if detail.Charts[i].ChartName == "noop-a" {
+			noopA = &detail.Charts[i]
+			break
+		}
+	}
+	require.NotNil(t, noopA, "decoded charts must include noop-a")
+	assert.Equal(t, "charts/noop-a", noopA.ChartPath, "chart_path must round-trip")
+	assert.Equal(t, 1, noopA.DeployOrder, "deploy_order must round-trip")
+	assert.True(t, noopA.Required, "required must round-trip")
+	assert.Equal(t, "image:\n  tag: pinned", noopA.LockedValues, "locked_values must round-trip")
+	assert.Equal(t, "live-test-pipeline", noopA.BuildPipelineID, "build_pipeline_id must round-trip")
 
 	// Publish to materialise a version snapshot — versions are only
 	// created at publish time, not at create time. Then read it back.
