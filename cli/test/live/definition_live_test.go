@@ -61,7 +61,7 @@ func TestLiveDefinition_ExportImportRoundTrip(t *testing.T) {
 	// Re-fetch to confirm charts came along with the import.
 	roundtrip, err := c.GetDefinition(imported.ID)
 	require.NoError(t, err)
-	if origCharts, ok := bundle["charts"].([]any); ok && len(origCharts) > 0 {
+	if origCharts, ok := innerDef["charts"].([]any); ok && len(origCharts) > 0 {
 		assert.NotEmpty(t, roundtrip.Charts, "imported definition must carry its charts")
 	}
 }

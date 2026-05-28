@@ -93,7 +93,7 @@ func cleanupInstance(t *testing.T, c *client.Client, id string) {
 // suite. CI smoke + per-endpoint wire-contract coverage lives in the
 // other *_live_test.go files in this package.
 func TestLiveWorkflow_FullLifecycle(t *testing.T) {
-	if os.Getenv("STACKCTL_LIVE_HEAVY") == "" {
+	if os.Getenv("STACKCTL_LIVE_HEAVY") != "1" {
 		t.Skip("set STACKCTL_LIVE_HEAVY=1 to run real-workload lifecycle tests (~5–10 min, requires cluster capacity)")
 	}
 	c := newLiveClient(t)
@@ -221,7 +221,7 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 // this test only adds the actual deploy/stop/clean assertions, so it's
 // gated behind STACKCTL_LIVE_HEAVY=1.
 func TestLiveWorkflow_BulkOperations(t *testing.T) {
-	if os.Getenv("STACKCTL_LIVE_HEAVY") == "" {
+	if os.Getenv("STACKCTL_LIVE_HEAVY") != "1" {
 		t.Skip("set STACKCTL_LIVE_HEAVY=1 to run real-workload bulk tests (creates 3 instances)")
 	}
 	c := newLiveClient(t)

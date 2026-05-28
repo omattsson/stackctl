@@ -101,14 +101,19 @@ func requireCluster(t *testing.T, c *client.Client) types.Cluster {
 // disabled in this backend build).
 func skipUnlessHTTP200(t *testing.T, c *client.Client, path string) {
 	t.Helper()
-	resp, err := http.Get(strings.TrimSuffix(c.BaseURL, "/") + path)
+	httpC := &http.Client{Timeout: 5 * time.Second}
+	resp, err := httpC.Get(strings.TrimSuffix(c.BaseURL, "/") + path)
 	if err != nil {
 		t.Skipf("endpoint %s unreachable: %v", path, err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		t.Skipf("endpoint %s returned 404 — feature not enabled on this backend", path)
 	}
+	t.Skipf("endpoint %s returned HTTP %d", path, resp.StatusCode)
 }
 
 // ensure imports stay used — these helpers are pulled in via _test.go

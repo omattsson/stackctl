@@ -889,7 +889,7 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 		// Bulk publish templates
 		case r.URL.Path == "/api/v1/templates/bulk/publish" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []string `json:"ids"`
+				TemplateIDs []string `json:"template_ids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -897,16 +897,21 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 				return
 			}
 			var results []map[string]interface{}
-			for _, id := range req.IDs {
-				results = append(results, map[string]interface{}{"id": id, "success": true})
+			for _, id := range req.TemplateIDs {
+				results = append(results, map[string]interface{}{"template_id": id, "status": "success"})
 			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results":    results,
+				"total":      len(results),
+				"successful": len(results),
+				"failed":     0,
+			})
 
 		// Bulk unpublish templates
 		case r.URL.Path == "/api/v1/templates/bulk/unpublish" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []string `json:"ids"`
+				TemplateIDs []string `json:"template_ids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -914,16 +919,21 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 				return
 			}
 			var results []map[string]interface{}
-			for _, id := range req.IDs {
-				results = append(results, map[string]interface{}{"id": id, "success": true})
+			for _, id := range req.TemplateIDs {
+				results = append(results, map[string]interface{}{"template_id": id, "status": "success"})
 			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results":    results,
+				"total":      len(results),
+				"successful": len(results),
+				"failed":     0,
+			})
 
 		// Bulk delete templates
 		case r.URL.Path == "/api/v1/templates/bulk/delete" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []string `json:"ids"`
+				TemplateIDs []string `json:"template_ids"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -931,11 +941,16 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 				return
 			}
 			var results []map[string]interface{}
-			for _, id := range req.IDs {
-				results = append(results, map[string]interface{}{"id": id, "success": true})
+			for _, id := range req.TemplateIDs {
+				results = append(results, map[string]interface{}{"template_id": id, "status": "success"})
 			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results":    results,
+				"total":      len(results),
+				"successful": len(results),
+				"failed":     0,
+			})
 
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -1205,53 +1220,68 @@ func startE2EQuietPipingMockServer(t *testing.T) *httptest.Server {
 		// Bulk deploy
 		case r.URL.Path == "/api/v1/stack-instances/bulk/deploy" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []string `json:"ids"`
+				InstanceIDs []string `json:"instance_ids"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.InstanceIDs) == 0 {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				json.NewEncoder(w).Encode(map[string]string{"error": "instance_ids required"})
 				return
 			}
 			var results []map[string]interface{}
-			for _, id := range req.IDs {
-				results = append(results, map[string]interface{}{"id": id, "success": true})
+			for _, id := range req.InstanceIDs {
+				results = append(results, map[string]interface{}{"instance_id": id, "status": "success"})
 			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results":    results,
+				"total":      len(results),
+				"successful": len(results),
+				"failed":     0,
+			})
 
 		// Bulk stop
 		case r.URL.Path == "/api/v1/stack-instances/bulk/stop" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []string `json:"ids"`
+				InstanceIDs []string `json:"instance_ids"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.InstanceIDs) == 0 {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				json.NewEncoder(w).Encode(map[string]string{"error": "instance_ids required"})
 				return
 			}
 			var results []map[string]interface{}
-			for _, id := range req.IDs {
-				results = append(results, map[string]interface{}{"id": id, "success": true})
+			for _, id := range req.InstanceIDs {
+				results = append(results, map[string]interface{}{"instance_id": id, "status": "success"})
 			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results":    results,
+				"total":      len(results),
+				"successful": len(results),
+				"failed":     0,
+			})
 
 		// Bulk delete
 		case r.URL.Path == "/api/v1/stack-instances/bulk/delete" && r.Method == http.MethodPost:
 			var req struct {
-				IDs []string `json:"ids"`
+				InstanceIDs []string `json:"instance_ids"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.InstanceIDs) == 0 {
 				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]string{"error": "ids required"})
+				json.NewEncoder(w).Encode(map[string]string{"error": "instance_ids required"})
 				return
 			}
 			var results []map[string]interface{}
-			for _, id := range req.IDs {
-				results = append(results, map[string]interface{}{"id": id, "success": true})
+			for _, id := range req.InstanceIDs {
+				results = append(results, map[string]interface{}{"instance_id": id, "status": "success"})
 			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]interface{}{"results": results})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"results":    results,
+				"total":      len(results),
+				"successful": len(results),
+				"failed":     0,
+			})
 
 		default:
 			w.WriteHeader(http.StatusNotFound)

@@ -3,6 +3,7 @@
 package live
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,9 +46,14 @@ func TestLiveCluster_QuotaRoundTrip(t *testing.T) {
 
 	q, err := c.GetClusterQuota(cluster.ID)
 	if err != nil {
-		// Quota is optional — some clusters run unbounded. Skip rather
-		// than fail so partial-config backends stay green.
-		t.Skipf("cluster %s has no quota configured: %v", cluster.ID, err)
+		// Quota is optional — some clusters run unbounded. Only skip on
+		// the documented not-configured / not-found paths so genuine
+		// contract regressions still surface as failures.
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "not found") || strings.Contains(msg, "no quota") {
+			t.Skipf("cluster %s has no quota configured: %v", cluster.ID, err)
+		}
+		require.NoError(t, err, "get cluster quota")
 	}
 	assert.NotEmpty(t, q.CPURequest, "quota cpu_request should be set when quota exists")
 	assert.NotEmpty(t, q.MemoryRequest, "quota memory_request should be set when quota exists")
@@ -83,7 +89,13 @@ func TestLiveCluster_HealthAndTest(t *testing.T) {
 	t.Run("nodes", func(t *testing.T) {
 		nodes, err := c.GetClusterNodes(cluster.ID)
 		if err != nil {
-			t.Skipf("nodes endpoint unavailable (cluster not reachable): %v", err)
+			// Skip only when the backend can't reach the cluster — any
+			// other error (bad wire shape, 5xx) should fail the test.
+			msg := strings.ToLower(err.Error())
+			if strings.Contains(msg, "not reachable") || strings.Contains(msg, "unavailable") || strings.Contains(msg, "connection refused") {
+				t.Skipf("nodes endpoint unavailable (cluster not reachable): %v", err)
+			}
+			require.NoError(t, err, "get cluster nodes")
 		}
 		// Just verify we get a decodable slice back. Empty is fine.
 		assert.NotNil(t, nodes)

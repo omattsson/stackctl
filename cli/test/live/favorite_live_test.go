@@ -58,8 +58,7 @@ func TestLiveFavorite_AddListRemove(t *testing.T) {
 	list2, err := c.ListFavorites()
 	require.NoError(t, err)
 	for _, f := range list2 {
-		if f.EntityType == entityType && f.EntityID == def.ID {
-			t.Errorf("favorite must be gone after RemoveFavorite, still found %+v", f)
-		}
+		assert.False(t, f.EntityType == entityType && f.EntityID == def.ID,
+			"favorite must be gone after RemoveFavorite, still found %+v", f)
 	}
 }
