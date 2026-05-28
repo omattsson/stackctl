@@ -69,7 +69,17 @@ func TestLiveCluster_HealthAndTest(t *testing.T) {
 
 	t.Run("health", func(t *testing.T) {
 		health, err := c.GetClusterHealth(cluster.ID)
-		require.NoError(t, err, "get cluster health")
+		if err != nil {
+			// Same skip rule as the "nodes" subtest below: when the
+			// backend can't talk to the cluster, the health summary
+			// 500s. That's not a wire-shape regression, just an
+			// environment with no kubeconfig (e.g. the CI api-only
+			// stack against a stub cluster).
+			if isClusterUnreachable(err) {
+				t.Skipf("health endpoint unavailable (cluster not reachable): %v", err)
+			}
+			require.NoError(t, err, "get cluster health")
+		}
 		// Health summary should at least populate node count for any
 		// non-empty cluster. Zero would mean the wire decode lost data.
 		assert.GreaterOrEqual(t, health.NodeCount, 0, "node_count must decode (zero is fine for empty clusters)")
@@ -91,8 +101,7 @@ func TestLiveCluster_HealthAndTest(t *testing.T) {
 		if err != nil {
 			// Skip only when the backend can't reach the cluster — any
 			// other error (bad wire shape, 5xx) should fail the test.
-			msg := strings.ToLower(err.Error())
-			if strings.Contains(msg, "not reachable") || strings.Contains(msg, "unavailable") || strings.Contains(msg, "connection refused") {
+			if isClusterUnreachable(err) {
 				t.Skipf("nodes endpoint unavailable (cluster not reachable): %v", err)
 			}
 			require.NoError(t, err, "get cluster nodes")
@@ -100,4 +109,24 @@ func TestLiveCluster_HealthAndTest(t *testing.T) {
 		// Just verify we get a decodable slice back. Empty is fine.
 		assert.NotNil(t, nodes)
 	})
+}
+
+// isClusterUnreachable returns true when the backend's error indicates
+// the cluster itself isn't reachable (no kubeconfig, kube-apiserver
+// down, DNS failure) rather than a wire-shape or auth issue. Used by
+// the diagnostic-endpoint tests to skip cleanly in CI environments
+// running against a stub cluster.
+func isClusterUnreachable(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"not reachable",
+		"unavailable",
+		"connection refused",
+		"failed to connect to cluster", // backend's literal 500 message
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
 }
