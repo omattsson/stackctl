@@ -896,6 +896,11 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 				return
 			}
+			if len(req.TemplateIDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "template_ids required"})
+				return
+			}
 			var results []map[string]interface{}
 			for _, id := range req.TemplateIDs {
 				results = append(results, map[string]interface{}{"template_id": id, "status": "success"})
@@ -918,6 +923,11 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
 				return
 			}
+			if len(req.TemplateIDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "template_ids required"})
+				return
+			}
 			var results []map[string]interface{}
 			for _, id := range req.TemplateIDs {
 				results = append(results, map[string]interface{}{"template_id": id, "status": "success"})
@@ -938,6 +948,11 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+				return
+			}
+			if len(req.TemplateIDs) == 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "template_ids required"})
 				return
 			}
 			var results []map[string]interface{}
