@@ -86,7 +86,16 @@ func cleanupInstance(t *testing.T, c *client.Client, id string) {
 	})
 }
 
+// TestLiveWorkflow_FullLifecycle exercises the complete deploy-stop-clean-
+// delete path against a real backend by actually rolling out a stack
+// instance. It pulls images, allocates PVs, and burns cluster quota — so
+// it's gated behind STACKCTL_LIVE_HEAVY=1 to keep it off the default
+// suite. CI smoke + per-endpoint wire-contract coverage lives in the
+// other *_live_test.go files in this package.
 func TestLiveWorkflow_FullLifecycle(t *testing.T) {
+	if os.Getenv("STACKCTL_LIVE_HEAVY") == "" {
+		t.Skip("set STACKCTL_LIVE_HEAVY=1 to run real-workload lifecycle tests (~5–10 min, requires cluster capacity)")
+	}
 	c := newLiveClient(t)
 
 	// Step 1: Login
@@ -205,7 +214,16 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	assert.Error(t, err, "GetStack on deleted instance should fail")
 }
 
+// TestLiveWorkflow_BulkOperations deploys 3 real stack instances and bulk-
+// operates on them. Heavy: ~3 cluster-CPU and ~5 Gi memory per instance,
+// plus golden-db pulls. Wire-shape coverage for bulk lives in
+// TestLiveBulk_StackInstanceWireShape / TestLiveBulk_TemplateRoundTrip;
+// this test only adds the actual deploy/stop/clean assertions, so it's
+// gated behind STACKCTL_LIVE_HEAVY=1.
 func TestLiveWorkflow_BulkOperations(t *testing.T) {
+	if os.Getenv("STACKCTL_LIVE_HEAVY") == "" {
+		t.Skip("set STACKCTL_LIVE_HEAVY=1 to run real-workload bulk tests (creates 3 instances)")
+	}
 	c := newLiveClient(t)
 
 	// Step 1: Login
