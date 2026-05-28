@@ -145,11 +145,16 @@ func TestStackDefinition_JSONRoundTrip(t *testing.T) {
 		Owner:         "admin",
 		Charts: []ChartConfig{
 			{
-				Base:         Base{ID: "chart-1"},
-				Name:         "api",
-				RepoURL:      "https://charts.example.com",
-				ChartName:    "api-chart",
-				ChartVersion: "1.0.0",
+				Base:            Base{ID: "chart-1"},
+				Name:            "api",
+				RepoURL:         "https://charts.example.com",
+				ChartName:       "api-chart",
+				ChartPath:       "charts/api",
+				ChartVersion:    "1.0.0",
+				DeployOrder:     2,
+				BuildPipelineID: "pipeline-42",
+				LockedValues:    "image:\n  tag: v1",
+				Required:        true,
 			},
 		},
 	}
@@ -163,6 +168,14 @@ func TestStackDefinition_JSONRoundTrip(t *testing.T) {
 	assert.Equal(t, orig.Name, decoded.Name)
 	assert.Equal(t, orig.DefaultBranch, decoded.DefaultBranch)
 	assert.Len(t, decoded.Charts, 1)
-	assert.Equal(t, "api", decoded.Charts[0].Name)
-	assert.Equal(t, "1.0.0", decoded.Charts[0].ChartVersion)
+	ch := decoded.Charts[0]
+	assert.Equal(t, "api", ch.Name)
+	assert.Equal(t, "1.0.0", ch.ChartVersion)
+	// Round-trip the union fields so we catch silent drops (regression for
+	// the 5-field gap that the live template test surfaced).
+	assert.Equal(t, "charts/api", ch.ChartPath)
+	assert.Equal(t, 2, ch.DeployOrder)
+	assert.Equal(t, "pipeline-42", ch.BuildPipelineID)
+	assert.Equal(t, "image:\n  tag: v1", ch.LockedValues)
+	assert.True(t, ch.Required)
 }
