@@ -1,0 +1,25 @@
+# CI override for k8s-stack-manager's docker-compose.yml.
+#
+# Two upstream defaults don't fit `target: production` + headless CI:
+#
+# 1. `./backend:/app` bind-mount is for dev hot-reload. With the production
+#    target it overlays the baked-in /app/main binary with the host source
+#    tree (which has no compiled binary), so the container exits with
+#    "stat ./main: no such file or directory". `!reset []` replaces the
+#    list instead of merging (Compose ≥1.28).
+#
+# 2. The healthcheck runs `curl -f http://localhost:8081/health/live`
+#    inside the container, but the alpine production image doesn't have
+#    curl installed. Replace with busybox `wget --spider`, which alpine
+#    ships in the base image. (`test: ["NONE"]` would disable the check
+#    but then `docker compose up --wait` errors with "no healthcheck
+#    configured" instead of treating "running" as ready.)
+services:
+  backend:
+    volumes: !reset []
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s

@@ -1,0 +1,137 @@
+name: Live tests
+
+# Boots k8s-stack-manager (origin/main, api-only profile) in the same job,
+# applies a SQL fixture, mints an API key, then runs cli/test/live against
+# the booted backend. Catches wire-contract drift between the two repos at
+# PR time — the stub-based unit tests can't see it.
+#
+# Tracks omattsson/stackctl#96.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    name: Live integration suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: ci-admin-password-do-not-reuse
+      DB_PASSWORD: rootpassword
+      DB_NAME: app
+      MYSQL_CONTAINER: app-mysql-dev
+      BACKEND_URL: http://localhost:8081
+    steps:
+      - name: Check out stackctl
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Clone k8s-stack-manager (origin/main)
+        run: |
+          git clone --depth=1 https://github.com/omattsson/k8s-stack-manager /tmp/k8s-sm
+          echo "k8s-sm @ $(git -C /tmp/k8s-sm rev-parse --short HEAD)"
+
+      - name: Boot api-only stack (backend + mysql)
+        env:
+          ADMIN_USERNAME: ${{ env.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ env.ADMIN_PASSWORD }}
+          DB_PASSWORD: ${{ env.DB_PASSWORD }}
+        run: |
+          # No --profile flag → only services without profiles run, which is
+          # exactly the api-only set (backend + mysql). Frontend is gated to
+          # the "full" profile.
+          #
+          # The override file resets the dev bind-mount that would otherwise
+          # hide the production image's baked-in ./main binary.
+          docker compose \
+            -f /tmp/k8s-sm/docker-compose.yml \
+            -f "$GITHUB_WORKSPACE/cli/test/live/testdata/docker-compose.ci.yml" \
+            up -d --wait backend
+
+      - name: Wait for backend /health/live
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS "$BACKEND_URL/health/live" >/dev/null 2>&1; then
+              echo "Backend healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Backend never became healthy" >&2
+          docker compose \
+            -f /tmp/k8s-sm/docker-compose.yml \
+            -f "$GITHUB_WORKSPACE/cli/test/live/testdata/docker-compose.ci.yml" \
+            logs backend
+          exit 1
+
+      - name: Apply CI seed fixtures
+        run: |
+          docker exec -i "$MYSQL_CONTAINER" \
+            mysql -u root -p"$DB_PASSWORD" "$DB_NAME" \
+            < cli/test/live/testdata/ci-seed.sql
+
+      - name: Mint API key for live tests
+        id: apikey
+        run: |
+          set -euo pipefail
+          # Login as the env-seeded admin → JWT + admin user id.
+          login=$(curl -fsS -X POST "$BACKEND_URL/api/v1/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"$ADMIN_USERNAME\",\"password\":\"$ADMIN_PASSWORD\"}")
+          jwt=$(echo "$login" | jq -r '.token // .access_token')
+          admin_id=$(echo "$login" | jq -r '.user.id')
+          if [ -z "$jwt" ] || [ "$jwt" = "null" ] || [ -z "$admin_id" ] || [ "$admin_id" = "null" ]; then
+            echo "Login response missing token/user.id" >&2
+            # Drop the JWT before logging so a failed boot can't leak it.
+            echo "$login" | jq 'del(.token, .access_token)' >&2
+            exit 1
+          fi
+          # Mint a key — the raw key is only returned once.
+          # Backend requires an expiration; 1 day is plenty for a CI run.
+          # Response field is "raw_key" (prefixed sk_<hex>), not "key".
+          mint=$(curl -fsS -X POST "$BACKEND_URL/api/v1/users/$admin_id/api-keys" \
+            -H "Authorization: Bearer $jwt" \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"ci-live-tests","expires_in_days":1}')
+          key=$(echo "$mint" | jq -r '.raw_key')
+          if [ -z "$key" ] || [ "$key" = "null" ]; then
+            echo "API-key mint response missing .raw_key" >&2
+            # Drop the raw key before logging — it's only valid once but
+            # still a credential while the job is alive.
+            echo "$mint" | jq 'del(.raw_key)' >&2
+            exit 1
+          fi
+          # Mask in logs and export for the test step.
+          echo "::add-mask::$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Run live suite
+        env:
+          STACKCTL_LIVE_URL: ${{ env.BACKEND_URL }}
+          STACKCTL_LIVE_API_KEY: ${{ steps.apikey.outputs.key }}
+        working-directory: cli
+        run: go test -tags live -count=1 -timeout 10m -v ./test/live/...
+
+      - name: Backend logs on failure
+        if: failure()
+        run: |
+          docker compose \
+            -f /tmp/k8s-sm/docker-compose.yml \
+            -f "$GITHUB_WORKSPACE/cli/test/live/testdata/docker-compose.ci.yml" \
+            logs backend
