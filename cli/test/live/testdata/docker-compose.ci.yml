@@ -10,11 +10,16 @@
 #
 # 2. The healthcheck runs `curl -f http://localhost:8081/health/live`
 #    inside the container, but the alpine production image doesn't have
-#    curl installed. The check fails forever and `docker compose up
-#    --wait` times out. Disable the container-side healthcheck — we run
-#    our own poll against /health/live from the host in the next step.
+#    curl installed. Replace with busybox `wget --spider`, which alpine
+#    ships in the base image. (`test: ["NONE"]` would disable the check
+#    but then `docker compose up --wait` errors with "no healthcheck
+#    configured" instead of treating "running" as ready.)
 services:
   backend:
     volumes: !reset []
     healthcheck:
-      test: ["NONE"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
