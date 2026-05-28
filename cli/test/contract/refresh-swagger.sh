@@ -14,7 +14,7 @@
 #   ./refresh-swagger.sh                       # fetch from main
 #   ./refresh-swagger.sh <git-ref>             # fetch from a specific tag/branch/sha
 #
-# Requires: curl, shasum.
+# Requires: curl, shasum, python3.
 set -euo pipefail
 
 REF="${1:-main}"
@@ -29,7 +29,7 @@ curl -fsSL "$URL" -o "$tmp"
 
 # Refuse to overwrite if the fetched payload isn't valid JSON — protects
 # against fetching a 404 HTML page that happens to be 200 from a CDN.
-if ! python3 -c "import json,sys; json.load(open('$tmp'))" 2>/dev/null; then
+if ! python3 -c 'import json,sys; json.load(sys.stdin)' < "$tmp" 2>/dev/null; then
     echo "ERROR: fetched file is not valid JSON, refusing to overwrite" >&2
     exit 1
 fi
