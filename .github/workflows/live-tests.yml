@@ -98,7 +98,8 @@ jobs:
           admin_id=$(echo "$login" | jq -r '.user.id')
           if [ -z "$jwt" ] || [ "$jwt" = "null" ] || [ -z "$admin_id" ] || [ "$admin_id" = "null" ]; then
             echo "Login response missing token/user.id" >&2
-            echo "$login" | jq . >&2
+            # Drop the JWT before logging so a failed boot can't leak it.
+            echo "$login" | jq 'del(.token, .access_token)' >&2
             exit 1
           fi
           # Mint a key — the raw key is only returned once.
@@ -111,7 +112,9 @@ jobs:
           key=$(echo "$mint" | jq -r '.raw_key')
           if [ -z "$key" ] || [ "$key" = "null" ]; then
             echo "API-key mint response missing .raw_key" >&2
-            echo "$mint" | jq . >&2
+            # Drop the raw key before logging — it's only valid once but
+            # still a credential while the job is alive.
+            echo "$mint" | jq 'del(.raw_key)' >&2
             exit 1
           fi
           # Mask in logs and export for the test step.
