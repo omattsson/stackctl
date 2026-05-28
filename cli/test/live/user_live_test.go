@@ -54,25 +54,35 @@ func TestLiveUser_RegisterListDisableEnable(t *testing.T) {
 	require.NotNilf(t, found, "newly-registered user %s must appear in list", username)
 	assert.False(t, found.Disabled, "freshly-registered user must not be disabled")
 
-	// 3. Disable → re-list and verify the flag flipped.
+	// 3. Disable → re-list and verify the flag flipped. Find-first so a
+	// missing user in the response fails the test rather than silently
+	// no-op'ing the assertion.
 	require.NoError(t, c.DisableUser(created.ID), "disable user")
 	after, err := c.ListUsers()
 	require.NoError(t, err, "list users after disable")
-	for _, u := range after {
-		if u.ID == created.ID {
-			assert.True(t, u.Disabled, "user must be marked disabled after DisableUser")
+	var disabled *types.User
+	for i := range after {
+		if after[i].ID == created.ID {
+			disabled = &after[i]
+			break
 		}
 	}
+	require.NotNilf(t, disabled, "user %s must still be in list after DisableUser", created.ID)
+	assert.True(t, disabled.Disabled, "user must be marked disabled after DisableUser")
 
 	// 4. Enable → re-list and verify the flag flipped back.
 	require.NoError(t, c.EnableUser(created.ID), "enable user")
 	after2, err := c.ListUsers()
 	require.NoError(t, err, "list users after enable")
-	for _, u := range after2 {
-		if u.ID == created.ID {
-			assert.False(t, u.Disabled, "user must be re-enabled after EnableUser")
+	var enabled *types.User
+	for i := range after2 {
+		if after2[i].ID == created.ID {
+			enabled = &after2[i]
+			break
 		}
 	}
+	require.NotNilf(t, enabled, "user %s must still be in list after EnableUser", created.ID)
+	assert.False(t, enabled.Disabled, "user must be re-enabled after EnableUser")
 
 	// 5. ResetUserPassword — admin path. We don't try to authenticate as the
 	// new user, just verify the endpoint returns 204 for a local-provider

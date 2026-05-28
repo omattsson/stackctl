@@ -37,7 +37,8 @@ func TestLiveAPIKey_CRUD(t *testing.T) {
 	require.NoError(t, err, "create api key")
 	require.NotEmpty(t, created.ID, "created key must have an ID")
 	require.NotEmpty(t, created.RawKey, "raw_key must be populated on create (this is the only time it's returned)")
-	assert.Truef(t, len(created.RawKey) > len("sk_"), "raw_key %q must be longer than the sk_ prefix", created.RawKey)
+	// require (not assert) so a short response doesn't panic the slice below.
+	require.Truef(t, len(created.RawKey) > len("sk_"), "raw_key %q must be longer than the sk_ prefix", created.RawKey)
 	assert.Equal(t, "sk_", created.RawKey[:3], "raw_key must carry the sk_ prefix")
 	assert.NotEmpty(t, created.Prefix, "prefix must be set so the key shows up in list")
 	require.NotNil(t, created.ExpiresAt, "expires_at must echo back on create when expires_in_days was set")
