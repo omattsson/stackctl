@@ -24,18 +24,25 @@ func baseURL() string {
 
 // newLiveClient creates a client pointing at the live backend and verifies
 // connectivity. If the backend is unreachable the test is skipped.
+//
+// Auth: prefers STACKCTL_LIVE_API_KEY (header-based, no session) and falls
+// back to STACKCTL_LIVE_USER + STACKCTL_LIVE_PASS via Login. If neither is
+// configured the suite is skipped.
 func newLiveClient(t *testing.T) *client.Client {
 	t.Helper()
 
-	if os.Getenv("STACKCTL_LIVE_USER") == "" || os.Getenv("STACKCTL_LIVE_PASS") == "" {
-		t.Skip("STACKCTL_LIVE_USER and STACKCTL_LIVE_PASS must be set for live tests")
+	apiKey := os.Getenv("STACKCTL_LIVE_API_KEY")
+	user, pass := os.Getenv("STACKCTL_LIVE_USER"), os.Getenv("STACKCTL_LIVE_PASS")
+	if apiKey == "" && (user == "" || pass == "") {
+		t.Skip("STACKCTL_LIVE_API_KEY or (STACKCTL_LIVE_USER + STACKCTL_LIVE_PASS) must be set for live tests")
 	}
 
 	c := client.New(baseURL())
 
 	// Quick connectivity check — skip (not fail) if backend is down.
+	// Backend exposes /health/live (Kubernetes liveness probe), not /api/v1/health.
 	httpC := &http.Client{Timeout: 5 * time.Second}
-	resp, err := httpC.Get(baseURL() + "/api/v1/health")
+	resp, err := httpC.Get(baseURL() + "/health/live")
 	if err != nil {
 		t.Skipf("Backend unreachable at %s: %v", baseURL(), err)
 	}
@@ -44,12 +51,23 @@ func newLiveClient(t *testing.T) *client.Client {
 		t.Skipf("Backend unhealthy at %s: HTTP %d", baseURL(), resp.StatusCode)
 	}
 
+	// API-key path: stamps the X-API-Key header on every subsequent request,
+	// no login needed. Password path is handled by the per-test login() helper.
+	if apiKey != "" {
+		c.APIKey = apiKey
+	}
+
 	return c
 }
 
-// login authenticates the client and returns the login response.
+// login authenticates the client when running in password mode and returns
+// the login response. When STACKCTL_LIVE_API_KEY is set this is a no-op —
+// the client is already authenticated via the header set in newLiveClient.
 func login(t *testing.T, c *client.Client) *types.LoginResponse {
 	t.Helper()
+	if os.Getenv("STACKCTL_LIVE_API_KEY") != "" {
+		return &types.LoginResponse{}
+	}
 	resp, err := c.Login(os.Getenv("STACKCTL_LIVE_USER"), os.Getenv("STACKCTL_LIVE_PASS"))
 	require.NoError(t, err, "login must succeed")
 	require.NotEmpty(t, resp.Token, "token must not be empty")
@@ -57,7 +75,7 @@ func login(t *testing.T, c *client.Client) *types.LoginResponse {
 }
 
 // cleanupInstance registers a t.Cleanup that best-effort deletes the instance.
-func cleanupInstance(t *testing.T, c *client.Client, id uint) {
+func cleanupInstance(t *testing.T, c *client.Client, id string) {
 	t.Helper()
 	t.Cleanup(func() {
 		// Best-effort: stop -> clean -> delete. Ignore errors because the
@@ -74,7 +92,9 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	// Step 1: Login
 	t.Log("Step 1: Login")
 	loginResp := login(t, c)
-	assert.NotEmpty(t, loginResp.User.Username)
+	if loginResp.User.Username != "" {
+		t.Logf("Logged in as %s", loginResp.User.Username)
+	}
 
 	// Step 2: List templates — pick the first available
 	t.Log("Step 2: List templates")
@@ -84,7 +104,7 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 		t.Skip("No templates available on backend — cannot run full lifecycle test")
 	}
 	tmpl := templates.Data[0]
-	t.Logf("Using template %d (%s)", tmpl.ID, tmpl.Name)
+	t.Logf("Using template %s (%s)", tmpl.ID, tmpl.Name)
 
 	// Step 3: Instantiate template
 	t.Log("Step 3: Instantiate template")
@@ -93,8 +113,8 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 		Branch: "main",
 	})
 	require.NoError(t, err, "instantiate template")
-	require.NotZero(t, instance.ID, "instance ID must be set")
-	t.Logf("Created instance %d (%s)", instance.ID, instance.Name)
+	require.NotEmpty(t, instance.ID, "instance ID must be set")
+	t.Logf("Created instance %s (%s)", instance.ID, instance.Name)
 
 	// Register cleanup so resources are removed even on failure.
 	cleanupInstance(t, c, instance.ID)
@@ -103,7 +123,7 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	t.Log("Step 4: Deploy")
 	deployLog, err := c.DeployStack(instance.ID)
 	require.NoError(t, err, "deploy stack")
-	assert.NotZero(t, deployLog.ID, "deploy log ID must be set")
+	assert.NotEmpty(t, deployLog.LogID, "deploy log ID must be set")
 
 	// Step 5: Check status
 	t.Log("Step 5: Check status")
@@ -112,9 +132,13 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	assert.NotEmpty(t, status.Status, "status field must be present")
 	t.Logf("Status: %s, pods: %d", status.Status, len(status.Pods))
 
-	// Step 6–7: Set overrides and redeploy (only if template has charts)
+	// Step 6–7: Set overrides and redeploy (only if template has charts).
+	// Note: templates.Data[0] from ListTemplates doesn't carry charts unless
+	// the backend includes them in the list response, so this branch usually
+	// gets skipped against the live backend (charts are populated by a
+	// per-template GET, not on the list endpoint).
 	if len(tmpl.Charts) == 0 {
-		t.Log("Step 6–7: Skipped — template has no charts, cannot set overrides")
+		t.Log("Step 6–7: Skipped — template list response carries no charts")
 	} else {
 		chartID := tmpl.Charts[0].ID
 
@@ -149,7 +173,7 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 		t.Log("Step 7: Redeploy")
 		redeployLog, err := c.DeployStack(instance.ID)
 		require.NoError(t, err, "redeploy stack")
-		assert.NotZero(t, redeployLog.ID, "redeploy log ID must be set")
+		assert.NotEmpty(t, redeployLog.LogID, "redeploy log ID must be set")
 	}
 
 	// Step 8: View logs
@@ -162,13 +186,13 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	t.Log("Step 9: Stop")
 	stopLog, err := c.StopStack(instance.ID)
 	require.NoError(t, err, "stop stack")
-	assert.NotZero(t, stopLog.ID, "stop log ID must be set")
+	assert.NotEmpty(t, stopLog.LogID, "stop log ID must be set")
 
 	// Step 10: Clean
 	t.Log("Step 10: Clean")
 	cleanLog, err := c.CleanStack(instance.ID)
 	require.NoError(t, err, "clean stack")
-	assert.NotZero(t, cleanLog.ID, "clean log ID must be set")
+	assert.NotEmpty(t, cleanLog.LogID, "clean log ID must be set")
 
 	// Step 11: Delete
 	t.Log("Step 11: Delete")
@@ -195,11 +219,11 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 		t.Skip("No definitions available on backend — cannot run bulk test")
 	}
 	defID := defs.Data[0].ID
-	t.Logf("Using definition %d (%s)", defID, defs.Data[0].Name)
+	t.Logf("Using definition %s (%s)", defID, defs.Data[0].Name)
 
 	// Step 2: Create 3 stack instances
 	t.Log("Step 2: Create 3 stack instances")
-	var ids []uint
+	var ids []string
 	for i := 0; i < 3; i++ {
 		inst, err := c.CreateStack(&types.CreateStackRequest{
 			Name:              fmt.Sprintf("live-bulk-%d-%d", time.Now().UnixMilli(), i),
@@ -207,9 +231,9 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 			Branch:            "main",
 		})
 		require.NoError(t, err, "create stack %d", i)
-		require.NotZero(t, inst.ID)
+		require.NotEmpty(t, inst.ID)
 		ids = append(ids, inst.ID)
-		t.Logf("Created instance %d", inst.ID)
+		t.Logf("Created instance %s", inst.ID)
 	}
 
 	// Register cleanup for all created instances.
@@ -223,7 +247,7 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	require.NoError(t, err, "bulk deploy")
 	assert.Len(t, deployResp.Results, 3, "should have 3 results")
 	for _, r := range deployResp.Results {
-		assert.True(t, r.Success, "deploy should succeed for id %d: %s", r.ID, r.Error)
+		assert.True(t, r.Success(), "deploy should succeed for id %s: %s", r.ID(), r.Error)
 	}
 
 	// Step 4: Bulk stop
@@ -232,7 +256,7 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	require.NoError(t, err, "bulk stop")
 	assert.Len(t, stopResp.Results, 3)
 	for _, r := range stopResp.Results {
-		assert.True(t, r.Success, "stop should succeed for id %d: %s", r.ID, r.Error)
+		assert.True(t, r.Success(), "stop should succeed for id %s: %s", r.ID(), r.Error)
 	}
 
 	// Step 5: Bulk clean
@@ -241,7 +265,7 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	require.NoError(t, err, "bulk clean")
 	assert.Len(t, cleanResp.Results, 3)
 	for _, r := range cleanResp.Results {
-		assert.True(t, r.Success, "clean should succeed for id %d: %s", r.ID, r.Error)
+		assert.True(t, r.Success(), "clean should succeed for id %s: %s", r.ID(), r.Error)
 	}
 
 	// Step 6: Bulk delete
@@ -250,13 +274,13 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	require.NoError(t, err, "bulk delete")
 	assert.Len(t, deleteResp.Results, 3)
 	for _, r := range deleteResp.Results {
-		assert.True(t, r.Success, "delete should succeed for id %d: %s", r.ID, r.Error)
+		assert.True(t, r.Success(), "delete should succeed for id %s: %s", r.ID(), r.Error)
 	}
 
 	// Step 7: Verify all deleted
 	t.Log("Step 7: Verify all deleted")
 	for _, id := range ids {
 		_, err := c.GetStack(id)
-		assert.Error(t, err, "GetStack on deleted instance %d should fail", id)
+		assert.Error(t, err, "GetStack on deleted instance %s should fail", id)
 	}
 }

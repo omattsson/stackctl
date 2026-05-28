@@ -25,9 +25,9 @@ func setupBulkTestCmd(t *testing.T, apiURL string) *bytes.Buffer {
 func sampleBulkResponse() types.BulkResponse {
 	return types.BulkResponse{
 		Results: []types.BulkOperationResult{
-			{ID: "1", Success: true},
-			{ID: "2", Success: true},
-			{ID: "3", Success: false, Error: "not found"},
+			{InstanceID: "1", Status: "success"},
+			{InstanceID: "2", Status: "success"},
+			{InstanceID: "3", Status: "error", Error: "not found"},
 		},
 	}
 }
@@ -40,9 +40,9 @@ func TestBulkDeployCmd_TableOutput(t *testing.T) {
 		require.Equal(t, "/api/v1/stack-instances/bulk/deploy", r.URL.Path)
 		require.Equal(t, http.MethodPost, r.Method)
 
-		var body types.BulkRequest
+		var body types.BulkInstancesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.InstanceIDs)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -88,8 +88,8 @@ func TestBulkDeployCmd_JSONOutput(t *testing.T) {
 	var result types.BulkResponse
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.Len(t, result.Results, 3)
-	assert.True(t, result.Results[0].Success)
-	assert.False(t, result.Results[2].Success)
+	assert.True(t, result.Results[0].Success())
+	assert.False(t, result.Results[2].Success())
 }
 
 func TestBulkDeployCmd_QuietOutput(t *testing.T) {
@@ -474,8 +474,8 @@ func TestBulkDeployCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: \"1\"")
-	assert.Contains(t, out, "success: true")
+	assert.Contains(t, out, "instance_id: \"1\"")
+	assert.Contains(t, out, "status: success")
 	assert.Contains(t, out, "error: not found")
 }
 
@@ -524,8 +524,8 @@ func TestBulkStopCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: \"1\"")
-	assert.Contains(t, out, "success: true")
+	assert.Contains(t, out, "instance_id: \"1\"")
+	assert.Contains(t, out, "status: success")
 }
 
 func TestBulkStopCmd_QuietOutput(t *testing.T) {
@@ -593,8 +593,8 @@ func TestBulkCleanCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: \"1\"")
-	assert.Contains(t, out, "success: true")
+	assert.Contains(t, out, "instance_id: \"1\"")
+	assert.Contains(t, out, "status: success")
 }
 
 // ---------- bulk delete additional output modes ----------
@@ -622,8 +622,8 @@ func TestBulkDeleteCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: \"1\"")
-	assert.Contains(t, out, "success: true")
+	assert.Contains(t, out, "instance_id: \"1\"")
+	assert.Contains(t, out, "status: success")
 }
 
 // ---------- resolveBulkIDs edge cases ----------
@@ -689,9 +689,9 @@ func TestBulkDeployCmd_PositionalArgs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/stack-instances/bulk/deploy", r.URL.Path)
 
-		var body types.BulkRequest
+		var body types.BulkInstancesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.InstanceIDs)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -712,9 +712,9 @@ func TestBulkDeployCmd_PositionalArgs(t *testing.T) {
 func TestBulkDeployCmd_MixedArgs(t *testing.T) {
 	resp := sampleBulkResponse()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body types.BulkRequest
+		var body types.BulkInstancesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.InstanceIDs)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -821,9 +821,9 @@ func TestBulkTemplatePublishCmd_TableOutput(t *testing.T) {
 		require.Equal(t, "/api/v1/templates/bulk/publish", r.URL.Path)
 		require.Equal(t, http.MethodPost, r.Method)
 
-		var body types.BulkRequest
+		var body types.BulkTemplatesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.TemplateIDs)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -889,8 +889,8 @@ func TestBulkTemplatePublishCmd_YAMLOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "id: \"1\"")
-	assert.Contains(t, out, "success: true")
+	assert.Contains(t, out, "instance_id: \"1\"")
+	assert.Contains(t, out, "status: success")
 }
 
 func TestBulkTemplatePublishCmd_QuietOutput(t *testing.T) {
@@ -1019,8 +1019,8 @@ func TestBulkTemplateUnpublishCmd_YAMLOutput(t *testing.T) {
 	err := bulkTemplateUnpublishCmd.RunE(bulkTemplateUnpublishCmd, []string{})
 	require.NoError(t, err)
 	out := buf.String()
-	assert.Contains(t, out, "id: \"1\"")
-	assert.Contains(t, out, "success: true")
+	assert.Contains(t, out, "instance_id: \"1\"")
+	assert.Contains(t, out, "status: success")
 }
 
 func TestBulkTemplateUnpublishCmd_APIError(t *testing.T) {
@@ -1225,8 +1225,8 @@ func TestBulkTemplateDeleteCmd_YAMLOutput(t *testing.T) {
 	err := bulkTemplateDeleteCmd.RunE(bulkTemplateDeleteCmd, []string{})
 	require.NoError(t, err)
 	out := buf.String()
-	assert.Contains(t, out, "id: \"1\"")
-	assert.Contains(t, out, "success: true")
+	assert.Contains(t, out, "instance_id: \"1\"")
+	assert.Contains(t, out, "status: success")
 }
 
 func TestBulkTemplateDeleteCmd_QuietOutput(t *testing.T) {

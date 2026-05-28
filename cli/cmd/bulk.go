@@ -455,8 +455,8 @@ func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]stri
 func printBulkResults(resp *types.BulkResponse) error {
 	if printer.Quiet {
 		for _, r := range resp.Results {
-			if r.Success {
-				fmt.Fprintln(printer.Writer, r.ID)
+			if r.Success() {
+				fmt.Fprintln(printer.Writer, r.ID())
 			}
 		}
 		return nil
@@ -471,13 +471,9 @@ func printBulkResults(resp *types.BulkResponse) error {
 		headers := []string{"ID", "STATUS", "ERROR"}
 		rows := make([][]string, len(resp.Results))
 		for i, r := range resp.Results {
-			status := "success"
-			if !r.Success {
-				status = "failed"
-			}
 			rows[i] = []string{
-				r.ID,
-				printer.StatusColor(status),
+				r.ID(),
+				printer.StatusColor(r.Status),
 				r.Error,
 			}
 		}

@@ -950,7 +950,7 @@ func (c *Client) CompareInstances(leftID, rightID string) (*types.CompareResult,
 // BulkDeploy triggers deployment for multiple stack instances.
 func (c *Client) BulkDeploy(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
-	err := c.Post("/api/v1/stack-instances/bulk/deploy", types.BulkRequest{IDs: ids}, &resp)
+	err := c.Post("/api/v1/stack-instances/bulk/deploy", types.BulkInstancesRequest{InstanceIDs: ids}, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -960,7 +960,7 @@ func (c *Client) BulkDeploy(ids []string) (*types.BulkResponse, error) {
 // BulkStop stops multiple stack instances.
 func (c *Client) BulkStop(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
-	err := c.Post("/api/v1/stack-instances/bulk/stop", types.BulkRequest{IDs: ids}, &resp)
+	err := c.Post("/api/v1/stack-instances/bulk/stop", types.BulkInstancesRequest{InstanceIDs: ids}, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -970,7 +970,7 @@ func (c *Client) BulkStop(ids []string) (*types.BulkResponse, error) {
 // BulkClean undeploys and removes namespaces for multiple stack instances.
 func (c *Client) BulkClean(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
-	err := c.Post("/api/v1/stack-instances/bulk/clean", types.BulkRequest{IDs: ids}, &resp)
+	err := c.Post("/api/v1/stack-instances/bulk/clean", types.BulkInstancesRequest{InstanceIDs: ids}, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -980,7 +980,7 @@ func (c *Client) BulkClean(ids []string) (*types.BulkResponse, error) {
 // BulkDelete deletes multiple stack instances.
 func (c *Client) BulkDelete(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
-	err := c.Post("/api/v1/stack-instances/bulk/delete", types.BulkRequest{IDs: ids}, &resp)
+	err := c.Post("/api/v1/stack-instances/bulk/delete", types.BulkInstancesRequest{InstanceIDs: ids}, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -990,7 +990,7 @@ func (c *Client) BulkDelete(ids []string) (*types.BulkResponse, error) {
 // BulkDeleteTemplates deletes multiple stack templates.
 func (c *Client) BulkDeleteTemplates(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
-	err := c.Post("/api/v1/templates/bulk/delete", types.BulkRequest{IDs: ids}, &resp)
+	err := c.Post("/api/v1/templates/bulk/delete", types.BulkTemplatesRequest{TemplateIDs: ids}, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -1000,7 +1000,7 @@ func (c *Client) BulkDeleteTemplates(ids []string) (*types.BulkResponse, error) 
 // BulkPublishTemplates publishes multiple stack templates.
 func (c *Client) BulkPublishTemplates(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
-	err := c.Post("/api/v1/templates/bulk/publish", types.BulkRequest{IDs: ids}, &resp)
+	err := c.Post("/api/v1/templates/bulk/publish", types.BulkTemplatesRequest{TemplateIDs: ids}, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -1010,7 +1010,7 @@ func (c *Client) BulkPublishTemplates(ids []string) (*types.BulkResponse, error)
 // BulkUnpublishTemplates unpublishes multiple stack templates.
 func (c *Client) BulkUnpublishTemplates(ids []string) (*types.BulkResponse, error) {
 	var resp types.BulkResponse
-	err := c.Post("/api/v1/templates/bulk/unpublish", types.BulkRequest{IDs: ids}, &resp)
+	err := c.Post("/api/v1/templates/bulk/unpublish", types.BulkTemplatesRequest{TemplateIDs: ids}, &resp)
 	if err != nil {
 		return nil, err
 	}

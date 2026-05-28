@@ -1757,15 +1757,18 @@ func TestBulkDeploy_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/stack-instances/bulk/deploy", r.URL.Path)
-		var body types.BulkRequest
+		// Backend's stack-instance bulk endpoints require `instance_ids` —
+		// stubs decode into the matching wire type so the contract is
+		// locked here, not just in live tests.
+		var body types.BulkInstancesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.InstanceIDs)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: "1", Success: true},
-				{ID: "2", Success: true},
-				{ID: "3", Success: false, Error: "not found"},
+				{InstanceID: "1", Status: "success"},
+				{InstanceID: "2", Status: "success"},
+				{InstanceID: "3", Status: "error", Error: "not found"},
 			},
 		})
 	}))
@@ -1775,8 +1778,8 @@ func TestBulkDeploy_Success(t *testing.T) {
 	resp, err := c.BulkDeploy([]string{"1", "2", "3"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 3)
-	assert.True(t, resp.Results[0].Success)
-	assert.False(t, resp.Results[2].Success)
+	assert.True(t, resp.Results[0].Success())
+	assert.False(t, resp.Results[2].Success())
 	assert.Equal(t, "not found", resp.Results[2].Error)
 }
 
@@ -1802,7 +1805,7 @@ func TestBulkStop_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: "1", Success: true},
+				{InstanceID: "1", Status: "success"},
 			},
 		})
 	}))
@@ -1812,7 +1815,7 @@ func TestBulkStop_Success(t *testing.T) {
 	resp, err := c.BulkStop([]string{"1"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 1)
-	assert.True(t, resp.Results[0].Success)
+	assert.True(t, resp.Results[0].Success())
 }
 
 func TestBulkStop_Error(t *testing.T) {
@@ -1837,8 +1840,8 @@ func TestBulkClean_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: "5", Success: true},
-				{ID: "6", Success: true},
+				{InstanceID: "5", Status: "success"},
+				{InstanceID: "6", Status: "success"},
 			},
 		})
 	}))
@@ -1872,7 +1875,7 @@ func TestBulkDelete_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: "10", Success: true},
+				{InstanceID: "10", Status: "success"},
 			},
 		})
 	}))
@@ -1882,7 +1885,7 @@ func TestBulkDelete_Success(t *testing.T) {
 	resp, err := c.BulkDelete([]string{"10"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 1)
-	assert.True(t, resp.Results[0].Success)
+	assert.True(t, resp.Results[0].Success())
 }
 
 func TestBulkDelete_Error(t *testing.T) {
@@ -4564,15 +4567,16 @@ func TestBulkPublishTemplates_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/templates/bulk/publish", r.URL.Path)
-		var body types.BulkRequest
+		// Backend's template bulk endpoints require `template_ids`.
+		var body types.BulkTemplatesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"1", "2", "3"}, body.IDs)
+		assert.Equal(t, []string{"1", "2", "3"}, body.TemplateIDs)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: "1", Success: true},
-				{ID: "2", Success: true},
-				{ID: "3", Success: false, Error: "not found"},
+				{TemplateID: "1", Status: "success"},
+				{TemplateID: "2", Status: "success"},
+				{TemplateID: "3", Status: "error", Error: "not found"},
 			},
 		})
 	}))
@@ -4582,8 +4586,8 @@ func TestBulkPublishTemplates_Success(t *testing.T) {
 	resp, err := c.BulkPublishTemplates([]string{"1", "2", "3"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 3)
-	assert.True(t, resp.Results[0].Success)
-	assert.False(t, resp.Results[2].Success)
+	assert.True(t, resp.Results[0].Success())
+	assert.False(t, resp.Results[2].Success())
 	assert.Equal(t, "not found", resp.Results[2].Error)
 }
 
@@ -4606,14 +4610,14 @@ func TestBulkUnpublishTemplates_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/templates/bulk/unpublish", r.URL.Path)
-		var body types.BulkRequest
+		var body types.BulkTemplatesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"a", "b"}, body.IDs)
+		assert.Equal(t, []string{"a", "b"}, body.TemplateIDs)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: "a", Success: true},
-				{ID: "b", Success: true},
+				{TemplateID: "a", Status: "success"},
+				{TemplateID: "b", Status: "success"},
 			},
 		})
 	}))
@@ -4623,7 +4627,7 @@ func TestBulkUnpublishTemplates_Success(t *testing.T) {
 	resp, err := c.BulkUnpublishTemplates([]string{"a", "b"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 2)
-	assert.True(t, resp.Results[0].Success)
+	assert.True(t, resp.Results[0].Success())
 }
 
 func TestBulkUnpublishTemplates_Error(t *testing.T) {
@@ -4645,14 +4649,14 @@ func TestBulkDeleteTemplates_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/templates/bulk/delete", r.URL.Path)
-		var body types.BulkRequest
+		var body types.BulkTemplatesRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"10", "20"}, body.IDs)
+		assert.Equal(t, []string{"10", "20"}, body.TemplateIDs)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BulkResponse{
 			Results: []types.BulkOperationResult{
-				{ID: "10", Success: true},
-				{ID: "20", Success: false, Error: "in use"},
+				{TemplateID: "10", Status: "success"},
+				{TemplateID: "20", Status: "error", Error: "in use"},
 			},
 		})
 	}))
@@ -4662,8 +4666,8 @@ func TestBulkDeleteTemplates_Success(t *testing.T) {
 	resp, err := c.BulkDeleteTemplates([]string{"10", "20"})
 	require.NoError(t, err)
 	assert.Len(t, resp.Results, 2)
-	assert.True(t, resp.Results[0].Success)
-	assert.False(t, resp.Results[1].Success)
+	assert.True(t, resp.Results[0].Success())
+	assert.False(t, resp.Results[1].Success())
 	assert.Equal(t, "in use", resp.Results[1].Error)
 }
 

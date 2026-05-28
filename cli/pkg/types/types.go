@@ -523,16 +523,50 @@ type ListResponse[T any] struct {
 	TotalPages int `json:"total_pages"`
 }
 
-// BulkOperationResult represents the result of a bulk operation.
+// BulkOperationResult represents the result of a single instance/template in
+// a bulk operation. Field names match the backend's BulkOperationResultItem
+// (stack-instance bulk) and the equivalent template bulk handler — both ship
+// `instance_id` (or template_id) plus a string `status` of "success"/"error",
+// not a bool. Earlier versions of this struct used `id` + `success` which
+// caused the response to silently decode as zero values against the live
+// backend.
 type BulkOperationResult struct {
-	ID      string `json:"id" yaml:"id"`
-	Success bool   `json:"success" yaml:"success"`
-	Error   string `json:"error,omitempty" yaml:"error,omitempty"`
+	// InstanceID is set on stack-instance bulk responses (deploy/stop/clean/delete).
+	InstanceID string `json:"instance_id,omitempty" yaml:"instance_id,omitempty"`
+	// TemplateID is set on template bulk responses (delete/publish/unpublish).
+	TemplateID   string `json:"template_id,omitempty" yaml:"template_id,omitempty"`
+	InstanceName string `json:"instance_name,omitempty" yaml:"instance_name,omitempty"`
+	TemplateName string `json:"template_name,omitempty" yaml:"template_name,omitempty"`
+	// Status is the per-item outcome; backend returns "success" or "error".
+	Status string `json:"status" yaml:"status"`
+	Error  string `json:"error,omitempty" yaml:"error,omitempty"`
+	LogID  string `json:"log_id,omitempty" yaml:"log_id,omitempty"`
 }
 
-// BulkResponse wraps bulk operation results.
+// ID returns the identifier carried by this result regardless of whether the
+// underlying endpoint was instance-scoped or template-scoped. Empty if neither
+// field is populated.
+func (r BulkOperationResult) ID() string {
+	if r.InstanceID != "" {
+		return r.InstanceID
+	}
+	return r.TemplateID
+}
+
+// Success returns true when the per-item status is "success". A miscoded
+// or omitted status string therefore reads as failure, which matches the
+// caller's expectation (no positive confirmation == treat as failed).
+func (r BulkOperationResult) Success() bool {
+	return r.Status == "success"
+}
+
+// BulkResponse wraps bulk operation results. Total/Successful/Failed mirror
+// the backend's BulkOperationResponse counters; Results retains per-item detail.
 type BulkResponse struct {
-	Results []BulkOperationResult `json:"results" yaml:"results"`
+	Total      int                   `json:"total" yaml:"total"`
+	Successful int                   `json:"successful" yaml:"successful"`
+	Failed     int                   `json:"failed" yaml:"failed"`
+	Results    []BulkOperationResult `json:"results" yaml:"results"`
 }
 
 // ValueOverride represents a per-chart value override.
@@ -603,9 +637,19 @@ type OrphanedNamespace struct {
 	CreatedAt string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
-// BulkRequest is the request body for bulk operations.
-type BulkRequest struct {
-	IDs []string `json:"ids" yaml:"ids"`
+// BulkInstancesRequest is the request body for bulk operations against
+// stack instances (deploy / stop / clean / delete). The backend handler
+// binds into `{"instance_ids": [...]}` with `binding:"required"` — using
+// any other key returns 400 "instance_ids is required".
+type BulkInstancesRequest struct {
+	InstanceIDs []string `json:"instance_ids" yaml:"instance_ids"`
+}
+
+// BulkTemplatesRequest is the request body for bulk operations against
+// stack templates (delete / publish / unpublish). The backend handler
+// binds into `{"template_ids": [...]}` with `binding:"required"`.
+type BulkTemplatesRequest struct {
+	TemplateIDs []string `json:"template_ids" yaml:"template_ids"`
 }
 
 // GitValidateResponse represents the result of branch validation.
