@@ -119,8 +119,11 @@ func TestLiveCluster_HealthAndTest(t *testing.T) {
 func isClusterUnreachable(err error) bool {
 	msg := strings.ToLower(err.Error())
 	for _, needle := range []string{
+		// Backend uses ClusterUnreachable = "unreachable" as its
+		// status constant; keep both spacings since the error string
+		// can render either way.
+		"unreachable",
 		"not reachable",
-		"unavailable",
 		"connection refused",
 		"failed to connect to cluster", // backend's literal 500 message
 	} {
