@@ -48,7 +48,6 @@ jobs:
           echo "k8s-sm @ $(git -C /tmp/k8s-sm rev-parse --short HEAD)"
 
       - name: Boot api-only stack (backend + mysql)
-        working-directory: /tmp/k8s-sm
         env:
           ADMIN_USERNAME: ${{ env.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ env.ADMIN_PASSWORD }}
@@ -57,7 +56,13 @@ jobs:
           # No --profile flag → only services without profiles run, which is
           # exactly the api-only set (backend + mysql). Frontend is gated to
           # the "full" profile.
-          docker compose up -d --wait backend
+          #
+          # The override file resets the dev bind-mount that would otherwise
+          # hide the production image's baked-in ./main binary.
+          docker compose \
+            -f /tmp/k8s-sm/docker-compose.yml \
+            -f "$GITHUB_WORKSPACE/cli/test/live/testdata/docker-compose.ci.yml" \
+            up -d --wait backend
 
       - name: Wait for backend /health/live
         run: |
@@ -69,7 +74,10 @@ jobs:
             sleep 1
           done
           echo "Backend never became healthy" >&2
-          docker compose -f /tmp/k8s-sm/docker-compose.yml logs backend
+          docker compose \
+            -f /tmp/k8s-sm/docker-compose.yml \
+            -f "$GITHUB_WORKSPACE/cli/test/live/testdata/docker-compose.ci.yml" \
+            logs backend
           exit 1
 
       - name: Apply CI seed fixtures
@@ -119,4 +127,8 @@ jobs:
 
       - name: Backend logs on failure
         if: failure()
-        run: docker compose -f /tmp/k8s-sm/docker-compose.yml logs backend
+        run: |
+          docker compose \
+            -f /tmp/k8s-sm/docker-compose.yml \
+            -f "$GITHUB_WORKSPACE/cli/test/live/testdata/docker-compose.ci.yml" \
+            logs backend

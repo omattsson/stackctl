@@ -1,0 +1,11 @@
+# CI override for k8s-stack-manager's docker-compose.yml.
+#
+# The upstream compose bind-mounts ./backend:/app for dev hot-reload, but
+# that overlays the production image's baked-in /app/main binary with the
+# host source tree (which has no compiled binary), so the container can't
+# start. We're not editing source at runtime in CI, so reset the volumes.
+#
+# `!reset []` replaces the list instead of merging (Compose ≥1.28).
+services:
+  backend:
+    volumes: !reset []
