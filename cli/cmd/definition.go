@@ -402,11 +402,12 @@ Examples:
 		chartPath, _ := cmd.Flags().GetString("chart-path")
 		chartVersion, _ := cmd.Flags().GetString("chart-version")
 		sourceRepoURL, _ := cmd.Flags().GetString("source-repo-url")
+		repositoryURL, _ := cmd.Flags().GetString("repository-url")
 		deployOrder, _ := cmd.Flags().GetInt("deploy-order")
 		valuesFile, _ := cmd.Flags().GetString("file")
 
-		if chartPath == "" && chartVersion == "" && sourceRepoURL == "" && deployOrder < 0 && valuesFile == "" {
-			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --deploy-order, or --file must be specified")
+		if chartPath == "" && chartVersion == "" && sourceRepoURL == "" && repositoryURL == "" && deployOrder < 0 && valuesFile == "" {
+			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --repository-url, --deploy-order, or --file must be specified")
 		}
 
 		if valuesFile != "" {
@@ -427,11 +428,20 @@ Examples:
 			return fmt.Errorf("fetching current chart config: %w", err)
 		}
 
+		// Seed every field from the current record so a PUT round-trip
+		// doesn't wipe values the user didn't intend to change. Backend
+		// merges absent-from-JSON keys as "preserve"; we still send the
+		// full record because older backends do full PUT replace.
+		deployOrderCopy := current.DeployOrder
 		req := types.UpdateChartConfigRequest{
-			ChartName:     current.ChartName,
-			ChartVersion:  current.ChartVersion,
-			SourceRepoURL: current.SourceRepoURL,
-			DefaultValues: current.DefaultValues,
+			ChartName:       current.ChartName,
+			RepositoryURL:   current.RepoURL,
+			ChartPath:       current.ChartPath,
+			ChartVersion:    current.ChartVersion,
+			SourceRepoURL:   current.SourceRepoURL,
+			BuildPipelineID: current.BuildPipelineID,
+			DeployOrder:     &deployOrderCopy,
+			DefaultValues:   current.DefaultValues,
 		}
 
 		if chartPath != "" {
@@ -442,6 +452,9 @@ Examples:
 		}
 		if sourceRepoURL != "" {
 			req.SourceRepoURL = sourceRepoURL
+		}
+		if repositoryURL != "" {
+			req.RepositoryURL = repositoryURL
 		}
 		if deployOrder >= 0 {
 			req.DeployOrder = &deployOrder
@@ -539,6 +552,7 @@ func init() {
 	definitionUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/kvk-core)")
 	definitionUpdateChartCmd.Flags().String("chart-version", "", "Chart version")
 	definitionUpdateChartCmd.Flags().String("source-repo-url", "", "Git repository URL for branch listing")
+	definitionUpdateChartCmd.Flags().String("repository-url", "", "Helm chart repository URL (e.g. oci://acr.example.com/helm)")
 	definitionUpdateChartCmd.Flags().Int("deploy-order", -1, "Deploy order (0+)")
 	definitionUpdateChartCmd.Flags().String("file", "", "File containing default values")
 

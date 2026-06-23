@@ -629,13 +629,20 @@ type UpdateDefinitionRequest struct {
 }
 
 // UpdateChartConfigRequest is the request body for PUT /api/v1/stack-definitions/:id/charts/:chartID.
+//
+// Includes every field the backend's ChartConfig knows about, so a
+// GET-then-PUT round-trip in update-chart doesn't silently wipe fields
+// stackctl flags don't expose. Backend treats absent JSON keys as
+// "preserve existing"; explicit "" replaces.
 type UpdateChartConfigRequest struct {
-	ChartName     string `json:"chart_name,omitempty" yaml:"chart_name,omitempty"`
-	ChartPath     string `json:"chart_path,omitempty" yaml:"chart_path,omitempty"`
-	ChartVersion  string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
-	SourceRepoURL string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
-	DeployOrder   *int   `json:"deploy_order,omitempty" yaml:"deploy_order,omitempty"`
-	DefaultValues string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
+	ChartName       string `json:"chart_name,omitempty" yaml:"chart_name,omitempty"`
+	RepositoryURL   string `json:"repository_url,omitempty" yaml:"repository_url,omitempty"`
+	ChartPath       string `json:"chart_path,omitempty" yaml:"chart_path,omitempty"`
+	ChartVersion    string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
+	SourceRepoURL   string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
+	BuildPipelineID string `json:"build_pipeline_id,omitempty" yaml:"build_pipeline_id,omitempty"`
+	DeployOrder     *int   `json:"deploy_order,omitempty" yaml:"deploy_order,omitempty"`
+	DefaultValues   string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
 }
 
 // OrphanedNamespace represents a Kubernetes namespace with no matching stack record.
