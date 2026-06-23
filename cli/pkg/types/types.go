@@ -632,8 +632,9 @@ type UpdateDefinitionRequest struct {
 //
 // Includes every field the backend's ChartConfig knows about, so a
 // GET-then-PUT round-trip in update-chart doesn't silently wipe fields
-// stackctl flags don't expose. Backend treats absent JSON keys as
-// "preserve existing"; explicit "" replaces.
+// stackctl flags don't expose. All string fields use omitempty, so an
+// empty value is dropped from the JSON body and the backend preserves
+// its existing value; there is no way to clear a field via this request.
 type UpdateChartConfigRequest struct {
 	ChartName       string `json:"chart_name,omitempty" yaml:"chart_name,omitempty"`
 	RepositoryURL   string `json:"repository_url,omitempty" yaml:"repository_url,omitempty"`

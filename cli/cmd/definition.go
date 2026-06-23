@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -386,6 +387,7 @@ Examples:
   stackctl definition update-chart 1 5 --chart-path /charts/kvk-core
   stackctl definition update-chart 1 5 --deploy-order 6
   stackctl definition update-chart 1 5 --source-repo-url https://dev.azure.com/org/project/_git/repo
+  stackctl definition update-chart 1 5 --repository-url oci://acr.example.com/helm
   stackctl definition update-chart 1 5 --file values.yaml`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
@@ -410,6 +412,18 @@ Examples:
 			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --repository-url, --deploy-order, or --file must be specified")
 		}
 
+		if repositoryURL != "" {
+			u, err := url.Parse(repositoryURL)
+			if err != nil || u.Scheme == "" || u.Host == "" {
+				return fmt.Errorf("--repository-url %q is not a valid URL", repositoryURL)
+			}
+			switch u.Scheme {
+			case "oci", "http", "https":
+			default:
+				return fmt.Errorf("--repository-url scheme %q is not supported (use oci, http, or https)", u.Scheme)
+			}
+		}
+
 		if valuesFile != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(valuesFile), "/") {
 				if segment == ".." {
@@ -432,7 +446,6 @@ Examples:
 		// doesn't wipe values the user didn't intend to change. Backend
 		// merges absent-from-JSON keys as "preserve"; we still send the
 		// full record because older backends do full PUT replace.
-		deployOrderCopy := current.DeployOrder
 		req := types.UpdateChartConfigRequest{
 			ChartName:       current.ChartName,
 			RepositoryURL:   current.RepoURL,
@@ -440,7 +453,7 @@ Examples:
 			ChartVersion:    current.ChartVersion,
 			SourceRepoURL:   current.SourceRepoURL,
 			BuildPipelineID: current.BuildPipelineID,
-			DeployOrder:     &deployOrderCopy,
+			DeployOrder:     &current.DeployOrder,
 			DefaultValues:   current.DefaultValues,
 		}
 
