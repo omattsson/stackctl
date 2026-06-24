@@ -442,10 +442,9 @@ Examples:
 			return fmt.Errorf("fetching current chart config: %w", err)
 		}
 
-		// Seed every field from the current record so a PUT round-trip
-		// doesn't wipe values the user didn't intend to change. Backend
-		// merges absent-from-JSON keys as "preserve"; we still send the
-		// full record because older backends do full PUT replace.
+		// Seed every field from the current record before PUT so backends
+		// that treat the payload as a full replacement do not wipe values
+		// the user didn't intend to change.
 		req := types.UpdateChartConfigRequest{
 			ChartName:       current.ChartName,
 			RepositoryURL:   current.RepoURL,
