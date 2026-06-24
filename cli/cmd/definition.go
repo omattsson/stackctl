@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -386,6 +387,7 @@ Examples:
   stackctl definition update-chart 1 5 --chart-path /charts/kvk-core
   stackctl definition update-chart 1 5 --deploy-order 6
   stackctl definition update-chart 1 5 --source-repo-url https://dev.azure.com/org/project/_git/repo
+  stackctl definition update-chart 1 5 --repository-url oci://acr.example.com/helm
   stackctl definition update-chart 1 5 --file values.yaml`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
@@ -402,11 +404,24 @@ Examples:
 		chartPath, _ := cmd.Flags().GetString("chart-path")
 		chartVersion, _ := cmd.Flags().GetString("chart-version")
 		sourceRepoURL, _ := cmd.Flags().GetString("source-repo-url")
+		repositoryURL, _ := cmd.Flags().GetString("repository-url")
 		deployOrder, _ := cmd.Flags().GetInt("deploy-order")
 		valuesFile, _ := cmd.Flags().GetString("file")
 
-		if chartPath == "" && chartVersion == "" && sourceRepoURL == "" && deployOrder < 0 && valuesFile == "" {
-			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --deploy-order, or --file must be specified")
+		if chartPath == "" && chartVersion == "" && sourceRepoURL == "" && repositoryURL == "" && deployOrder < 0 && valuesFile == "" {
+			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --repository-url, --deploy-order, or --file must be specified")
+		}
+
+		if repositoryURL != "" {
+			u, err := url.Parse(repositoryURL)
+			if err != nil || u.Scheme == "" || u.Host == "" {
+				return fmt.Errorf("--repository-url %q is not a valid URL", repositoryURL)
+			}
+			switch u.Scheme {
+			case "oci", "http", "https":
+			default:
+				return fmt.Errorf("--repository-url scheme %q is not supported (use oci, http, or https)", u.Scheme)
+			}
 		}
 
 		if valuesFile != "" {
@@ -427,11 +442,18 @@ Examples:
 			return fmt.Errorf("fetching current chart config: %w", err)
 		}
 
+		// Seed every field from the current record before PUT so backends
+		// that treat the payload as a full replacement do not wipe values
+		// the user didn't intend to change.
 		req := types.UpdateChartConfigRequest{
-			ChartName:     current.ChartName,
-			ChartVersion:  current.ChartVersion,
-			SourceRepoURL: current.SourceRepoURL,
-			DefaultValues: current.DefaultValues,
+			ChartName:       current.ChartName,
+			RepositoryURL:   current.RepoURL,
+			ChartPath:       current.ChartPath,
+			ChartVersion:    current.ChartVersion,
+			SourceRepoURL:   current.SourceRepoURL,
+			BuildPipelineID: current.BuildPipelineID,
+			DeployOrder:     &current.DeployOrder,
+			DefaultValues:   current.DefaultValues,
 		}
 
 		if chartPath != "" {
@@ -442,6 +464,9 @@ Examples:
 		}
 		if sourceRepoURL != "" {
 			req.SourceRepoURL = sourceRepoURL
+		}
+		if repositoryURL != "" {
+			req.RepositoryURL = repositoryURL
 		}
 		if deployOrder >= 0 {
 			req.DeployOrder = &deployOrder
@@ -539,6 +564,7 @@ func init() {
 	definitionUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/kvk-core)")
 	definitionUpdateChartCmd.Flags().String("chart-version", "", "Chart version")
 	definitionUpdateChartCmd.Flags().String("source-repo-url", "", "Git repository URL for branch listing")
+	definitionUpdateChartCmd.Flags().String("repository-url", "", "Helm chart repository URL (e.g. oci://acr.example.com/helm)")
 	definitionUpdateChartCmd.Flags().Int("deploy-order", -1, "Deploy order (0+)")
 	definitionUpdateChartCmd.Flags().String("file", "", "File containing default values")
 

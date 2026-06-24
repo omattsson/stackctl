@@ -1012,13 +1012,17 @@ func TestDefinitionUpdateCmd_NoFlags(t *testing.T) {
 
 func sampleChartConfig() types.ChartConfig {
 	return types.ChartConfig{
-		Base:          types.Base{ID: "1", Version: "1"},
-		Name:          "api",
-		RepoURL:       "https://charts.example.com",
-		ChartName:     "api-chart",
-		ChartVersion:  "2.0.0",
-		ReleaseName:   "api-release",
-		DefaultValues: "replicas: 1\nimage: app:latest",
+		Base:            types.Base{ID: "1", Version: "1"},
+		Name:            "api",
+		RepoURL:         "https://charts.example.com",
+		ChartName:       "api-chart",
+		ChartPath:       "/charts/api",
+		ChartVersion:    "2.0.0",
+		SourceRepoURL:   "https://dev.azure.com/org/project/_git/repo",
+		BuildPipelineID: "pipeline-42",
+		DeployOrder:     8,
+		ReleaseName:     "api-release",
+		DefaultValues:   "replicas: 1\nimage: app:latest",
 	}
 }
 
@@ -1040,6 +1044,15 @@ func TestDefinitionUpdateChartCmd_ChartVersion(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "3.0.0", body.ChartVersion)
 		assert.Equal(t, chart.ChartName, body.ChartName)
+		// Fields not touched by the user flag must round-trip from the GET
+		// response back into the PUT body — that's the wipe-fix this PR exists for.
+		assert.Equal(t, chart.RepoURL, body.RepositoryURL)
+		assert.Equal(t, chart.ChartPath, body.ChartPath)
+		assert.Equal(t, chart.SourceRepoURL, body.SourceRepoURL)
+		assert.Equal(t, chart.BuildPipelineID, body.BuildPipelineID)
+		assert.Equal(t, chart.DefaultValues, body.DefaultValues)
+		require.NotNil(t, body.DeployOrder)
+		assert.Equal(t, chart.DeployOrder, *body.DeployOrder)
 
 		chart.ChartVersion = "3.0.0"
 		json.NewEncoder(w).Encode(chart)
@@ -1052,6 +1065,8 @@ func TestDefinitionUpdateChartCmd_ChartVersion(t *testing.T) {
 	t.Cleanup(func() {
 		definitionUpdateChartCmd.Flags().Set("chart-version", "")
 		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("source-repo-url", "")
+		definitionUpdateChartCmd.Flags().Set("repository-url", "")
 		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
 		definitionUpdateChartCmd.Flags().Set("file", "")
 	})
@@ -1089,6 +1104,8 @@ func TestDefinitionUpdateChartCmd_ValuesFromFile(t *testing.T) {
 	t.Cleanup(func() {
 		definitionUpdateChartCmd.Flags().Set("chart-version", "")
 		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("source-repo-url", "")
+		definitionUpdateChartCmd.Flags().Set("repository-url", "")
 		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
 		definitionUpdateChartCmd.Flags().Set("file", "")
 	})
@@ -1121,12 +1138,75 @@ func TestDefinitionUpdateChartCmd_DeployOrder(t *testing.T) {
 	t.Cleanup(func() {
 		definitionUpdateChartCmd.Flags().Set("chart-version", "")
 		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("source-repo-url", "")
+		definitionUpdateChartCmd.Flags().Set("repository-url", "")
 		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
 		definitionUpdateChartCmd.Flags().Set("file", "")
 	})
 
 	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
 	require.NoError(t, err)
+}
+
+func TestDefinitionUpdateChartCmd_RepositoryURL(t *testing.T) {
+	chart := sampleChartConfig()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(chart)
+			return
+		}
+		var body types.UpdateChartConfigRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "oci://acr.example.com/helm", body.RepositoryURL)
+		// Other fields still seeded from GET.
+		assert.Equal(t, chart.ChartPath, body.ChartPath)
+		assert.Equal(t, chart.BuildPipelineID, body.BuildPipelineID)
+
+		chart.RepoURL = body.RepositoryURL
+		json.NewEncoder(w).Encode(chart)
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	definitionUpdateChartCmd.Flags().Set("repository-url", "oci://acr.example.com/helm")
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("source-repo-url", "")
+		definitionUpdateChartCmd.Flags().Set("repository-url", "")
+		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
+		definitionUpdateChartCmd.Flags().Set("file", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+	require.NoError(t, err)
+}
+
+func TestDefinitionUpdateChartCmd_RepositoryURL_Invalid(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API should not be called when --repository-url is invalid")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("repository-url", "")
+	})
+
+	cases := []string{
+		"not-a-url",
+		"oci:/acr.example.com/helm",
+		"ftp://acr.example.com/helm",
+	}
+	for _, raw := range cases {
+		definitionUpdateChartCmd.Flags().Set("repository-url", raw)
+		err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"})
+		require.Error(t, err, raw)
+		assert.Contains(t, err.Error(), "--repository-url")
+	}
 }
 
 func TestDefinitionUpdateChartCmd_NoFlags(t *testing.T) {
@@ -1140,6 +1220,8 @@ func TestDefinitionUpdateChartCmd_NoFlags(t *testing.T) {
 	t.Cleanup(func() {
 		definitionUpdateChartCmd.Flags().Set("chart-version", "")
 		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("source-repo-url", "")
+		definitionUpdateChartCmd.Flags().Set("repository-url", "")
 		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
 		definitionUpdateChartCmd.Flags().Set("file", "")
 	})
@@ -1169,6 +1251,8 @@ func TestDefinitionUpdateChartCmd_JSONOutput(t *testing.T) {
 	t.Cleanup(func() {
 		definitionUpdateChartCmd.Flags().Set("chart-version", "")
 		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("source-repo-url", "")
+		definitionUpdateChartCmd.Flags().Set("repository-url", "")
 		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
 		definitionUpdateChartCmd.Flags().Set("file", "")
 	})
@@ -1200,6 +1284,8 @@ func TestDefinitionUpdateChartCmd_QuietOutput(t *testing.T) {
 	t.Cleanup(func() {
 		definitionUpdateChartCmd.Flags().Set("chart-version", "")
 		definitionUpdateChartCmd.Flags().Set("chart-path", "")
+		definitionUpdateChartCmd.Flags().Set("source-repo-url", "")
+		definitionUpdateChartCmd.Flags().Set("repository-url", "")
 		definitionUpdateChartCmd.Flags().Set("deploy-order", "-1")
 		definitionUpdateChartCmd.Flags().Set("file", "")
 	})
