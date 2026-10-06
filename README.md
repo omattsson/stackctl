@@ -17,7 +17,13 @@ curl -fsSL https://raw.githubusercontent.com/omattsson/stackctl/main/install.sh 
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install omattsson/tap/stackctl
+brew install --cask omattsson/tap/stackctl
+```
+
+No compiler is needed. If you installed the old formula, reinstall once:
+
+```bash
+brew uninstall stackctl && brew install --cask omattsson/tap/stackctl
 ```
 
 ### From release binaries

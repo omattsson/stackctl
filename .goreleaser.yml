@@ -45,18 +45,26 @@ changelog:
     exclude:
       - "^Merge"
 
-brews:
+# Cask, not formula: a formula without a bottle is built from source, so
+# Homebrew demands a compiler (build-essential / Xcode CLT) for a prebuilt binary.
+homebrew_casks:
   - repository:
       owner: omattsson
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
     homepage: https://github.com/omattsson/stackctl
     description: CLI for managing Kubernetes stack deployments via k8s-stack-manager
     license: MIT
-    install: |
-      bin.install "stackctl"
-    test: |
-      system "#{bin}/stackctl", "version"
+    binaries:
+      - stackctl
+    hooks:
+      post:
+        # The binary is not signed or notarized.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/stackctl"]
+          end
 
 release:
   github:
