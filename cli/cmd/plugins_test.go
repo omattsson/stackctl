@@ -8,10 +8,13 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omattsson/stackctl/cli/pkg/config"
 )
 
 // writeScript writes a shell script executable at dir/name with the given body.
@@ -261,4 +264,112 @@ func TestPluginEnv_NilCommand(t *testing.T) {
 
 	env := pluginEnv(nil)
 	assert.NotEmpty(t, env)
+}
+
+// ---------- contextEnv ----------
+
+func envValue(env []string, key string) (string, bool) {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return strings.TrimPrefix(kv, prefix), true
+		}
+	}
+	return "", false
+}
+
+// withContextConfig sets the global config to one context and isolates the
+// token directory and the STACKCTL_* variables for the test.
+func withContextConfig(t *testing.T, ctx *config.Context) {
+	t.Helper()
+	oldCfg, oldURL, oldKey := cfg, flagAPIURL, flagAPIKey
+	t.Cleanup(func() { cfg, flagAPIURL, flagAPIKey = oldCfg, oldURL, oldKey })
+	t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
+	for _, k := range []string{"STACKCTL_API_URL", "STACKCTL_API_KEY", "STACKCTL_TOKEN", "STACKCTL_CONTEXT", "STACKCTL_INSECURE"} {
+		t.Setenv(k, "")
+		require.NoError(t, os.Unsetenv(k))
+	}
+	flagAPIURL, flagAPIKey = "", ""
+	cfg = &config.Config{CurrentContext: "kvk-k8s-dev", Contexts: map[string]*config.Context{"kvk-k8s-dev": ctx}}
+}
+
+func TestContextEnv_APIKeyFromContext(t *testing.T) {
+	withContextConfig(t, &config.Context{APIURL: "https://stacks.example.dev", APIKey: "sk_ctx", Insecure: true})
+	require.NoError(t, saveToken("jwt-ignored", "olof", time.Now().Add(time.Hour)))
+
+	env := contextEnv(os.Environ())
+
+	v, _ := envValue(env, "STACKCTL_API_URL")
+	assert.Equal(t, "https://stacks.example.dev", v)
+	v, _ = envValue(env, "STACKCTL_API_KEY")
+	assert.Equal(t, "sk_ctx", v)
+	_, hasToken := envValue(env, "STACKCTL_TOKEN")
+	assert.False(t, hasToken, "no session token when an API key is set")
+	v, _ = envValue(env, "STACKCTL_CONTEXT")
+	assert.Equal(t, "kvk-k8s-dev", v)
+	v, _ = envValue(env, "STACKCTL_INSECURE")
+	assert.Equal(t, "1", v)
+}
+
+func TestContextEnv_SessionTokenWithoutAPIKey(t *testing.T) {
+	withContextConfig(t, &config.Context{APIURL: "https://stacks.example.dev"})
+	require.NoError(t, saveToken("jwt-session", "olof", time.Now().Add(time.Hour)))
+
+	env := contextEnv(os.Environ())
+
+	v, _ := envValue(env, "STACKCTL_TOKEN")
+	assert.Equal(t, "jwt-session", v)
+	_, hasKey := envValue(env, "STACKCTL_API_KEY")
+	assert.False(t, hasKey)
+	_, hasInsecure := envValue(env, "STACKCTL_INSECURE")
+	assert.False(t, hasInsecure)
+}
+
+func TestContextEnv_ExpiredTokenIsLeftOut(t *testing.T) {
+	withContextConfig(t, &config.Context{APIURL: "https://stacks.example.dev"})
+	require.NoError(t, saveToken("jwt-old", "olof", time.Now().Add(-time.Minute)))
+
+	env := contextEnv(os.Environ())
+
+	_, hasToken := envValue(env, "STACKCTL_TOKEN")
+	assert.False(t, hasToken)
+}
+
+func TestContextEnv_ParentEnvWinsOverConfig(t *testing.T) {
+	withContextConfig(t, &config.Context{APIURL: "https://from-config", APIKey: "sk_config"})
+	t.Setenv("STACKCTL_API_URL", "https://from-shell")
+	t.Setenv("STACKCTL_API_KEY", "sk_shell")
+	t.Setenv("STACKCTL_CONTEXT", "shell-ctx")
+
+	env := contextEnv(os.Environ())
+
+	v, _ := envValue(env, "STACKCTL_API_URL")
+	assert.Equal(t, "https://from-shell", v)
+	v, _ = envValue(env, "STACKCTL_API_KEY")
+	assert.Equal(t, "sk_shell", v)
+	v, _ = envValue(env, "STACKCTL_CONTEXT")
+	assert.Equal(t, "shell-ctx", v)
+}
+
+func TestContextEnv_FlagWinsOverEnv(t *testing.T) {
+	withContextConfig(t, &config.Context{APIURL: "https://from-config"})
+	t.Setenv("STACKCTL_API_URL", "https://from-shell")
+	t.Setenv("STACKCTL_API_KEY", "sk_shell")
+	flagAPIURL, flagAPIKey = "https://from-flag", "sk_flag"
+
+	env := contextEnv(os.Environ())
+
+	v, _ := envValue(env, "STACKCTL_API_URL")
+	assert.Equal(t, "https://from-flag", v)
+	v, _ = envValue(env, "STACKCTL_API_KEY")
+	assert.Equal(t, "sk_flag", v)
+}
+
+func TestContextEnv_NilConfig(t *testing.T) {
+	oldCfg := cfg
+	t.Cleanup(func() { cfg = oldCfg })
+	cfg = nil
+
+	in := []string{"A=1"}
+	assert.Equal(t, in, contextEnv(in))
 }

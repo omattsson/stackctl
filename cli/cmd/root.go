@@ -149,15 +149,7 @@ func newClient() (*client.Client, error) {
 		c.DebugWriter = os.Stderr
 	}
 
-	// API key: flag > env > config
-	apiKey := flagAPIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("STACKCTL_API_KEY")
-	}
-	if apiKey == "" && cfg.CurrentCtx() != nil {
-		apiKey = cfg.CurrentCtx().APIKey
-	}
-	c.APIKey = apiKey
+	c.APIKey = resolveAPIKey()
 
 	applyInsecureTLS(c)
 
@@ -200,6 +192,20 @@ func resolveAPIURL() string {
 	}
 	if ctx := cfg.CurrentCtx(); ctx != nil {
 		return ctx.APIURL
+	}
+	return ""
+}
+
+// resolveAPIKey determines the API key from flags, env, or config.
+func resolveAPIKey() string {
+	if flagAPIKey != "" {
+		return flagAPIKey
+	}
+	if envKey := os.Getenv("STACKCTL_API_KEY"); envKey != "" {
+		return envKey
+	}
+	if ctx := cfg.CurrentCtx(); ctx != nil {
+		return ctx.APIKey
 	}
 	return ""
 }
