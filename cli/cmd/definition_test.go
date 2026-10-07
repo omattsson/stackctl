@@ -1312,3 +1312,27 @@ func TestDefinitionUpdateChartCmd_PathTraversal(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "path")
 }
+
+func TestDefinitionUpdateChartCmd_BuildPipelineID(t *testing.T) {
+	chart := sampleChartConfig()
+	var put types.UpdateChartConfigRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(chart)
+			return
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&put))
+		json.NewEncoder(w).Encode(chart)
+	}))
+	defer server.Close()
+
+	setupStackTestCmd(t, server.URL)
+	require.NoError(t, definitionUpdateChartCmd.Flags().Set("build-pipeline-id", "811"))
+	t.Cleanup(func() { _ = definitionUpdateChartCmd.Flags().Set("build-pipeline-id", "") })
+
+	require.NoError(t, definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"}))
+	assert.Equal(t, "811", put.BuildPipelineID)
+	assert.Equal(t, chart.ChartVersion, put.ChartVersion)
+	assert.Equal(t, chart.SourceRepoURL, put.SourceRepoURL)
+}

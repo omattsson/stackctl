@@ -388,6 +388,7 @@ Examples:
   stackctl definition update-chart 1 5 --deploy-order 6
   stackctl definition update-chart 1 5 --source-repo-url https://dev.azure.com/org/project/_git/repo
   stackctl definition update-chart 1 5 --repository-url oci://acr.example.com/helm
+  stackctl definition update-chart 1 5 --build-pipeline-id 811
   stackctl definition update-chart 1 5 --file values.yaml`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
@@ -405,31 +406,19 @@ Examples:
 		chartVersion, _ := cmd.Flags().GetString("chart-version")
 		sourceRepoURL, _ := cmd.Flags().GetString("source-repo-url")
 		repositoryURL, _ := cmd.Flags().GetString("repository-url")
+		buildPipelineID, _ := cmd.Flags().GetString("build-pipeline-id")
 		deployOrder, _ := cmd.Flags().GetInt("deploy-order")
 		valuesFile, _ := cmd.Flags().GetString("file")
 
-		if chartPath == "" && chartVersion == "" && sourceRepoURL == "" && repositoryURL == "" && deployOrder < 0 && valuesFile == "" {
-			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --repository-url, --deploy-order, or --file must be specified")
+		if chartPath == "" && chartVersion == "" && sourceRepoURL == "" && repositoryURL == "" && buildPipelineID == "" && deployOrder < 0 && valuesFile == "" {
+			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --repository-url, --build-pipeline-id, --deploy-order, or --file must be specified")
 		}
 
-		if repositoryURL != "" {
-			u, err := url.Parse(repositoryURL)
-			if err != nil || u.Scheme == "" || u.Host == "" {
-				return fmt.Errorf("--repository-url %q is not a valid URL", repositoryURL)
-			}
-			switch u.Scheme {
-			case "oci", "http", "https":
-			default:
-				return fmt.Errorf("--repository-url scheme %q is not supported (use oci, http, or https)", u.Scheme)
-			}
+		if err := validateChartRepositoryURL(repositoryURL); err != nil {
+			return err
 		}
-
-		if valuesFile != "" {
-			for _, segment := range strings.Split(filepath.ToSlash(valuesFile), "/") {
-				if segment == ".." {
-					return errors.New(msgPathTraversal)
-				}
-			}
+		if err := checkNoPathTraversal(valuesFile); err != nil {
+			return err
 		}
 
 		c, err := newClient()
@@ -468,6 +457,9 @@ Examples:
 		if repositoryURL != "" {
 			req.RepositoryURL = repositoryURL
 		}
+		if buildPipelineID != "" {
+			req.BuildPipelineID = buildPipelineID
+		}
 		if deployOrder >= 0 {
 			req.DeployOrder = &deployOrder
 		}
@@ -487,6 +479,34 @@ Examples:
 
 		return printChartConfig(updated)
 	},
+}
+
+// validateChartRepositoryURL accepts an empty value or an oci, http or https
+// URL with a host.
+func validateChartRepositoryURL(repositoryURL string) error {
+	if repositoryURL == "" {
+		return nil
+	}
+	u, err := url.Parse(repositoryURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("--repository-url %q is not a valid URL", repositoryURL)
+	}
+	switch u.Scheme {
+	case "oci", "http", "https":
+		return nil
+	default:
+		return fmt.Errorf("--repository-url scheme %q is not supported (use oci, http, or https)", u.Scheme)
+	}
+}
+
+// checkNoPathTraversal rejects a file path with a ".." segment.
+func checkNoPathTraversal(path string) error {
+	for _, segment := range strings.Split(filepath.ToSlash(path), "/") {
+		if segment == ".." {
+			return errors.New(msgPathTraversal)
+		}
+	}
+	return nil
 }
 
 func printChartConfig(ch *types.ChartConfig) error {
@@ -565,6 +585,7 @@ func init() {
 	definitionUpdateChartCmd.Flags().String("chart-version", "", "Chart version")
 	definitionUpdateChartCmd.Flags().String("source-repo-url", "", "Git repository URL for branch listing")
 	definitionUpdateChartCmd.Flags().String("repository-url", "", "Helm chart repository URL (e.g. oci://acr.example.com/helm)")
+	definitionUpdateChartCmd.Flags().String("build-pipeline-id", "", "CI pipeline ID that builds the chart's image (used by a pre-deploy CI gate)")
 	definitionUpdateChartCmd.Flags().Int("deploy-order", -1, "Deploy order (0+)")
 	definitionUpdateChartCmd.Flags().String("file", "", "File containing default values")
 

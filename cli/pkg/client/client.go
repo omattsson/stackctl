@@ -725,6 +725,17 @@ func (c *Client) DeleteOrphanedNamespace(namespace string) error {
 	return c.Delete(fmt.Sprintf("/api/v1/orphaned-namespaces/%s", namespace))
 }
 
+// UpdateTemplateChart updates a chart config within a template. The backend
+// replaces every field, so req must carry the full record.
+func (c *Client) UpdateTemplateChart(templateID, chartID string, req *types.UpdateTemplateChartRequest) (*types.ChartConfig, error) {
+	var chart types.ChartConfig
+	err := c.Put(fmt.Sprintf(pathTemplate+"/charts/%s", templateID, chartID), req, &chart)
+	if err != nil {
+		return nil, err
+	}
+	return &chart, nil
+}
+
 // GetDefinitionChart returns a single chart config within a definition.
 func (c *Client) GetDefinitionChart(defID, chartID string) (*types.ChartConfig, error) {
 	var chart types.ChartConfig
