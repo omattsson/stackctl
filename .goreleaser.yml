@@ -71,3 +71,7 @@ release:
     owner: omattsson
     name: stackctl
   draft: false
+  # A rerun of a failed release (for example after the Homebrew step failed)
+  # uploads the same file names again. Replace them instead of failing with
+  # "422 already_exists".
+  replace_existing_artifacts: true
