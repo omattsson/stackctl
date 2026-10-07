@@ -188,6 +188,11 @@ stackctl template quick-deploy 1
 # Or step by step
 stackctl template instantiate 1 --name my-stack --branch main
 
+# Update a chart config in a template (GET-merge-PUT preserves unspecified fields)
+stackctl template update-chart 1 7 --chart-version 0.3.7
+stackctl template update-chart 1 7 --file values.yaml --locked-file locked.yaml
+stackctl template update-chart 1 7 --build-pipeline-id 811
+
 # Delete a template
 stackctl template delete 1
 ```
@@ -212,6 +217,7 @@ stackctl definition update-chart 5 1 --chart-version 0.3.0
 stackctl definition update-chart 5 1 --chart-path /charts/kvk-core
 stackctl definition update-chart 5 1 --deploy-order 6
 stackctl definition update-chart 5 1 --file values.yaml
+stackctl definition update-chart 5 1 --build-pipeline-id 811
 
 # Delete
 stackctl definition delete 5

@@ -646,6 +646,21 @@ type UpdateChartConfigRequest struct {
 	DefaultValues   string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
 }
 
+// UpdateTemplateChartRequest is the body of PUT /api/v1/templates/:id/charts/:chartId.
+// The backend replaces every field, so callers must send the full record.
+type UpdateTemplateChartRequest struct {
+	ChartName       string `json:"chart_name" yaml:"chart_name"`
+	RepositoryURL   string `json:"repository_url" yaml:"repository_url"`
+	SourceRepoURL   string `json:"source_repo_url" yaml:"source_repo_url"`
+	BuildPipelineID string `json:"build_pipeline_id" yaml:"build_pipeline_id"`
+	ChartPath       string `json:"chart_path" yaml:"chart_path"`
+	ChartVersion    string `json:"chart_version" yaml:"chart_version"`
+	DefaultValues   string `json:"default_values" yaml:"default_values"`
+	LockedValues    string `json:"locked_values" yaml:"locked_values"`
+	DeployOrder     int    `json:"deploy_order" yaml:"deploy_order"`
+	Required        bool   `json:"required" yaml:"required"`
+}
+
 // OrphanedNamespace represents a Kubernetes namespace with no matching stack record.
 type OrphanedNamespace struct {
 	Namespace string `json:"namespace" yaml:"namespace"`

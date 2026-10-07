@@ -692,6 +692,138 @@ func printTemplate(tmpl *types.StackTemplate) error {
 	}
 }
 
+var templateUpdateChartCmd = &cobra.Command{
+	Use:   "update-chart <template-id> <chart-id>",
+	Short: "Update a chart config within a template",
+	Long: `Update a chart configuration's settings within a stack template.
+
+The command reads the current chart config from the template and merges your
+changes, so unspecified fields are preserved (the API replaces the full record).
+
+Examples:
+  stackctl template update-chart 3 7 --chart-version 0.3.7
+  stackctl template update-chart 3 7 --file values.yaml
+  stackctl template update-chart 3 7 --locked-file locked.yaml
+  stackctl template update-chart 3 7 --build-pipeline-id 811 --source-repo-url https://dev.azure.com/org/project/_git/repo
+  stackctl template update-chart 3 7 --required=false`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		templateID, err := parseID(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid template ID: %w", err)
+		}
+		chartID, err := parseID(args[1])
+		if err != nil {
+			return fmt.Errorf("invalid chart ID: %w", err)
+		}
+
+		chartPath, _ := cmd.Flags().GetString("chart-path")
+		chartVersion, _ := cmd.Flags().GetString("chart-version")
+		sourceRepoURL, _ := cmd.Flags().GetString("source-repo-url")
+		repositoryURL, _ := cmd.Flags().GetString("repository-url")
+		buildPipelineID, _ := cmd.Flags().GetString("build-pipeline-id")
+		deployOrder, _ := cmd.Flags().GetInt("deploy-order")
+		valuesFile, _ := cmd.Flags().GetString("file")
+		lockedFile, _ := cmd.Flags().GetString("locked-file")
+		requiredChanged := cmd.Flags().Changed("required")
+		required, _ := cmd.Flags().GetBool("required")
+
+		if chartPath == "" && chartVersion == "" && sourceRepoURL == "" && repositoryURL == "" &&
+			buildPipelineID == "" && deployOrder < 0 && valuesFile == "" && lockedFile == "" && !requiredChanged {
+			return fmt.Errorf("at least one of --chart-path, --chart-version, --source-repo-url, --repository-url, --build-pipeline-id, --deploy-order, --file, --locked-file, or --required must be specified")
+		}
+		if err := validateChartRepositoryURL(repositoryURL); err != nil {
+			return err
+		}
+		if err := checkNoPathTraversal(valuesFile); err != nil {
+			return err
+		}
+		if err := checkNoPathTraversal(lockedFile); err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		tmpl, err := c.GetTemplate(templateID)
+		if err != nil {
+			return fmt.Errorf("fetching template: %w", err)
+		}
+		var current *types.ChartConfig
+		for i := range tmpl.Charts {
+			if tmpl.Charts[i].ID == chartID {
+				current = &tmpl.Charts[i]
+				break
+			}
+		}
+		if current == nil {
+			return fmt.Errorf("chart %s not found in template %s", chartID, templateID)
+		}
+
+		// The API replaces every field: seed the request from the current
+		// record so fields the user did not change keep their values.
+		req := types.UpdateTemplateChartRequest{
+			ChartName:       current.ChartName,
+			RepositoryURL:   current.RepoURL,
+			SourceRepoURL:   current.SourceRepoURL,
+			BuildPipelineID: current.BuildPipelineID,
+			ChartPath:       current.ChartPath,
+			ChartVersion:    current.ChartVersion,
+			DefaultValues:   current.DefaultValues,
+			LockedValues:    current.LockedValues,
+			DeployOrder:     current.DeployOrder,
+			Required:        current.Required,
+		}
+
+		if chartPath != "" {
+			req.ChartPath = chartPath
+		}
+		if chartVersion != "" {
+			req.ChartVersion = chartVersion
+		}
+		if sourceRepoURL != "" {
+			req.SourceRepoURL = sourceRepoURL
+		}
+		if repositoryURL != "" {
+			req.RepositoryURL = repositoryURL
+		}
+		if buildPipelineID != "" {
+			req.BuildPipelineID = buildPipelineID
+		}
+		if deployOrder >= 0 {
+			req.DeployOrder = deployOrder
+		}
+		if requiredChanged {
+			req.Required = required
+		}
+		if valuesFile != "" {
+			valuesFile = filepath.Clean(valuesFile)
+			data, err := os.ReadFile(valuesFile)
+			if err != nil {
+				return readFileErr(valuesFile, err)
+			}
+			req.DefaultValues = string(data)
+		}
+		if lockedFile != "" {
+			lockedFile = filepath.Clean(lockedFile)
+			data, err := os.ReadFile(lockedFile)
+			if err != nil {
+				return readFileErr(lockedFile, err)
+			}
+			req.LockedValues = string(data)
+		}
+
+		updated, err := c.UpdateTemplateChart(templateID, chartID, &req)
+		if err != nil {
+			return err
+		}
+		return printChartConfig(updated)
+	},
+}
+
 func init() {
 	// template list flags
 	templateListCmd.Flags().Bool("published", false, "Show only published templates")
@@ -739,6 +871,17 @@ func init() {
 	templateCmd.AddCommand(templateCloneCmd)
 	templateCmd.AddCommand(templatePublishCmd)
 	templateCmd.AddCommand(templateUnpublishCmd)
+	templateCmd.AddCommand(templateUpdateChartCmd)
+
+	templateUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/kvk-core)")
+	templateUpdateChartCmd.Flags().String("chart-version", "", "Chart version")
+	templateUpdateChartCmd.Flags().String("source-repo-url", "", "Git repository URL for branch listing")
+	templateUpdateChartCmd.Flags().String("repository-url", "", "Helm chart repository URL (e.g. oci://acr.example.com/helm)")
+	templateUpdateChartCmd.Flags().String("build-pipeline-id", "", "CI pipeline ID that builds the chart's image (used by a pre-deploy CI gate)")
+	templateUpdateChartCmd.Flags().Int("deploy-order", -1, "Deploy order (0+)")
+	templateUpdateChartCmd.Flags().String("file", "", "File containing default values")
+	templateUpdateChartCmd.Flags().String("locked-file", "", "File containing locked values (always win over instance overrides)")
+	templateUpdateChartCmd.Flags().Bool("required", false, "Whether the chart is required when the template is instantiated")
 	templateVersionsCmd.AddCommand(templateVersionsListCmd)
 	templateVersionsCmd.AddCommand(templateVersionsGetCmd)
 	templateVersionsCmd.AddCommand(templateVersionsDiffCmd)

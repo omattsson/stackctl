@@ -1694,3 +1694,140 @@ func TestTemplateVersionsDiffCmd_UnifiedDiffOutput(t *testing.T) {
 	assert.Contains(t, out, "-replicaCount: 1")
 	assert.Contains(t, out, "+replicaCount: 2")
 }
+
+// ---------- template update-chart ----------
+
+func resetTemplateUpdateChartFlags(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, f := range []string{"chart-path", "chart-version", "source-repo-url", "repository-url", "build-pipeline-id", "file", "locked-file"} {
+			_ = templateUpdateChartCmd.Flags().Set(f, "")
+		}
+		_ = templateUpdateChartCmd.Flags().Set("deploy-order", "-1")
+		_ = templateUpdateChartCmd.Flags().Set("required", "false")
+		templateUpdateChartCmd.Flags().Lookup("required").Changed = false
+	})
+}
+
+func sampleTemplateWithChart() types.StackTemplate {
+	chart := sampleChartConfig()
+	chart.ID = "7"
+	chart.LockedValues = "ingress:\n  enabled: true\n"
+	chart.Required = true
+	return types.StackTemplate{Base: types.Base{ID: "3"}, Name: "Full Stack", Charts: []types.ChartConfig{chart}}
+}
+
+func TestTemplateUpdateChartCmd_ChartVersionKeepsOtherFields(t *testing.T) {
+	tmpl := sampleTemplateWithChart()
+	chart := tmpl.Charts[0]
+	var put types.UpdateTemplateChartRequest
+	puts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/templates/3":
+			json.NewEncoder(w).Encode(tmpl)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/templates/3/charts/7":
+			puts++
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&put))
+			out := chart
+			out.ChartVersion = put.ChartVersion
+			json.NewEncoder(w).Encode(out)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetTemplateUpdateChartFlags(t)
+	require.NoError(t, templateUpdateChartCmd.Flags().Set("chart-version", "0.3.7"))
+
+	require.NoError(t, templateUpdateChartCmd.RunE(templateUpdateChartCmd, []string{"3", "7"}))
+	assert.Equal(t, 1, puts)
+	assert.Equal(t, "0.3.7", put.ChartVersion)
+	// The API replaces the record: every untouched field must round-trip.
+	assert.Equal(t, chart.ChartName, put.ChartName)
+	assert.Equal(t, chart.RepoURL, put.RepositoryURL)
+	assert.Equal(t, chart.SourceRepoURL, put.SourceRepoURL)
+	assert.Equal(t, chart.BuildPipelineID, put.BuildPipelineID)
+	assert.Equal(t, chart.ChartPath, put.ChartPath)
+	assert.Equal(t, chart.DefaultValues, put.DefaultValues)
+	assert.Equal(t, chart.LockedValues, put.LockedValues)
+	assert.Equal(t, chart.DeployOrder, put.DeployOrder)
+	assert.True(t, put.Required)
+	assert.Contains(t, buf.String(), "api-chart")
+}
+
+func TestTemplateUpdateChartCmd_SetsPipelineFilesAndRequired(t *testing.T) {
+	tmpl := sampleTemplateWithChart()
+	dir := t.TempDir()
+	valuesPath := dir + "/values.yaml"
+	lockedPath := dir + "/locked.yaml"
+	require.NoError(t, os.WriteFile(valuesPath, []byte("image:\n  tag: x\n"), 0o600))
+	require.NoError(t, os.WriteFile(lockedPath, []byte("replicas: 1\n"), 0o600))
+
+	var put types.UpdateTemplateChartRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(tmpl)
+			return
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&put))
+		json.NewEncoder(w).Encode(tmpl.Charts[0])
+	}))
+	defer server.Close()
+
+	setupStackTestCmd(t, server.URL)
+	resetTemplateUpdateChartFlags(t)
+	require.NoError(t, templateUpdateChartCmd.Flags().Set("build-pipeline-id", "811"))
+	require.NoError(t, templateUpdateChartCmd.Flags().Set("file", valuesPath))
+	require.NoError(t, templateUpdateChartCmd.Flags().Set("locked-file", lockedPath))
+	require.NoError(t, templateUpdateChartCmd.Flags().Set("required", "false"))
+
+	require.NoError(t, templateUpdateChartCmd.RunE(templateUpdateChartCmd, []string{"3", "7"}))
+	assert.Equal(t, "811", put.BuildPipelineID)
+	assert.Equal(t, "image:\n  tag: x\n", put.DefaultValues)
+	assert.Equal(t, "replicas: 1\n", put.LockedValues)
+	assert.False(t, put.Required)
+	assert.Equal(t, tmpl.Charts[0].ChartVersion, put.ChartVersion)
+}
+
+func TestTemplateUpdateChartCmd_Errors(t *testing.T) {
+	tmpl := sampleTemplateWithChart()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(tmpl)
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	setupStackTestCmd(t, server.URL)
+
+	tests := []struct {
+		name    string
+		flags   map[string]string
+		args    []string
+		wantErr string
+	}{
+		{name: "no flag", args: []string{"3", "7"}, wantErr: "at least one of"},
+		{name: "chart not in template", flags: map[string]string{"chart-version": "1.0.0"}, args: []string{"3", "99"}, wantErr: "chart 99 not found in template 3"},
+		{name: "path traversal", flags: map[string]string{"file": "../secret.yaml"}, args: []string{"3", "7"}, wantErr: "'..'"},
+		{name: "bad repository url", flags: map[string]string{"repository-url": "ftp://x"}, args: []string{"3", "7"}, wantErr: "not supported"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetTemplateUpdateChartFlags(t)
+			for k, v := range tt.flags {
+				require.NoError(t, templateUpdateChartCmd.Flags().Set(k, v))
+			}
+			err := templateUpdateChartCmd.RunE(templateUpdateChartCmd, tt.args)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
