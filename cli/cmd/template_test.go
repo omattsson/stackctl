@@ -1782,13 +1782,13 @@ func TestTemplateUpdateChartCmd_SetsPipelineFilesAndRequired(t *testing.T) {
 
 	setupStackTestCmd(t, server.URL)
 	resetTemplateUpdateChartFlags(t)
-	require.NoError(t, templateUpdateChartCmd.Flags().Set("build-pipeline-id", "811"))
+	require.NoError(t, templateUpdateChartCmd.Flags().Set("build-pipeline-id", "42"))
 	require.NoError(t, templateUpdateChartCmd.Flags().Set("file", valuesPath))
 	require.NoError(t, templateUpdateChartCmd.Flags().Set("locked-file", lockedPath))
 	require.NoError(t, templateUpdateChartCmd.Flags().Set("required", "false"))
 
 	require.NoError(t, templateUpdateChartCmd.RunE(templateUpdateChartCmd, []string{"3", "7"}))
-	assert.Equal(t, "811", put.BuildPipelineID)
+	assert.Equal(t, "42", put.BuildPipelineID)
 	assert.Equal(t, "image:\n  tag: x\n", put.DefaultValues)
 	assert.Equal(t, "replicas: 1\n", put.LockedValues)
 	assert.False(t, put.Required)

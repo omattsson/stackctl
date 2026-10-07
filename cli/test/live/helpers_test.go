@@ -61,7 +61,7 @@ func requireTemplate(t *testing.T, c *client.Client) types.StackTemplate {
 	resp, err := c.ListTemplates(nil)
 	require.NoError(t, err, "list templates")
 	if len(resp.Data) == 0 {
-		t.Skip("backend has no templates — seed Klaravik Core/Full Stack to run this suite")
+		t.Skip("backend has no templates — seed the sample templates to run this suite")
 	}
 	return resp.Data[0]
 }
@@ -72,7 +72,7 @@ func requireDefinition(t *testing.T, c *client.Client) types.StackDefinition {
 	resp, err := c.ListDefinitions(nil)
 	require.NoError(t, err, "list definitions")
 	if len(resp.Data) == 0 {
-		t.Skip("backend has no definitions — seed Klaravik Full Stack SE/DK to run this suite")
+		t.Skip("backend has no definitions — seed the sample definitions to run this suite")
 	}
 	return resp.Data[0]
 }

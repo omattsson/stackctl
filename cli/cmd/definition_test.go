@@ -1328,11 +1328,11 @@ func TestDefinitionUpdateChartCmd_BuildPipelineID(t *testing.T) {
 	defer server.Close()
 
 	setupStackTestCmd(t, server.URL)
-	require.NoError(t, definitionUpdateChartCmd.Flags().Set("build-pipeline-id", "811"))
+	require.NoError(t, definitionUpdateChartCmd.Flags().Set("build-pipeline-id", "42"))
 	t.Cleanup(func() { _ = definitionUpdateChartCmd.Flags().Set("build-pipeline-id", "") })
 
 	require.NoError(t, definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"5", "1"}))
-	assert.Equal(t, "811", put.BuildPipelineID)
+	assert.Equal(t, "42", put.BuildPipelineID)
 	assert.Equal(t, chart.ChartVersion, put.ChartVersion)
 	assert.Equal(t, chart.SourceRepoURL, put.SourceRepoURL)
 }

@@ -384,11 +384,11 @@ so unspecified fields are preserved.
 
 Examples:
   stackctl definition update-chart 1 5 --chart-version 0.3.0
-  stackctl definition update-chart 1 5 --chart-path /charts/kvk-core
+  stackctl definition update-chart 1 5 --chart-path /charts/app-core
   stackctl definition update-chart 1 5 --deploy-order 6
   stackctl definition update-chart 1 5 --source-repo-url https://dev.azure.com/org/project/_git/repo
   stackctl definition update-chart 1 5 --repository-url oci://acr.example.com/helm
-  stackctl definition update-chart 1 5 --build-pipeline-id 811
+  stackctl definition update-chart 1 5 --build-pipeline-id 42
   stackctl definition update-chart 1 5 --file values.yaml`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
@@ -581,7 +581,7 @@ func init() {
 	definitionUpdateCmd.Flags().String(flagFromFile, "", "Update from JSON file")
 
 	// definition update-chart flags
-	definitionUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/kvk-core)")
+	definitionUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/app-core)")
 	definitionUpdateChartCmd.Flags().String("chart-version", "", "Chart version")
 	definitionUpdateChartCmd.Flags().String("source-repo-url", "", "Git repository URL for branch listing")
 	definitionUpdateChartCmd.Flags().String("repository-url", "", "Helm chart repository URL (e.g. oci://acr.example.com/helm)")
