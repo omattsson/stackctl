@@ -23,7 +23,7 @@ func TestLiveBulk_TemplateRoundTrip(t *testing.T) {
 	login(t, c)
 
 	// Create 2 throwaway templates so we can publish + unpublish them in
-	// bulk without affecting the seeded Klaravik templates.
+	// bulk without affecting the seeded templates.
 	prefix := liveResourcePrefix()
 	ids := make([]string, 0, 2)
 	for i := 0; i < 2; i++ {

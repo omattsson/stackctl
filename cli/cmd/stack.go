@@ -80,7 +80,7 @@ Examples:
   stackctl stack list
   stackctl stack list --mine
   stackctl stack list --status running --cluster 1
-  stackctl stack list --definition klaravik-dev
+  stackctl stack list --definition example-dev
   stackctl stack list -o json
   stackctl stack list -q | xargs -I{} stackctl stack deploy {}`,
 	SilenceUsage: true,
@@ -206,9 +206,9 @@ var stackCreateCmd = &cobra.Command{
 The --definition flag accepts either a definition name or ID.
 
 Examples:
-  stackctl stack create --name my-stack --definition klaravik-dev
+  stackctl stack create --name my-stack --definition example-dev
   stackctl stack create --name my-stack --definition e9af3b10-4633-436b-a131-975a3b598e3e
-  stackctl stack create --name my-stack --definition klaravik-dev --branch feature/xyz --cluster 2 --ttl 120`,
+  stackctl stack create --name my-stack --definition example-dev --branch feature/xyz --cluster 2 --ttl 120`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")

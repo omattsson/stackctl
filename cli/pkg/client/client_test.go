@@ -4757,8 +4757,8 @@ func TestUpdateCluster_Error(t *testing.T) {
 }
 
 // Registry credentials (URL / username / password / pull-secret) must round-trip
-// intact through both CreateCluster and UpdateCluster — kvk-k8s-dev's ACR
-// bootstrap relies on stackctl carrying registry_password, which used to fall
+// intact through both CreateCluster and UpdateCluster — a cluster bootstrap with ACR
+// credentials relies on stackctl carrying registry_password, which used to fall
 // out of the request body because the wire types omitted it.
 func TestCreateCluster_RegistryCredentialsRoundTrip(t *testing.T) {
 	t.Parallel()

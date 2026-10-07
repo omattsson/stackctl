@@ -290,12 +290,12 @@ func withContextConfig(t *testing.T, ctx *config.Context) {
 		require.NoError(t, os.Unsetenv(k))
 	}
 	flagAPIURL, flagAPIKey = "", ""
-	cfg = &config.Config{CurrentContext: "kvk-k8s-dev", Contexts: map[string]*config.Context{"kvk-k8s-dev": ctx}}
+	cfg = &config.Config{CurrentContext: "dev-cluster", Contexts: map[string]*config.Context{"dev-cluster": ctx}}
 }
 
 func TestContextEnv_APIKeyFromContext(t *testing.T) {
 	withContextConfig(t, &config.Context{APIURL: "https://stacks.example.dev", APIKey: "sk_ctx", Insecure: true})
-	require.NoError(t, saveToken("jwt-ignored", "olof", time.Now().Add(time.Hour)))
+	require.NoError(t, saveToken("jwt-ignored", "alice", time.Now().Add(time.Hour)))
 
 	env := contextEnv(os.Environ())
 
@@ -306,14 +306,14 @@ func TestContextEnv_APIKeyFromContext(t *testing.T) {
 	_, hasToken := envValue(env, "STACKCTL_TOKEN")
 	assert.False(t, hasToken, "no session token when an API key is set")
 	v, _ = envValue(env, "STACKCTL_CONTEXT")
-	assert.Equal(t, "kvk-k8s-dev", v)
+	assert.Equal(t, "dev-cluster", v)
 	v, _ = envValue(env, "STACKCTL_INSECURE")
 	assert.Equal(t, "1", v)
 }
 
 func TestContextEnv_SessionTokenWithoutAPIKey(t *testing.T) {
 	withContextConfig(t, &config.Context{APIURL: "https://stacks.example.dev"})
-	require.NoError(t, saveToken("jwt-session", "olof", time.Now().Add(time.Hour)))
+	require.NoError(t, saveToken("jwt-session", "alice", time.Now().Add(time.Hour)))
 
 	env := contextEnv(os.Environ())
 
@@ -327,7 +327,7 @@ func TestContextEnv_SessionTokenWithoutAPIKey(t *testing.T) {
 
 func TestContextEnv_ExpiredTokenIsLeftOut(t *testing.T) {
 	withContextConfig(t, &config.Context{APIURL: "https://stacks.example.dev"})
-	require.NoError(t, saveToken("jwt-old", "olof", time.Now().Add(-time.Minute)))
+	require.NoError(t, saveToken("jwt-old", "alice", time.Now().Add(-time.Minute)))
 
 	env := contextEnv(os.Environ())
 

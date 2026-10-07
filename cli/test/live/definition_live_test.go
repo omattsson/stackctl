@@ -25,7 +25,7 @@ func TestLiveDefinition_ListAndGet(t *testing.T) {
 }
 
 // TestLiveDefinition_ExportImportRoundTrip locks the import wire contract
-// — the seed-definitions.sh script in kvk-k8s-dev posts *.definition.json
+// — a seed script that posts *.definition.json
 // files via this path and any field-name drift would silently drop charts.
 func TestLiveDefinition_ExportImportRoundTrip(t *testing.T) {
 	c := newLiveClient(t)

@@ -211,10 +211,10 @@ func TestResolveDefinitionID_Whitespace(t *testing.T) {
 func TestResolveDefinitionID_NameWithWhitespace(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "klaravik-dev", r.URL.Query().Get("name"))
+		assert.Equal(t, "example-dev", r.URL.Query().Get("name"))
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
 			Data: []types.StackDefinition{
-				{Base: types.Base{ID: "def-123"}, Name: "klaravik-dev"},
+				{Base: types.Base{ID: "def-123"}, Name: "example-dev"},
 			},
 			Total: 1, Page: 1, PageSize: 1,
 		})
@@ -222,7 +222,7 @@ func TestResolveDefinitionID_NameWithWhitespace(t *testing.T) {
 	defer server.Close()
 
 	c := client.New(server.URL)
-	id, err := resolveDefinitionID(c, "  klaravik-dev  ")
+	id, err := resolveDefinitionID(c, "  example-dev  ")
 	require.NoError(t, err)
 	assert.Equal(t, "def-123", id)
 }
@@ -231,10 +231,10 @@ func TestResolveDefinitionID_NameSingleMatch(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v1/stack-definitions", r.URL.Path)
-		assert.Equal(t, "klaravik-dev", r.URL.Query().Get("name"))
+		assert.Equal(t, "example-dev", r.URL.Query().Get("name"))
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
 			Data: []types.StackDefinition{
-				{Base: types.Base{ID: "def-123"}, Name: "klaravik-dev", Owner: "alice"},
+				{Base: types.Base{ID: "def-123"}, Name: "example-dev", Owner: "alice"},
 			},
 			Total: 1, Page: 1, PageSize: 1,
 		})
@@ -242,7 +242,7 @@ func TestResolveDefinitionID_NameSingleMatch(t *testing.T) {
 	defer server.Close()
 
 	c := client.New(server.URL)
-	id, err := resolveDefinitionID(c, "klaravik-dev")
+	id, err := resolveDefinitionID(c, "example-dev")
 	require.NoError(t, err)
 	assert.Equal(t, "def-123", id)
 }
@@ -267,8 +267,8 @@ func TestResolveDefinitionID_NameMultipleMatches(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
 			Data: []types.StackDefinition{
-				{Base: types.Base{ID: "def-1"}, Name: "klaravik-dev", Owner: "alice"},
-				{Base: types.Base{ID: "def-2"}, Name: "klaravik-dev", Owner: "bob"},
+				{Base: types.Base{ID: "def-1"}, Name: "example-dev", Owner: "alice"},
+				{Base: types.Base{ID: "def-2"}, Name: "example-dev", Owner: "bob"},
 			},
 			Total: 2, Page: 1, PageSize: 2,
 		})
@@ -276,7 +276,7 @@ func TestResolveDefinitionID_NameMultipleMatches(t *testing.T) {
 	defer server.Close()
 
 	c := client.New(server.URL)
-	_, err := resolveDefinitionID(c, "klaravik-dev")
+	_, err := resolveDefinitionID(c, "example-dev")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "multiple definitions match")
 	assert.Contains(t, err.Error(), "def-1")
@@ -296,9 +296,9 @@ func TestResolveDefinitionID_NameMismatch(t *testing.T) {
 	defer server.Close()
 
 	c := client.New(server.URL)
-	_, err := resolveDefinitionID(c, "klaravik-dev")
+	_, err := resolveDefinitionID(c, "example-dev")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), `no definition found with name "klaravik-dev"`)
+	assert.Contains(t, err.Error(), `no definition found with name "example-dev"`)
 }
 
 func TestResolveDefinitionID_APIError(t *testing.T) {
@@ -310,7 +310,7 @@ func TestResolveDefinitionID_APIError(t *testing.T) {
 	defer server.Close()
 
 	c := client.New(server.URL)
-	_, err := resolveDefinitionID(c, "klaravik-dev")
+	_, err := resolveDefinitionID(c, "example-dev")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "resolving definition name")
 }

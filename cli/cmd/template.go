@@ -704,7 +704,7 @@ Examples:
   stackctl template update-chart 3 7 --chart-version 0.3.7
   stackctl template update-chart 3 7 --file values.yaml
   stackctl template update-chart 3 7 --locked-file locked.yaml
-  stackctl template update-chart 3 7 --build-pipeline-id 811 --source-repo-url https://dev.azure.com/org/project/_git/repo
+  stackctl template update-chart 3 7 --build-pipeline-id 42 --source-repo-url https://dev.azure.com/org/project/_git/repo
   stackctl template update-chart 3 7 --required=false`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
@@ -873,7 +873,7 @@ func init() {
 	templateCmd.AddCommand(templateUnpublishCmd)
 	templateCmd.AddCommand(templateUpdateChartCmd)
 
-	templateUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/kvk-core)")
+	templateUpdateChartCmd.Flags().String("chart-path", "", "Chart path (e.g. /charts/app-core)")
 	templateUpdateChartCmd.Flags().String("chart-version", "", "Chart version")
 	templateUpdateChartCmd.Flags().String("source-repo-url", "", "Git repository URL for branch listing")
 	templateUpdateChartCmd.Flags().String("repository-url", "", "Helm chart repository URL (e.g. oci://acr.example.com/helm)")
