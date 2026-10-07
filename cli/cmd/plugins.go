@@ -112,13 +112,15 @@ func discoverPlugins(pathEnv string) map[string]string {
 // pluginEnv returns the environment to pass to a plugin subprocess. It
 // preserves the full parent environment — plugins might legitimately need
 // unrelated variables (AWS_PROFILE, KUBECONFIG, etc.) — and injects
-// STACKCTL_* values resolved from flags so a plugin sees the same effective
-// config stackctl itself would use for a built-in command.
+// STACKCTL_* values resolved from flags and from the current context so a
+// plugin sees the same effective config stackctl itself would use for a
+// built-in command.
 //
-// Precedence: an explicitly-passed flag wins over a pre-existing env var.
-// Flags that weren't set on the command line leave the inherited env
-// untouched, so STACKCTL_INSECURE=1 in the parent shell keeps working for
-// plugin invocations when no --insecure flag is passed.
+// Precedence: an explicitly-passed flag wins over a pre-existing env var,
+// and a pre-existing env var wins over the config file. Flags that weren't
+// set on the command line leave the inherited env untouched, so
+// STACKCTL_INSECURE=1 in the parent shell keeps working for plugin
+// invocations when no --insecure flag is passed.
 //
 // Flag-to-env wiring documented in EXTENDING.md as a plugin-author contract.
 func pluginEnv(cmd *cobra.Command) []string {
@@ -147,7 +149,56 @@ func pluginEnv(cmd *cobra.Command) []string {
 			env = setEnv(env, "STACKCTL_DEBUG", boolEnvValue(debug))
 		}
 	}
+	return contextEnv(env)
+}
+
+// contextEnv adds the API URL, the credentials and the name of the current
+// context, resolved like newClient does, so a plugin can call the API without
+// reading the stackctl config or token files:
+//
+//   - STACKCTL_API_URL: the resolved API URL.
+//   - STACKCTL_API_KEY: the resolved API key (send it as X-API-Key).
+//   - STACKCTL_TOKEN: the session token from `stackctl login`, only when no
+//     API key is set (send it as Authorization: Bearer).
+//   - STACKCTL_CONTEXT: the name of the current context.
+//   - STACKCTL_INSECURE: 1 when the current context has insecure: true.
+//
+// A value already in env (from the parent shell or a flag) is kept. Secret
+// values are never printed.
+func contextEnv(env []string) []string {
+	if cfg == nil {
+		return env
+	}
+	if apiURL := resolveAPIURL(); apiURL != "" {
+		env = setEnv(env, "STACKCTL_API_URL", apiURL)
+	}
+	if apiKey := resolveAPIKey(); apiKey != "" {
+		env = setEnv(env, "STACKCTL_API_KEY", apiKey)
+	} else if !hasEnv(env, "STACKCTL_TOKEN") {
+		// An expired or unreadable token is left out; the plugin then gets a
+		// 401 and the user runs `stackctl login`, as for a built-in command.
+		if token, _, err := loadToken(); err == nil && token != "" {
+			env = setEnv(env, "STACKCTL_TOKEN", token)
+		}
+	}
+	if cfg.CurrentContext != "" && !hasEnv(env, "STACKCTL_CONTEXT") {
+		env = setEnv(env, "STACKCTL_CONTEXT", cfg.CurrentContext)
+	}
+	if ctx := cfg.CurrentCtx(); ctx != nil && ctx.Insecure && !hasEnv(env, "STACKCTL_INSECURE") {
+		env = setEnv(env, "STACKCTL_INSECURE", "1")
+	}
 	return env
+}
+
+// hasEnv reports whether env contains key with a non-empty value.
+func hasEnv(env []string, key string) bool {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) && len(kv) > len(prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // setEnv replaces (or appends) KEY=value in env, preserving order.

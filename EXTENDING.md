@@ -57,7 +57,7 @@ That's the whole mechanism. Your binary gets exec'd with:
 
 - Whatever argv the user typed after `stackctl <name>` (plus flags stackctl didn't consume at the top level)
 - `stdin`, `stdout`, `stderr` wired through directly
-- The full parent environment (so `STACKCTL_API_URL` / `STACKCTL_API_KEY` are visible)
+- The full parent environment, plus the API URL and credentials of the current context (`STACKCTL_API_URL`, `STACKCTL_API_KEY` or `STACKCTL_TOKEN`)
 - The plugin's exit code becomes stackctl's exit code
 
 ---
@@ -98,24 +98,26 @@ Discovery is **first-PATH-wins** (standard PATH semantics). If `stackctl-hello` 
 ### Environment variables (inherited + flag-derived)
 
 The plugin inherits **stackctl's entire environment** (same pattern as `git`,
-`kubectl`, `gh`). On top of that, stackctl exports a small set of values
-**derived from flags** (not from `~/.stackmanager/config.yaml`) before exec,
-so plugins can observe the user's requested TLS / output behaviour:
+`kubectl`, `gh`). On top of that, stackctl exports the values of the current
+context and of the global flags before exec, so a plugin sees the same
+effective config as a built-in command. The precedence is the same as for
+built-in commands: flag, then environment variable, then config file. A value
+that the user exported in the parent shell is kept.
 
 | Variable | Source | Purpose |
 |---|---|---|
-| `STACKCTL_API_URL` | parent shell only | Base URL of the k8s-stack-manager API, **if already exported** by the user |
-| `STACKCTL_API_KEY` | parent shell only | API key (header `X-API-Key`), **if already exported** by the user |
-| `STACKCTL_INSECURE` | `--insecure` flag OR parent shell | `1` to skip TLS verification |
+| `STACKCTL_API_URL` | `--api-url` flag, parent shell, or current context `api-url` | Base URL of the k8s-stack-manager API |
+| `STACKCTL_API_KEY` | `--api-key` flag, parent shell, or current context `api-key` | API key; send it in the header `X-API-Key` |
+| `STACKCTL_TOKEN` | parent shell, or the session token from `stackctl login` / `stackctl login --sso` | Set only when no API key is set; send it as `Authorization: Bearer <token>`. An expired token is left out. |
+| `STACKCTL_CONTEXT` | parent shell, or the current context name | Name of the current context |
+| `STACKCTL_INSECURE` | `--insecure` flag, parent shell, or current context `insecure: true` | `1` to skip TLS verification |
 | `STACKCTL_QUIET` | `--quiet` flag | `1` when the user requested quiet output |
 | `STACKCTL_OUTPUT` | `--output` flag | `table` / `json` / `yaml` / a registered custom format |
 | `HOME`, `PATH`, `LANG`, `AWS_*`, `KUBECONFIG`, … | parent shell | the rest of the user's environment |
 
-> **stackctl does NOT inject values resolved from the stackctl config file.**
-> If your plugin needs `STACKCTL_API_URL` / `STACKCTL_API_KEY`, they must
-> already be present in the environment when stackctl is launched — they
-> will not be filled in from `~/.stackmanager/config.yaml` automatically.
-> See the Troubleshooting section below for recommended workflows.
+> Send `STACKCTL_API_KEY` as `X-API-Key` and `STACKCTL_TOKEN` as
+> `Authorization: Bearer`. The backend rejects an API key sent as a bearer
+> token (401).
 
 > **Security note:** because the full parent environment is forwarded,
 > plugins have access to credentials stackctl doesn't know about
@@ -150,7 +152,7 @@ set -euo pipefail
 
 INSTANCE_ID=${1:?usage: stackctl snapshot-pvc <instance-id>}
 
-: "${STACKCTL_API_URL:?STACKCTL_API_URL not set — export it first, e.g. export STACKCTL_API_URL=\$(stackctl config get api-url)}"
+: "${STACKCTL_API_URL:?STACKCTL_API_URL not set — run: stackctl config set api-url <url>}"
 
 # Optional: allow insecure TLS per env
 CURL_OPTS=()
@@ -308,14 +310,14 @@ When it makes sense, accept `-o json` and emit structured output. Downstream scr
 
 ### Don't re-implement auth
 
-Read `STACKCTL_API_URL` + `STACKCTL_API_KEY` from the environment. stackctl does **not** currently pass its config-file values into the plugin environment — only the flag-derived `STACKCTL_INSECURE`, `STACKCTL_QUIET`, and `STACKCTL_OUTPUT` flow through. So if the user configured their API URL via `stackctl config set api-url <url>` (writing `~/.stackmanager/config.yaml`) and never exported `STACKCTL_API_URL`, a plugin subprocess will not see it.
+Read `STACKCTL_API_URL` and the credentials from the environment. Send
+`STACKCTL_API_KEY` as `X-API-Key` when it is set; otherwise send
+`STACKCTL_TOKEN` as `Authorization: Bearer`. stackctl resolves both from the
+current context, so the plugin works after `stackctl config set api-key ...`
+or `stackctl login` without any export.
 
-Two workable strategies:
-
-1. **Require the env vars**, and fail fast with a pointer (`export STACKCTL_API_URL=... STACKCTL_API_KEY=...` — or wrap your plugin in a shell function that exports them).
-2. **Shell out to `stackctl config get api-url`** and `stackctl config get api-key`. Works without any env wiring, at the cost of one extra exec per value.
-
-Either way, don't parse `~/.stackmanager/config.yaml` directly — the schema is internal and may change.
+Don't parse `~/.stackmanager/config.yaml` or the token files directly — the
+schema is internal and may change.
 
 ### Use a deny list for dangerous defaults
 
@@ -404,24 +406,18 @@ Source: [cli/cmd/plugins.go](cli/cmd/plugins.go) (≈110 lines). No plugin frame
 
 ### Plugin runs but `$STACKCTL_API_URL` is empty
 
-The plugin process only sees environment variables that were **already exported** in the user's shell. `stackctl config set api-url <url>` writes to `~/.stackmanager/config.yaml`; it does **not** export `STACKCTL_API_URL` into the environment for subsequent plugin execs.
+stackctl exports the `api-url` of the current context. If the variable is
+empty, the current context has no `api-url`:
 
-Pick one workflow and document it for your plugin's users:
+```bash
+stackctl config current-context
+stackctl config set api-url https://stacks.example.com
+```
 
-- **Have the user export env vars explicitly:**
+### Plugin gets 401
 
-  ```bash
-  export STACKCTL_API_URL="$(stackctl config get api-url)"
-  export STACKCTL_API_KEY="$(stackctl config get api-key)"
-  stackctl my-plugin …
-  ```
-
-- **Have the plugin resolve config via `stackctl config get`:**
-  shell out to `stackctl config get api-url` and `stackctl config get api-key`
-  if the env vars are empty. One extra exec per value, but avoids parsing
-  internal config formats.
-
-Core stackctl commands do config resolution automatically; plugins are plain exec'd subprocesses, so env is all they get unless you resolve config via the commands above.
+- Check that the plugin sends `STACKCTL_API_KEY` as `X-API-Key`, not as a bearer token.
+- Without an API key, check that the session is valid: run `stackctl login` (or `stackctl login --sso`). stackctl leaves out an expired token.
 
 ### Plugin exits non-zero but stackctl exits 0
 
