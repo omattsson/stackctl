@@ -60,9 +60,9 @@ func startClusterMockServer(t *testing.T, state *clusterMockState) *httptest.Ser
 			cluster.ID = fmt.Sprintf("%d", state.nextID)
 			state.nextID++
 			cluster.Status = "active"
-			cluster.CreatedAt = time.Now()
-			cluster.UpdatedAt = time.Now()
-			cluster.Version = "1"
+			now := time.Now()
+			cluster.CreatedAt = &now
+			cluster.UpdatedAt = &now
 			state.clusters[cluster.ID] = &cluster
 			state.mu.Unlock()
 

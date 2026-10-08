@@ -60,7 +60,7 @@ stackctl login
 
 # 4. Browse templates and deploy
 stackctl template list
-stackctl template quick-deploy 1
+stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
 stackctl stack list --mine
 ```
 
@@ -126,6 +126,22 @@ stackctl supports two authentication methods:
 
 API key takes precedence when both are configured.
 
+#### Session renewal
+
+The server gives a username/password login a short-lived access token (15 minutes by default) and a refresh token. `stackctl login` stores both in the token file (mode `0600`). stackctl renews the access token automatically:
+
+- before a request, when the access token expires within 60 seconds;
+- after a `401` response, once, and then it retries the request once;
+- before it starts a plugin, so the plugin gets a valid `STACKCTL_TOKEN`.
+
+Renewal works until the session ends: 12 hours after the login, or after 30 minutes without use (server defaults). Then stackctl removes the stored token and shows `Not authenticated. Run 'stackctl login' first.` A network or server error during renewal keeps the stored token.
+
+The server rotates the refresh token on each renewal. stackctl holds a lock on `tokens/<context>.lock` during a renewal, so parallel stackctl commands renew only once.
+
+An SSO login (`stackctl login --sso`) gets a longer-lived token (24 hours by default) without a refresh token. It is not renewed. API keys have no session.
+
+`stackctl logout` sends the access token and the refresh token to the server, which ends the session, and then removes the token file. If the server cannot be reached, stackctl prints a warning and still removes the file.
+
 ### Precedence
 
 Configuration values are resolved in this order (highest priority first):
@@ -142,16 +158,16 @@ Configuration values are resolved in this order (highest priority first):
   <img src="assets/stackctl-stack.svg" alt="stackctl stack commands" width="700">
 </p>
 
-All stack commands accept a **name or ID** — e.g. `stackctl stack deploy my-app` or `stackctl stack deploy 42`.
+All stack commands accept a **name or ID** — e.g. `stackctl stack deploy my-app` or `stackctl stack deploy 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d`.
 
 ```bash
 # List instances
 stackctl stack list
 stackctl stack list --mine --status running
-stackctl stack list --cluster 1 -o json
+stackctl stack list --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -o json
 
 # Create and deploy
-stackctl stack create --definition 1 --name my-app --branch feature/xyz --ttl 480
+stackctl stack create --definition example-dev --name my-app --branch feature/xyz --ttl 480
 stackctl stack deploy my-app
 
 # Monitor
@@ -166,7 +182,7 @@ stackctl stack delete my-app
 # Clone an existing instance
 stackctl stack clone my-app
 
-# Extend TTL
+# Set the TTL to 120 minutes from now (asks before it moves the expiry earlier)
 stackctl stack extend my-app --minutes 120
 
 # Deployment history and rollback
@@ -180,76 +196,88 @@ stackctl stack rollback my-app --target <log-id>
 ```bash
 # Browse published templates
 stackctl template list --published
-stackctl template get 1
+stackctl template get 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
 
 # Deploy from template (one command)
-stackctl template quick-deploy 1
+stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
 
 # Or step by step
-stackctl template instantiate 1 --name my-stack --branch main
+stackctl template instantiate 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --branch main
 
 # Update a chart config in a template (GET-merge-PUT preserves unspecified fields)
-stackctl template update-chart 1 7 --chart-version 0.3.7
-stackctl template update-chart 1 7 --file values.yaml --locked-file locked.yaml
-stackctl template update-chart 1 7 --build-pipeline-id 42
+stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --chart-version 0.3.7
+stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --file values.yaml --locked-file locked.yaml
+stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --build-pipeline-id 42
 
 # Delete a template
-stackctl template delete 1
+stackctl template delete 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
 ```
 
 ### Stack Definitions
 
 ```bash
-# List and inspect
+# List and inspect (commands take a definition name or ID; get shows the chart IDs)
 stackctl definition list --mine
-stackctl definition get 5
+stackctl definition get example-dev
 
 # Create from file
 stackctl definition create --from-file definition.json
 
 # Update metadata
-stackctl definition update 5 --name new-name
-stackctl definition update 5 --branch develop
-stackctl definition update 5 --description "Updated description"
+stackctl definition update example-dev --name new-name
+stackctl definition update example-dev --branch develop
+stackctl definition update example-dev --description "Updated description"
 
 # Update a chart config (GET-merge-PUT preserves unspecified fields)
-stackctl definition update-chart 5 1 --chart-version 0.3.0
-stackctl definition update-chart 5 1 --chart-path /charts/app-core
-stackctl definition update-chart 5 1 --deploy-order 6
-stackctl definition update-chart 5 1 --file values.yaml
-stackctl definition update-chart 5 1 --build-pipeline-id 42
+# <definition> and <chart> take a name or an ID
+stackctl definition update-chart example-dev my-chart --chart-version 0.3.0
+stackctl definition update-chart example-dev my-chart --chart-path /charts/app-core
+stackctl definition update-chart example-dev my-chart --deploy-order 6
+stackctl definition update-chart example-dev my-chart --file values.yaml
+stackctl definition update-chart example-dev my-chart --build-pipeline-id 42
 
 # Delete
-stackctl definition delete 5
+stackctl definition delete example-dev
 
 # Export / import
-stackctl definition export 5 > backup.json
+stackctl definition export example-dev > backup.json
 stackctl definition import --file backup.json
 ```
 
 ### Value and Branch Overrides
 
 ```bash
-# Set Helm value overrides from a file
-stackctl override set 42 3 --file values.yaml
+# <chart> is a chart name or a chart ID of the stack's definition
 
-# Set individual values
-stackctl override set 42 3 --set image.tag=v2.0.0
+# Replace the value override of a chart with a file
+stackctl override set my-app my-chart --file values.yaml
+
+# Change single keys; the other keys of the override stay (like helm --set)
+stackctl override set my-app my-chart --set image.tag=v2.0.0
+# Replace the whole override with only the --set keys
+stackctl override set my-app my-chart --replace --set replicas=1
+# Remove keys
+stackctl override unset my-app my-chart image.tag
+
+# Show or delete the override of one chart
+stackctl override get my-app my-chart
+stackctl override delete my-app my-chart
 
 # Per-chart branch overrides
-stackctl override branch set 42 3 feature/hotfix
+stackctl override branch set my-app my-chart feature/hotfix
 
 # Quota overrides
-stackctl override quota get 42
-stackctl override quota set 42 --cpu-request 200m --cpu-limit 500m --memory-request 256Mi --memory-limit 1Gi
-stackctl override quota delete 42
+stackctl override quota get my-app
+stackctl override quota set my-app --cpu-request 200m --cpu-limit 500m --memory-request 256Mi --memory-limit 1Gi
+stackctl override quota delete my-app
 
-# View merged values
-stackctl stack values 42
-stackctl stack values 42 --chart 3
+# View merged values (YAML per chart), one chart, or save the ZIP export
+stackctl stack values my-app
+stackctl stack values my-app --chart my-chart
+stackctl stack values my-app --output-file my-app-values.zip
 
 # Compare two instances side by side
-stackctl stack compare 42 43
+stackctl stack compare my-app other-app
 ```
 
 ### Bulk Operations
@@ -258,10 +286,10 @@ Bulk commands accept **names or IDs** (up to 50 at a time).
 
 ```bash
 # Bulk deploy/stop/clean/delete
-stackctl bulk deploy --ids my-app,other-app,3
-stackctl bulk deploy my-app other-app 3   # positional args also work
-stackctl bulk stop --ids 1,2,3
-stackctl bulk clean --ids 1,2,3
+stackctl bulk deploy --ids my-app,other-app,6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d
+stackctl bulk deploy my-app other-app 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d   # positional args also work
+stackctl bulk stop --ids my-app,other-app
+stackctl bulk clean --ids my-app,other-app
 
 # Piping workflows with quiet mode
 stackctl stack list --status stopped --mine -q | xargs stackctl bulk deploy
@@ -292,27 +320,27 @@ for id in $(stackctl definition list -q); do
 done
 
 # CI/CD: deploy and wait for status
-stackctl stack deploy 42
-while [ "$(stackctl stack status 42 -o json | jq -r '.status')" != "running" ]; do
+stackctl stack deploy my-app
+while [ "$(stackctl stack get my-app -o json | jq -r '.status')" != "running" ]; do
   sleep 5
 done
-echo "Stack 42 is running"
+echo "Stack my-app is running"
 
 # Delete all stacks on a specific cluster
-stackctl stack list --cluster 1 -q | xargs stackctl bulk delete --yes
+stackctl stack list --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -q | xargs stackctl bulk delete --yes
 ```
 
 ### Clusters
 
 ```bash
 stackctl cluster list
-stackctl cluster get 1
+stackctl cluster get 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
 
 # Cluster-level shared Helm values (applied to all deploys on a cluster)
-stackctl cluster shared-values list 1
-stackctl cluster shared-values set 1 --name "local-dev-defaults" --file values.yaml
-stackctl cluster shared-values set 1 --name "local-dev-defaults" --set persistence.storageClass=local-path --priority 10
-stackctl cluster shared-values delete 1 5
+stackctl cluster shared-values list 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
+stackctl cluster shared-values set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --name "local-dev-defaults" --file values.yaml
+stackctl cluster shared-values set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --name "local-dev-defaults" --set persistence.storageClass=local-path --priority 10
+stackctl cluster shared-values delete 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e 6e7f8a9b-0c1d-4e2f-8a3b-4c5d6e7f8a9b
 ```
 
 ### Git

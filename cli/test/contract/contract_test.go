@@ -249,6 +249,10 @@ func walkFields(t reflect.Type, out map[string]goFieldInfo) {
 		if info.Kind == reflect.Ptr {
 			info.Kind = f.Type.Elem().Kind()
 		}
+		// time.Time is a date-time string on the wire.
+		if f.Type == timeType || (f.Type.Kind() == reflect.Ptr && f.Type.Elem() == timeType) {
+			info.Kind = reflect.String
+		}
 		if info.Kind == reflect.Slice || info.Kind == reflect.Array {
 			info.IsSlice = true
 			info.ElemKind = f.Type.Elem().Kind()

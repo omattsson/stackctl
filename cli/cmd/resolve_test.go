@@ -423,3 +423,68 @@ func TestResolveTemplateID_APIError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resolving template name")
 }
+
+func TestMatchChart(t *testing.T) {
+	t.Parallel()
+	charts := []types.ChartConfig{
+		{Base: types.Base{ID: "3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b"}, ChartName: "my-api"},
+		{Base: types.Base{ID: "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d"}, ChartName: "my-db"},
+		{Base: types.Base{ID: "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a"}, ChartName: "dup"},
+		{Base: types.Base{ID: "0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d"}, ChartName: "DUP"},
+	}
+	tests := []struct {
+		name    string
+		in      string
+		wantID  string
+		wantErr string
+	}{
+		{name: "by id", in: "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d", wantID: "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d"},
+		{name: "by name", in: "my-api", wantID: "3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b"},
+		{name: "case-insensitive", in: "MY-DB", wantID: "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d"},
+		{name: "unknown", in: "nope", wantErr: `chart "nope" is not part of definition x (charts: my-api, my-db, dup, DUP)`},
+		{name: "ambiguous", in: "dup", wantErr: "multiple charts in definition x match name"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ch, err := matchChart(charts, tt.in, "definition x")
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantID, ch.ID)
+		})
+	}
+}
+
+func TestMatchChart_NoCharts(t *testing.T) {
+	t.Parallel()
+	_, err := matchChart(nil, "x", "definition y")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "(charts: none)")
+}
+
+// withChartLookup answers the chart lookups of resolveChartID and
+// resolveDefinitionChartID for stack 42 and definition 5 (charts "1" api,
+// "3" web, "5" db) and passes every other request to next.
+func withChartLookup(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			switch r.URL.Path {
+			case "/api/v1/stack-instances/42":
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"42","name":"my-stack","stack_definition_id":"5","status":"running"}`))
+				return
+			case "/api/v1/stack-definitions/5":
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"5","name":"api-service","charts":[` +
+					`{"id":"1","chart_name":"api"},{"id":"3","chart_name":"web"},{"id":"5","chart_name":"db"}]}`))
+				return
+			}
+		}
+		next(w, r)
+	}
+}

@@ -58,7 +58,7 @@ Examples:
 		if cmd.Flags().Changed(flagPageSize) {
 			pageSize, _ := cmd.Flags().GetInt(flagPageSize)
 			if pageSize > 0 {
-				params["page_size"] = strconv.Itoa(pageSize)
+				params["pageSize"] = strconv.Itoa(pageSize)
 			}
 		}
 
@@ -98,22 +98,23 @@ Examples:
 }
 
 var definitionGetCmd = &cobra.Command{
-	Use:   "get <id>",
+	Use:   "get <name|id>",
 	Short: "Show stack definition details",
-	Long: `Show detailed information about a stack definition.
+	Long: `Show detailed information about a stack definition, including the
+ID of each chart (for override and update-chart commands).
 
 Examples:
-  stackctl definition get 1
-  stackctl definition get 1 -o json`,
+  stackctl definition get example-dev
+  stackctl definition get e9af3b10-4633-436b-a131-975a3b598e3e -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		id, err := resolveDefinitionID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -184,20 +185,19 @@ Examples:
 }
 
 var definitionUpdateCmd = &cobra.Command{
-	Use:   "update <id>",
+	Use:   "update <name|id>",
 	Short: "Update a stack definition",
 	Long: `Update an existing stack definition from flags or a JSON file.
 
 Examples:
-  stackctl definition update 1 --name new-name
-  stackctl definition update 1 --branch develop
-  stackctl definition update 1 --from-file definition.json`,
+  stackctl definition update example-dev --name new-name
+  stackctl definition update example-dev --branch develop
+  stackctl definition update e9af3b10-4633-436b-a131-975a3b598e3e --from-file definition.json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
-		if err != nil {
-			return err
+		if strings.TrimSpace(args[0]) == "" {
+			return fmt.Errorf("definition name or ID must not be empty")
 		}
 
 		fromFile, _ := cmd.Flags().GetString(flagFromFile)
@@ -241,6 +241,11 @@ Examples:
 			return err
 		}
 
+		id, err := resolveDefinitionID(c, args[0])
+		if err != nil {
+			return err
+		}
+
 		def, err := c.UpdateDefinition(id, &req)
 		if err != nil {
 			return err
@@ -251,7 +256,7 @@ Examples:
 }
 
 var definitionDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
+	Use:   "delete <name|id>",
 	Short: "Delete a stack definition",
 	Long: `Permanently delete a stack definition.
 
@@ -259,14 +264,14 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl definition delete 1
-  stackctl definition delete 1 --yes`,
+  stackctl definition delete example-dev
+  stackctl definition delete e9af3b10-4633-436b-a131-975a3b598e3e --yes`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return deleteByID(cmd, args,
 			"This will permanently delete definition %s. Continue? (y/n): ",
-			passthroughID,
+			resolveDefinitionID,
 			func(c *client.Client, id string) error { return c.DeleteDefinition(id) },
 			"Deleted definition %s",
 		)
@@ -274,24 +279,24 @@ Examples:
 }
 
 var definitionExportCmd = &cobra.Command{
-	Use:   "export <id>",
+	Use:   "export <name|id>",
 	Short: "Export a stack definition as JSON",
 	Long: `Export a stack definition as a JSON bundle.
 
 By default, the JSON is written to stdout. Use --output-file to write to a file.
 
 Examples:
-  stackctl definition export 1
-  stackctl definition export 1 --output-file definition.json`,
+  stackctl definition export example-dev
+  stackctl definition export e9af3b10-4633-436b-a131-975a3b598e3e --output-file definition.json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := parseID(args[0])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
-		c, err := newClient()
+		id, err := resolveDefinitionID(c, args[0])
 		if err != nil {
 			return err
 		}
@@ -375,31 +380,32 @@ Examples:
 }
 
 var definitionUpdateChartCmd = &cobra.Command{
-	Use:   "update-chart <definition-id> <chart-id>",
+	Use:   "update-chart <definition> <chart>",
 	Short: "Update a chart config within a definition",
 	Long: `Update a chart configuration's settings within a stack definition.
+
+<definition> is a definition name or ID. <chart> is a chart name or ID of
+that definition ("stackctl definition get" shows the chart IDs).
 
 The command fetches the current chart config and merges your changes,
 so unspecified fields are preserved.
 
 Examples:
-  stackctl definition update-chart 1 5 --chart-version 0.3.0
-  stackctl definition update-chart 1 5 --chart-path /charts/app-core
-  stackctl definition update-chart 1 5 --deploy-order 6
-  stackctl definition update-chart 1 5 --source-repo-url https://dev.azure.com/org/project/_git/repo
-  stackctl definition update-chart 1 5 --repository-url oci://acr.example.com/helm
-  stackctl definition update-chart 1 5 --build-pipeline-id 42
-  stackctl definition update-chart 1 5 --file values.yaml`,
+  stackctl definition update-chart example-dev my-chart --chart-version 0.3.0
+  stackctl definition update-chart example-dev my-chart --chart-path /charts/app-core
+  stackctl definition update-chart example-dev my-chart --deploy-order 6
+  stackctl definition update-chart example-dev my-chart --source-repo-url https://dev.azure.com/org/project/_git/repo
+  stackctl definition update-chart example-dev my-chart --repository-url oci://acr.example.com/helm
+  stackctl definition update-chart example-dev my-chart --build-pipeline-id 42
+  stackctl definition update-chart e9af3b10-4633-436b-a131-975a3b598e3e 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --file values.yaml`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		defID, err := parseID(args[0])
-		if err != nil {
-			return fmt.Errorf("invalid definition ID: %w", err)
+		if _, err := parseID(args[0]); err != nil {
+			return fmt.Errorf("invalid definition: %w", err)
 		}
-		chartID, err := parseID(args[1])
-		if err != nil {
-			return fmt.Errorf("invalid chart ID: %w", err)
+		if _, err := parseID(args[1]); err != nil {
+			return fmt.Errorf("invalid chart: %w", err)
 		}
 
 		chartPath, _ := cmd.Flags().GetString("chart-path")
@@ -422,6 +428,15 @@ Examples:
 		}
 
 		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		defID, err := resolveDefinitionID(c, args[0])
+		if err != nil {
+			return err
+		}
+		chartID, err := resolveDefinitionChartID(c, defID, args[1])
 		if err != nil {
 			return err
 		}
@@ -553,13 +568,19 @@ func printDefinition(def *types.StackDefinition) error {
 			{Key: "Owner", Value: def.Owner},
 			{Key: "Default Branch", Value: def.DefaultBranch},
 		}
-		for _, ch := range def.Charts {
-			fields = append(fields, output.KeyValue{
-				Key:   "Chart",
-				Value: fmt.Sprintf("%s (%s@%s)", ch.ChartName, ch.RepoURL, ch.ChartVersion),
-			})
+		if err := printer.PrintSingle(def, fields); err != nil {
+			return err
 		}
-		return printer.PrintSingle(def, fields)
+		if len(def.Charts) == 0 || printer.Format != output.FormatTable {
+			return nil
+		}
+		fmt.Fprintln(printer.Writer)
+		headers := []string{"CHART ID", "CHART", "REPOSITORY", "VERSION", "ORDER"}
+		rows := make([][]string, len(def.Charts))
+		for i, ch := range def.Charts {
+			rows[i] = []string{ch.ID, ch.ChartName, ch.RepoURL, ch.ChartVersion, strconv.Itoa(ch.DeployOrder)}
+		}
+		return printer.PrintTable(headers, rows)
 	}
 }
 

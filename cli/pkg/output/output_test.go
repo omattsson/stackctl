@@ -3,7 +3,6 @@ package output
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -647,11 +646,14 @@ func TestInstanceStatus_WithPods_JSON(t *testing.T) {
 
 	status := types.InstanceStatus{
 		Status: "running",
-		Pods: []types.PodStatus{
-			{Name: "my-app-abc123", Status: "Running", Ready: true, Restarts: 0, Age: "2d"},
-			{Name: "my-db-def456", Status: "Running", Ready: true, Restarts: 3, Age: "5d"},
-			{Name: "my-worker-ghi789", Status: "CrashLoopBackOff", Ready: false, Restarts: 42, Age: "1h"},
-		},
+		Charts: []types.ChartStatus{{
+			ChartName: "my-app",
+			Status:    "healthy",
+			Pods: []types.PodStatus{
+				{Name: "my-app-abc123", Phase: "Running", Ready: true, RestartCount: 0},
+				{Name: "my-worker-ghi789", Phase: "Pending", Ready: false, RestartCount: 42},
+			},
+		}},
 	}
 
 	err := p.PrintJSON(status)
@@ -662,24 +664,26 @@ func TestInstanceStatus_WithPods_JSON(t *testing.T) {
 
 	assert.Equal(t, "running", result["status"])
 
-	pods, ok := result["pods"].([]interface{})
+	charts, ok := result["charts"].([]interface{})
 	require.True(t, ok)
-	require.Len(t, pods, 3)
+	require.Len(t, charts, 1)
+	chart0, ok := charts[0].(map[string]interface{})
+	require.True(t, ok)
+	pods, ok := chart0["pods"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, pods, 2)
 
 	pod0, ok := pods[0].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "my-app-abc123", pod0["name"])
-	assert.Equal(t, "Running", pod0["status"])
+	assert.Equal(t, "Running", pod0["phase"])
 	assert.Equal(t, true, pod0["ready"])
-	assert.Equal(t, float64(0), pod0["restarts"])
-	assert.Equal(t, "2d", pod0["age"])
+	assert.Equal(t, float64(0), pod0["restart_count"])
 
-	pod2, ok := pods[2].(map[string]interface{})
+	pod1, ok := pods[1].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "my-worker-ghi789", pod2["name"])
-	assert.Equal(t, "CrashLoopBackOff", pod2["status"])
-	assert.Equal(t, false, pod2["ready"])
-	assert.Equal(t, float64(42), pod2["restarts"])
+	assert.Equal(t, false, pod1["ready"])
+	assert.Equal(t, float64(42), pod1["restart_count"])
 }
 
 func TestInstanceStatus_WithPods_YAML(t *testing.T) {
@@ -690,10 +694,13 @@ func TestInstanceStatus_WithPods_YAML(t *testing.T) {
 
 	status := types.InstanceStatus{
 		Status: "running",
-		Pods: []types.PodStatus{
-			{Name: "my-app-abc123", Status: "Running", Ready: true, Restarts: 0, Age: "2d"},
-			{Name: "my-db-def456", Status: "Running", Ready: true, Restarts: 3, Age: "5d"},
-		},
+		Charts: []types.ChartStatus{{
+			ChartName: "my-app",
+			Pods: []types.PodStatus{
+				{Name: "my-app-abc123", Phase: "Running", Ready: true},
+				{Name: "my-db-def456", Phase: "Running", Ready: true, RestartCount: 3},
+			},
+		}},
 	}
 
 	err := p.PrintYAML(status)
@@ -703,45 +710,11 @@ func TestInstanceStatus_WithPods_YAML(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(buf.Bytes(), &result))
 
 	assert.Equal(t, "running", result.Status)
-	require.Len(t, result.Pods, 2)
-	assert.Equal(t, "my-app-abc123", result.Pods[0].Name)
-	assert.Equal(t, true, result.Pods[0].Ready)
-	assert.Equal(t, "Running", result.Pods[1].Status)
-	assert.Equal(t, 3, result.Pods[1].Restarts)
-}
-
-func TestInstanceStatus_WithPods_Table(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-	p := &Printer{Writer: &buf, Format: FormatTable, NoColor: true}
-
-	pods := []types.PodStatus{
-		{Name: "my-app-abc123", Status: "Running", Ready: true, Restarts: 0, Age: "2d"},
-		{Name: "my-worker-ghi789", Status: "CrashLoopBackOff", Ready: false, Restarts: 42, Age: "1h"},
-	}
-
-	headers := []string{"NAME", "STATUS", "READY", "RESTARTS", "AGE"}
-	rows := make([][]string, len(pods))
-	for i, pod := range pods {
-		ready := "false"
-		if pod.Ready {
-			ready = "true"
-		}
-		rows[i] = []string{pod.Name, p.StatusColor(pod.Status), ready, fmt.Sprintf("%d", pod.Restarts), pod.Age}
-	}
-
-	err := p.PrintTable(headers, rows)
-	require.NoError(t, err)
-
-	output := buf.String()
-	assert.Contains(t, output, "NAME")
-	assert.Contains(t, output, "RESTARTS")
-	assert.Contains(t, output, "my-app-abc123")
-	assert.Contains(t, output, "Running")
-	assert.Contains(t, output, "my-worker-ghi789")
-	assert.Contains(t, output, "CrashLoopBackOff")
-	assert.Contains(t, output, "42")
+	require.Len(t, result.Charts, 1)
+	require.Len(t, result.Charts[0].Pods, 2)
+	assert.Equal(t, "my-app-abc123", result.Charts[0].Pods[0].Name)
+	assert.Equal(t, "Running", result.Charts[0].Pods[1].Phase)
+	assert.Equal(t, int32(3), result.Charts[0].Pods[1].RestartCount)
 }
 
 func TestInstanceStatus_NoPods_JSON(t *testing.T) {
@@ -761,9 +734,9 @@ func TestInstanceStatus_NoPods_JSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 
 	assert.Equal(t, "stopped", result["status"])
-	// pods should be omitted when nil
-	_, hasPods := result["pods"]
-	assert.False(t, hasPods, "pods should be omitted when nil")
+	// ingresses should be omitted when nil
+	_, hasIngresses := result["ingresses"]
+	assert.False(t, hasIngresses, "ingresses should be omitted when nil")
 }
 
 func TestNilAndZeroValueHandling(t *testing.T) {
@@ -880,31 +853,30 @@ func TestNilAndZeroValueHandling(t *testing.T) {
 			},
 		},
 		{
-			name: "pod_status_zero_restarts_and_no_age",
+			name: "pod_status_zero_restarts_and_no_start_time",
 			data: types.PodStatus{
-				Name:     "test-pod",
-				Status:   "Running",
-				Ready:    true,
-				Restarts: 0,
-				Age:      "",
+				Name:         "test-pod",
+				Phase:        "Running",
+				Ready:        true,
+				RestartCount: 0,
 			},
 			json: func(t *testing.T, output string) {
 				var result map[string]interface{}
 				require.NoError(t, json.Unmarshal([]byte(output), &result))
 				assert.Equal(t, "test-pod", result["name"])
 				assert.Equal(t, true, result["ready"])
-				assert.Equal(t, float64(0), result["restarts"])
-				// Age="" with omitempty should be omitted
-				_, hasAge := result["age"]
-				assert.False(t, hasAge, "age should be omitted when empty")
+				assert.Equal(t, float64(0), result["restart_count"])
+				// nil start_time with omitempty should be omitted
+				_, hasStart := result["start_time"]
+				assert.False(t, hasStart, "start_time should be omitted when nil")
 			},
 			yaml: func(t *testing.T, output string) {
 				var result types.PodStatus
 				require.NoError(t, yaml.Unmarshal([]byte(output), &result))
 				assert.Equal(t, "test-pod", result.Name)
 				assert.Equal(t, true, result.Ready)
-				assert.Equal(t, 0, result.Restarts)
-				assert.Empty(t, result.Age)
+				assert.Equal(t, int32(0), result.RestartCount)
+				assert.Nil(t, result.StartTime)
 			},
 		},
 	}

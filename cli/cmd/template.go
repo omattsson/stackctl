@@ -53,7 +53,7 @@ Examples:
 		if cmd.Flags().Changed(flagPageSize) {
 			pageSize, _ := cmd.Flags().GetInt(flagPageSize)
 			if pageSize > 0 {
-				params["page_size"] = strconv.Itoa(pageSize)
+				params["pageSize"] = strconv.Itoa(pageSize)
 			}
 		}
 
@@ -103,8 +103,8 @@ var templateGetCmd = &cobra.Command{
 	Long: `Show detailed information about a stack template.
 
 Examples:
-  stackctl template get 1
-  stackctl template get 1 -o json`,
+  stackctl template get 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+  stackctl template get 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -133,8 +133,8 @@ var templateInstantiateCmd = &cobra.Command{
 	Long: `Create a new stack definition from a template.
 
 Examples:
-  stackctl template instantiate 1 --name my-stack
-  stackctl template instantiate 1 --name my-stack --branch feature/xyz --cluster 2`,
+  stackctl template instantiate 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack
+  stackctl template instantiate 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --branch feature/xyz --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -173,8 +173,8 @@ var templateQuickDeployCmd = &cobra.Command{
 	Long: `Create and deploy a stack instance from a template in one step.
 
 Examples:
-  stackctl template quick-deploy 1 --name my-stack
-  stackctl template quick-deploy 1 --name my-stack --branch feature/xyz --cluster 2`,
+  stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack
+  stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --branch feature/xyz --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -216,8 +216,8 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl template delete 1
-  stackctl template delete 1 --yes`,
+  stackctl template delete 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+  stackctl template delete 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --yes`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -292,9 +292,9 @@ var templateUpdateCmd = &cobra.Command{
 	Long: `Update an existing stack template from flags or a JSON file.
 
 Examples:
-  stackctl template update 1 --name new-name
-  stackctl template update 1 --description "Updated description"
-  stackctl template update 1 --from-file template.json`,
+  stackctl template update 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name new-name
+  stackctl template update 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --description "Updated description"
+  stackctl template update 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --from-file template.json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -355,8 +355,8 @@ var templateCloneCmd = &cobra.Command{
 	Long: `Clone an existing stack template with a new name.
 
 Examples:
-  stackctl template clone 1 --name my-clone
-  stackctl template clone 1 --name my-clone -o json`,
+  stackctl template clone 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-clone
+  stackctl template clone 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-clone -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -390,8 +390,8 @@ var templatePublishCmd = &cobra.Command{
 	Long: `Publish a stack template to make it available for use.
 
 Examples:
-  stackctl template publish 1
-  stackctl template publish 1 -o json`,
+  stackctl template publish 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+  stackctl template publish 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -420,8 +420,8 @@ var templateUnpublishCmd = &cobra.Command{
 	Long: `Unpublish a stack template to prevent new instantiations.
 
 Examples:
-  stackctl template unpublish 1
-  stackctl template unpublish 1 -o json`,
+  stackctl template unpublish 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+  stackctl template unpublish 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -456,8 +456,8 @@ var templateVersionsListCmd = &cobra.Command{
 	Long: `List all published versions of a stack template, newest first.
 
 Examples:
-  stackctl template versions list 1
-  stackctl template versions list 1 -o json`,
+  stackctl template versions list 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+  stackctl template versions list 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -515,8 +515,8 @@ var templateVersionsGetCmd = &cobra.Command{
 The <version-id> is the UUID shown in the ID column of 'template versions list'.
 
 Examples:
-  stackctl template versions get 1 $(stackctl template versions list 1 -q | head -1)
-  stackctl template versions get 1 <version-id> -o json`,
+  stackctl template versions get 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f $(stackctl template versions list 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f -q | head -1)
+  stackctl template versions get 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f <version-id> -o json`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -574,8 +574,8 @@ In table mode, shows a chart-level diff summary.
 In JSON or YAML mode, returns the full structured diff.
 
 Examples:
-  stackctl template versions diff 1 <left-version-id> <right-version-id>
-  stackctl template versions diff 1 <left-version-id> <right-version-id> -o json`,
+  stackctl template versions diff 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f <left-version-id> <right-version-id>
+  stackctl template versions diff 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f <left-version-id> <right-version-id> -o json`,
 	Args:         cobra.ExactArgs(3),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -701,11 +701,11 @@ The command reads the current chart config from the template and merges your
 changes, so unspecified fields are preserved (the API replaces the full record).
 
 Examples:
-  stackctl template update-chart 3 7 --chart-version 0.3.7
-  stackctl template update-chart 3 7 --file values.yaml
-  stackctl template update-chart 3 7 --locked-file locked.yaml
-  stackctl template update-chart 3 7 --build-pipeline-id 42 --source-repo-url https://dev.azure.com/org/project/_git/repo
-  stackctl template update-chart 3 7 --required=false`,
+  stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --chart-version 0.3.7
+  stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --file values.yaml
+  stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --locked-file locked.yaml
+  stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --build-pipeline-id 42 --source-repo-url https://dev.azure.com/org/project/_git/repo
+  stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --required=false`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {

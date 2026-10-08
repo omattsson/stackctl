@@ -187,9 +187,12 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(types.InstanceStatus{
 					Status: inst.Status,
-					Pods: []types.PodStatus{
-						{Name: inst.Name + "-pod-1", Status: "Running", Ready: true, Restarts: 0, Age: "5m"},
-					},
+					Charts: []types.ChartStatus{{
+						ChartName: "app",
+						Pods: []types.PodStatus{
+							{Name: inst.Name + "-pod-1", Phase: "Running", Ready: true},
+						},
+					}},
 				})
 
 			// Logs
@@ -312,7 +315,8 @@ func TestStackWorkflow_CreateDeployStatusLogsStopCleanDelete(t *testing.T) {
 	status, err := c.GetStackStatus(id)
 	require.NoError(t, err)
 	assert.Equal(t, "deploying", status.Status)
-	assert.Len(t, status.Pods, 1)
+	require.Len(t, status.Charts, 1)
+	assert.Len(t, status.Charts[0].Pods, 1)
 
 	// 5. Logs
 	log, err := c.GetStackLogs(id)
@@ -540,7 +544,7 @@ func TestStackWorkflow_PaginationParams(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "2", r.URL.Query().Get("page"))
-		assert.Equal(t, "10", r.URL.Query().Get("page_size"))
+		assert.Equal(t, "10", r.URL.Query().Get("pageSize"))
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ListResponse[types.StackInstance]{
 			Data:       nil,
@@ -554,8 +558,8 @@ func TestStackWorkflow_PaginationParams(t *testing.T) {
 
 	c := client.New(server.URL)
 	resp, err := c.ListStacks(map[string]string{
-		"page":      strconv.Itoa(2),
-		"page_size": strconv.Itoa(10),
+		"page":     strconv.Itoa(2),
+		"pageSize": strconv.Itoa(10),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 25, resp.Total)

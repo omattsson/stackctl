@@ -111,8 +111,8 @@ re-adding the same (entity_type, entity_id) returns the existing row
 without a duplicate-key error, so this command is safe to script.
 
 Examples:
-  stackctl favorite add --type definition --id 42
-  stackctl favorite add --type template --id 9 -o json`,
+  stackctl favorite add --type definition --id e9af3b10-4633-436b-a131-975a3b598e3e
+  stackctl favorite add --type template --id 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateFavoriteType(favoriteAddType); err != nil {
@@ -159,7 +159,7 @@ idempotent — removing a non-existent favorite returns 204 No Content
 rather than 404, so this command is safe to script.
 
 Examples:
-  stackctl favorite remove --type definition --id 42`,
+  stackctl favorite remove --type definition --id e9af3b10-4633-436b-a131-975a3b598e3e`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateFavoriteType(favoriteRemoveType); err != nil {

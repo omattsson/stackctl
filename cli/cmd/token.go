@@ -1,89 +1,87 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
-	"runtime"
 	"time"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/config"
 )
 
-// storedToken represents a JWT token stored on disk.
-type storedToken struct {
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Username  string    `json:"username,omitempty"`
+// storedToken represents a JWT token stored on disk (tokens/<context>.json).
+type storedToken = config.StoredToken
+
+// tokenStore returns the token store of the current context, or nil when no
+// context is set.
+func tokenStore() *config.TokenStore {
+	if cfg == nil || cfg.CurrentContext == "" {
+		return nil
+	}
+	store := config.NewTokenStore(cfg.CurrentContext)
+	if ctx := cfg.CurrentCtx(); ctx != nil {
+		// Files from older versions have no api_url: they belong to the
+		// URL of the context.
+		store.DefaultAPIURL = ctx.APIURL
+	}
+	return store
 }
 
-// saveToken writes a JWT token to disk for the current context.
+// saveToken writes a JWT token without a refresh token (SSO login) to disk
+// for the current context.
 func saveToken(token, username string, expiresAt time.Time) error {
-	if cfg.CurrentContext == "" {
+	return saveSession(token, "", username, expiresAt)
+}
+
+// saveSession writes a login session to disk for the current context. It
+// holds the token lock, so a renewal of the previous session in another
+// process cannot overwrite the new login.
+func saveSession(token, refreshToken, username string, expiresAt time.Time) error {
+	store := tokenStore()
+	if store == nil {
 		return fmt.Errorf("no current context set")
 	}
-
-	path, err := config.TokenPath(cfg.CurrentContext)
+	unlock, err := store.Lock()
 	if err != nil {
 		return err
 	}
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("creating token directory: %w", err)
-	}
-	// Enforce 0700 even if directory already existed with broader permissions.
-	// On Windows, Chmod is best-effort since POSIX permissions don't apply.
-	if err := os.Chmod(dir, 0700); err != nil && runtime.GOOS != "windows" {
-		return fmt.Errorf("setting token directory permissions: %w", err)
-	}
-
-	data, err := json.Marshal(storedToken{
-		Token:     token,
-		ExpiresAt: expiresAt,
-		Username:  username,
+	defer unlock()
+	return store.Save(&storedToken{
+		Token:        token,
+		ExpiresAt:    expiresAt,
+		Username:     username,
+		RefreshToken: refreshToken,
+		APIURL:       resolveAPIURL(),
 	})
-	if err != nil {
-		return fmt.Errorf("marshaling token: %w", err)
-	}
-
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("writing token file: %w", err)
-	}
-	// Enforce 0600 even if file already existed with broader permissions.
-	// On Windows, Chmod is best-effort since POSIX permissions don't apply.
-	if err := os.Chmod(path, 0600); err != nil && runtime.GOOS != "windows" {
-		return fmt.Errorf("setting token file permissions: %w", err)
-	}
-	return nil
 }
 
 // loadToken reads the JWT token for the current context.
 // Returns the token, an optional expiry warning, and any error.
 // Returns empty strings and nil error if no token exists.
+//
+// A username/password login stores a refresh token. The client renews its
+// access token automatically, so an expired access token is not an error
+// and gives no warning. The session itself ends 12 hours after the login,
+// or after 30 minutes without use (server defaults); then the user must run
+// 'stackctl login' again.
+//
+// An SSO login has no refresh token. Its token is not renewed.
 func loadToken() (token string, warning string, err error) {
-	if cfg.CurrentContext == "" {
+	store := tokenStore()
+	if store == nil {
 		return "", "", nil
 	}
 
-	path, err := config.TokenPath(cfg.CurrentContext)
+	t, err := store.Load()
 	if err != nil {
 		return "", "", err
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", "", nil
-		}
-		return "", "", fmt.Errorf("reading token file: %w", err)
+	if t == nil {
+		return "", "", nil
 	}
-
-	var t storedToken
-	if err := json.Unmarshal(data, &t); err != nil {
-		return "", "", fmt.Errorf("parsing token file: %w", err)
+	if t.RefreshToken != "" {
+		return t.Token, "", nil
 	}
 
 	if !t.ExpiresAt.IsZero() {
@@ -100,7 +98,8 @@ func loadToken() (token string, warning string, err error) {
 			if mins == 1 {
 				unit = "minute"
 			}
-			warning = fmt.Sprintf("Warning: token expires in %d %s. Run 'stackctl login' to refresh.", mins, unit)
+			warning = fmt.Sprintf("Warning: token expires in %d %s and cannot be renewed (SSO login or old token file). Run 'stackctl login' to get a new token.\n"+
+				"A username/password login renews automatically until the session ends (12 hours after login, or 30 minutes idle).", mins, unit)
 		}
 	}
 
@@ -109,18 +108,35 @@ func loadToken() (token string, warning string, err error) {
 
 // deleteToken removes the token file for the current context.
 func deleteToken() error {
-	if cfg.CurrentContext == "" {
+	store := tokenStore()
+	if store == nil {
 		return nil
 	}
+	return store.Delete()
+}
 
-	path, err := config.TokenPath(cfg.CurrentContext)
+// freshSessionToken returns the stored session token of the current context,
+// renewed first when it expires soon. It returns "" when there is no usable
+// token. Used to hand a valid STACKCTL_TOKEN to a plugin.
+func freshSessionToken() string {
+	token, _, err := loadToken()
+	if err != nil || token == "" {
+		return ""
+	}
+	apiURL := resolveAPIURL()
+	if apiURL == "" {
+		return token
+	}
+	c := client.New(apiURL)
+	applyInsecureTLS(c)
+	c.Token = token
+	c.Tokens = tokenStore()
+	fresh, err := c.EnsureFreshToken()
 	if err != nil {
-		return err
+		if !flagQuiet {
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		}
+		return ""
 	}
-
-	err = os.Remove(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("removing token file: %w", err)
-	}
-	return nil
+	return fresh
 }

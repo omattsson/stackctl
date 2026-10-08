@@ -27,10 +27,10 @@ var bulkDeployCmd = &cobra.Command{
 Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
-  stackctl bulk deploy --ids 1,2,3
+  stackctl bulk deploy --ids my-stack,other-stack
   stackctl bulk deploy my-stack other-stack
-  stackctl bulk deploy --ids my-stack,2 3
-  stackctl bulk deploy --ids 1,2,3 -o json`,
+  stackctl bulk deploy --ids my-stack,6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d 7b2e3d4c-5f6a-4b7c-9d8e-0f1a2b3c4d5e
+  stackctl bulk deploy --ids my-stack,other-stack -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would deploy %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
@@ -64,10 +64,10 @@ var bulkStopCmd = &cobra.Command{
 Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
-  stackctl bulk stop --ids 1,2,3
+  stackctl bulk stop --ids my-stack,other-stack
   stackctl bulk stop my-stack other-stack
-  stackctl bulk stop --ids my-stack,2 3
-  stackctl bulk stop --ids 1,2,3 -o json`,
+  stackctl bulk stop --ids my-stack,6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d 7b2e3d4c-5f6a-4b7c-9d8e-0f1a2b3c4d5e
+  stackctl bulk stop --ids my-stack,other-stack -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would stop %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
@@ -104,9 +104,9 @@ unless --yes is specified.
 Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
-  stackctl bulk clean --ids 1,2,3
+  stackctl bulk clean --ids my-stack,other-stack
   stackctl bulk clean my-stack other-stack
-  stackctl bulk clean --ids 1,2,3 --yes`,
+  stackctl bulk clean --ids my-stack,other-stack --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would clean %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
@@ -152,9 +152,9 @@ unless --yes is specified.
 Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
-  stackctl bulk delete --ids 1,2,3
+  stackctl bulk delete --ids my-stack,other-stack
   stackctl bulk delete my-stack other-stack
-  stackctl bulk delete --ids 1,2,3 --yes`,
+  stackctl bulk delete --ids my-stack,other-stack --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would delete %d stacks: %s", len(raw), strings.Join(raw, ", ")) {
@@ -203,9 +203,9 @@ var bulkTemplatePublishCmd = &cobra.Command{
 Templates can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
-  stackctl bulk template publish --ids 1,2,3
+  stackctl bulk template publish --ids my-template,other-template
   stackctl bulk template publish my-template other-template
-  stackctl bulk template publish --ids my-template,2 3`,
+  stackctl bulk template publish --ids my-template,8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 9f0a1b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would publish %d templates: %s", len(raw), strings.Join(raw, ", ")) {
@@ -239,7 +239,7 @@ var bulkTemplateUnpublishCmd = &cobra.Command{
 Templates can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
-  stackctl bulk template unpublish --ids 1,2,3
+  stackctl bulk template unpublish --ids my-template,other-template
   stackctl bulk template unpublish my-template other-template`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -277,9 +277,9 @@ unless --yes is specified.
 Templates can be specified by name or ID via --ids flag, positional arguments, or both.
 
 Examples:
-  stackctl bulk template delete --ids 1,2,3
+  stackctl bulk template delete --ids my-template,other-template
   stackctl bulk template delete my-template other-template
-  stackctl bulk template delete --ids 1,2,3 --yes`,
+  stackctl bulk template delete --ids my-template,other-template --yes`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if raw := rawBulkArgs(cmd, args); isDryRun(cmd, "Would delete %d templates: %s", len(raw), strings.Join(raw, ", ")) {

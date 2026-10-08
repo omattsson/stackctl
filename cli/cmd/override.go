@@ -1,12 +1,15 @@
 package cmd
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
@@ -57,7 +60,7 @@ Examples:
 
 		if printer.Quiet {
 			for _, o := range overrides {
-				fmt.Fprintln(printer.Writer, o.ChartID)
+				fmt.Fprintln(printer.Writer, o.ChartConfigID)
 			}
 			return nil
 		}
@@ -72,12 +75,12 @@ Examples:
 			rows := make([][]string, len(overrides))
 			for i, o := range overrides {
 				hasValues := "false"
-				if o.Values != "" {
+				if strings.TrimSpace(o.Values) != "" {
 					hasValues = "true"
 				}
 				rows[i] = []string{
-					o.ChartID,
-					o.InstanceID,
+					o.ChartConfigID,
+					o.StackInstanceID,
 					hasValues,
 					o.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 				}
@@ -87,36 +90,111 @@ Examples:
 	},
 }
 
-var overrideSetCmd = &cobra.Command{
-	Use:   "set <name|id> <chart-id>",
-	Short: "Set value overrides for a chart",
-	Long: `Set value overrides for a specific chart in a stack instance.
+var overrideGetCmd = &cobra.Command{
+	Use:   "get <name|id> <chart>",
+	Short: "Show the value override of a chart",
+	Long: `Show the value override of one chart in a stack instance.
 
-Provide values via --file (JSON or YAML file) or --set key=value (repeatable).
-At least one of --file or --set is required.
+<chart> is a chart name or a chart ID of the stack's definition.
 
 Examples:
-  stackctl override set my-stack 1 --file values.json
-  stackctl override set my-stack 1 --file values.yaml
-  stackctl override set my-stack 1 --set replicas=3 --set image.tag=v2
-  stackctl override set my-stack 1 --file values.json --set replicas=5`,
+  stackctl override get my-stack my-chart
+  stackctl override get my-stack 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b -o json`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		chartID, err := parseID(args[1])
+		c, err := newClient()
 		if err != nil {
 			return err
 		}
 
+		instanceID, err := resolveStackID(c, args[0])
+		if err != nil {
+			return err
+		}
+		chartID, err := resolveChartID(c, instanceID, args[1])
+		if err != nil {
+			return err
+		}
+
+		override, err := c.GetValueOverride(instanceID, chartID)
+		if err != nil {
+			return overrideError(err, "value", args[1], args[0])
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, override.ChartConfigID)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(override)
+		case output.FormatYAML:
+			return printer.PrintYAML(override)
+		default:
+			fields := []output.KeyValue{
+				{Key: "Chart ID", Value: override.ChartConfigID},
+				{Key: "Instance ID", Value: override.StackInstanceID},
+				{Key: "Updated At", Value: override.UpdatedAt.Format(time.RFC3339)},
+			}
+			if err := printer.PrintSingle(override, fields); err != nil {
+				return err
+			}
+			printer.PrintMessage("Values:")
+			return writeYAMLDoc([]byte(override.Values))
+		}
+	},
+}
+
+var overrideSetCmd = &cobra.Command{
+	Use:   "set <name|id> <chart>",
+	Short: "Set value overrides for a chart",
+	Long: `Set the value override of one chart in a stack instance.
+
+<chart> is a chart name or a chart ID of the stack's definition.
+
+--set key=value (repeatable) changes one key and keeps the other keys of
+the current override, like helm --set. Use dots for nested keys
+(image.tag=v2); escape a dot in a key with a backslash
+(podAnnotations.prometheus\.io/scrape=true). Values are parsed like helm
+--set: true/false/null (any case) become booleans and null, integers that
+do not start with "0" become numbers ("+1" and "-01" too), and everything
+else ("1.10", "0123", "1e3") stays a string.
+
+Differences from helm --set: one key per --set (no a=1,b=2; a comma is
+part of the value), no {a,b} list syntax, and no list indexes (a[0]=x).
+Use --file for lists.
+
+--file (JSON or YAML) replaces the whole override with the file content.
+--set keys given together with --file apply on top of the file.
+
+--replace starts from an empty override: the override becomes exactly the
+--set keys (and the --file content, if given).
+
+The command prints the keys that change. Key order and comments of the
+current override are not kept. An empty result (for example an empty
+--file) removes the override; the command asks for confirmation first
+unless --yes is given. To remove single keys, use "stackctl override unset".
+
+Examples:
+  stackctl override set my-stack my-chart --set replicas=3 --set image.tag=v2
+  stackctl override set my-stack 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --set replicas=3
+  stackctl override set my-stack my-chart --file values.yaml
+  stackctl override set my-stack my-chart --file values.json --set replicas=5
+  stackctl override set my-stack my-chart --replace --set replicas=1`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		file, _ := cmd.Flags().GetString("file")
-		setFlags, _ := cmd.Flags().GetStringSlice("set")
+		setFlags, _ := cmd.Flags().GetStringArray("set")
+		replace, _ := cmd.Flags().GetBool("replace")
 
 		if file == "" && len(setFlags) == 0 {
 			return fmt.Errorf("at least one of --file or --set is required")
 		}
 
-		values := map[string]interface{}{}
-
+		var fileValues map[string]interface{}
 		if file != "" {
 			for _, segment := range strings.Split(filepath.ToSlash(file), "/") {
 				if segment == ".." {
@@ -128,19 +206,15 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", file, err)
 			}
-			if err := json.Unmarshal(data, &values); err != nil {
-				if yamlErr := yaml.Unmarshal(data, &values); yamlErr != nil {
-					return fmt.Errorf("invalid JSON/YAML in file %s (json: %v): %w", file, err, yamlErr)
-				}
+			fileValues, err = parseValuesDocument(data)
+			if err != nil {
+				return fmt.Errorf("invalid JSON/YAML in file %s: %w", file, err)
 			}
 		}
 
-		for _, kv := range setFlags {
-			parts := strings.SplitN(kv, "=", 2)
-			if len(parts) != 2 {
-				return fmt.Errorf("invalid --set format %q: expected key=value", kv)
-			}
-			setNestedValue(values, parts[0], parseScalarValue(parts[1]))
+		sets, err := parseSetFlags(setFlags)
+		if err != nil {
+			return err
 		}
 
 		c, err := newClient()
@@ -152,47 +226,297 @@ Examples:
 		if err != nil {
 			return err
 		}
-
-		yamlBytes, err := yaml.Marshal(values)
-		if err != nil {
-			return fmt.Errorf("serializing values to YAML: %w", err)
-		}
-
-		override, err := c.SetValueOverride(instanceID, chartID, &types.SetValueOverrideRequest{
-			Values: string(yamlBytes),
-		})
+		chartID, err := resolveChartID(c, instanceID, args[1])
 		if err != nil {
 			return err
 		}
 
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, override.ChartID)
-			return nil
+		existing, current, err := currentOverrideValues(c, instanceID, chartID, args[1], args[0])
+		if err != nil {
+			return err
 		}
 
-		switch printer.Format {
-		case output.FormatJSON:
-			return printer.PrintJSON(override)
-		case output.FormatYAML:
-			return printer.PrintYAML(override)
+		var values map[string]interface{}
+		switch {
+		case fileValues != nil:
+			values = fileValues
+		case replace:
+			values = map[string]interface{}{}
 		default:
-			printer.PrintMessage("Set value override for chart %s on instance %s", chartID, instanceID)
-			return nil
+			values = deepCopyMap(current)
 		}
+		for _, kv := range sets {
+			setNestedPath(values, kv.path, kv.value)
+		}
+
+		if len(values) == 0 && existing != nil {
+			confirmed, err := confirmAction(cmd, fmt.Sprintf("The new values are empty. This will remove the value override of chart %s on instance %s. Continue? (y/n): ", args[1], instanceID))
+			if err != nil {
+				return err
+			}
+			if !confirmed {
+				printer.PrintMessage(msgAborted)
+				return nil
+			}
+		}
+
+		return writeValueOverride(c, instanceID, chartID, args[1], existing, current, values)
 	},
 }
 
+var overrideUnsetCmd = &cobra.Command{
+	Use:   "unset <name|id> <chart> <key>...",
+	Short: "Remove keys from the value override of a chart",
+	Long: `Remove one or more keys from the value override of one chart.
+
+<chart> is a chart name or a chart ID of the stack's definition. Use dots
+for nested keys (image.tag) and a backslash to escape a dot in a key
+(podAnnotations.prometheus\.io/scrape). The other keys stay. When no key
+is left, the override is removed.
+
+Examples:
+  stackctl override unset my-stack my-chart replicas
+  stackctl override unset my-stack my-chart image.tag resources.limits.memory`,
+	Args:         cobra.MinimumNArgs(3),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		instanceID, err := resolveStackID(c, args[0])
+		if err != nil {
+			return err
+		}
+		chartID, err := resolveChartID(c, instanceID, args[1])
+		if err != nil {
+			return err
+		}
+
+		override, err := c.GetValueOverride(instanceID, chartID)
+		if err != nil {
+			return overrideError(err, "value", args[1], args[0])
+		}
+		current, err := parseOverrideValues(override.Values)
+		if err != nil {
+			return err
+		}
+
+		paths := make([][]string, len(args)-2)
+		for i, key := range args[2:] {
+			if paths[i], err = splitKeyPath(key); err != nil {
+				return err
+			}
+		}
+
+		values := deepCopyMap(current)
+		for i, key := range args[2:] {
+			if !unsetNestedPath(values, paths[i]) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: key %q is not set in the override\n", key)
+			}
+		}
+
+		return writeValueOverride(c, instanceID, chartID, args[1], override, current, values)
+	},
+}
+
+// currentOverrideValues returns the value override of a chart and its
+// parsed values. Without an override it returns nil and an empty map.
+func currentOverrideValues(c *client.Client, instanceID, chartID, chartArg, stackArg string) (*types.ValueOverride, map[string]interface{}, error) {
+	override, err := c.GetValueOverride(instanceID, chartID)
+	if err != nil {
+		if isAPINotFound(err, "override not found") {
+			return nil, map[string]interface{}{}, nil
+		}
+		return nil, nil, overrideError(err, "value", chartArg, stackArg)
+	}
+	values, err := parseOverrideValues(override.Values)
+	return override, values, err
+}
+
+// parseOverrideValues parses the YAML of a value override into a map.
+func parseOverrideValues(raw string) (map[string]interface{}, error) {
+	values, err := parseValuesDocument([]byte(raw))
+	if err != nil {
+		return nil, fmt.Errorf("the current override is not a YAML mapping (use --replace or --file): %w", err)
+	}
+	return values, nil
+}
+
+// writeValueOverride prints the keys that change from old to values and
+// writes values as the override of the chart. It skips the API call when
+// nothing changes. An empty map removes the override. existing is the
+// current override (nil if none); -o json/yaml print it when nothing changes.
+func writeValueOverride(c *client.Client, instanceID, chartID, chartArg string, existing *types.ValueOverride, old, values map[string]interface{}) error {
+	changes := diffValueKeys(old, values)
+
+	if len(changes) == 0 {
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, chartID)
+			return nil
+		}
+		if printer.Format == output.FormatTable {
+			printer.PrintMessage("No changes to the value override of chart %s on instance %s", chartArg, instanceID)
+			return nil
+		}
+	}
+
+	var req types.SetValueOverrideRequest
+	if len(values) > 0 {
+		yamlBytes, err := yaml.Marshal(values)
+		if err != nil {
+			return fmt.Errorf("serializing values to YAML: %w", err)
+		}
+		req.Values = string(yamlBytes)
+	}
+
+	override := &types.ValueOverride{StackInstanceID: instanceID, ChartConfigID: chartID, Values: req.Values}
+	if len(changes) == 0 && existing != nil {
+		override = existing
+	}
+	if len(changes) > 0 {
+		saved, err := c.SetValueOverride(instanceID, chartID, &req)
+		if err != nil {
+			return overrideError(err, "value", chartArg, instanceID)
+		}
+		if saved != nil && saved.ID != "" {
+			override = saved
+		}
+	}
+
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, chartID)
+		return nil
+	}
+
+	switch printer.Format {
+	case output.FormatJSON:
+		return printer.PrintJSON(override)
+	case output.FormatYAML:
+		return printer.PrintYAML(override)
+	default:
+		if len(values) == 0 {
+			printer.PrintMessage("Removed the value override of chart %s on instance %s (no keys left)", chartArg, instanceID)
+		} else {
+			printer.PrintMessage("Set value override for chart %s on instance %s", chartArg, instanceID)
+		}
+		for _, ch := range changes {
+			printer.PrintMessage("  %s", ch)
+		}
+		return nil
+	}
+}
+
+// diffValueKeys returns one line per leaf key that is added, changed or
+// removed between old and new, sorted by key. Only key names are shown,
+// not values (values can be secrets).
+func diffValueKeys(oldValues, newValues map[string]interface{}) []string {
+	oldFlat := map[string]interface{}{}
+	newFlat := map[string]interface{}{}
+	flattenValues(oldValues, "", oldFlat)
+	flattenValues(newValues, "", newFlat)
+
+	keys := make([]string, 0, len(oldFlat)+len(newFlat))
+	seen := map[string]bool{}
+	for k := range oldFlat {
+		keys = append(keys, k)
+		seen[k] = true
+	}
+	for k := range newFlat {
+		if !seen[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+
+	var lines []string
+	for _, k := range keys {
+		ov, inOld := oldFlat[k]
+		nv, inNew := newFlat[k]
+		switch {
+		case inOld && !inNew:
+			lines = append(lines, "- "+k+" (removed)")
+		case !inOld && inNew:
+			lines = append(lines, "+ "+k+" (added)")
+		case !sameYAMLValue(ov, nv):
+			lines = append(lines, "~ "+k+" (changed)")
+		}
+	}
+	return lines
+}
+
+// flattenValues maps every leaf of a nested map to its dot path. Lists and
+// empty maps are leaves.
+func flattenValues(m map[string]interface{}, prefix string, out map[string]interface{}) {
+	for k, v := range m {
+		key := strings.ReplaceAll(k, ".", `\.`)
+		if prefix != "" {
+			key = prefix + "." + key
+		}
+		if sub, ok := v.(map[string]interface{}); ok && len(sub) > 0 {
+			flattenValues(sub, key, out)
+			continue
+		}
+		out[key] = v
+	}
+}
+
+// sameYAMLValue compares two values by their YAML form, so int and int64
+// (YAML decode vs. --set parse) compare equal.
+func sameYAMLValue(a, b interface{}) bool {
+	ya, errA := yaml.Marshal(a)
+	yb, errB := yaml.Marshal(b)
+	return errA == nil && errB == nil && string(ya) == string(yb)
+}
+
+// deepCopyMap copies a nested map so the original stays unchanged.
+func deepCopyMap(m map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if sub, ok := v.(map[string]interface{}); ok {
+			out[k] = deepCopyMap(sub)
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// isAPINotFound reports whether err is an API 404 whose server message
+// contains substr (case-insensitive).
+func isAPINotFound(err error, substr string) bool {
+	var apiErr *client.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound &&
+		strings.Contains(strings.ToLower(apiErr.Message), strings.ToLower(substr))
+}
+
+// overrideError turns the 404 responses of the per-chart override routes
+// into clear messages: an unknown chart, or a chart without an override.
+func overrideError(err error, kind, chart, stack string) error {
+	switch {
+	case isAPINotFound(err, "chart not found"):
+		return fmt.Errorf("chart %s is not part of the definition of stack %s", chart, stack)
+	case isAPINotFound(err, "override not found"):
+		return fmt.Errorf("chart %s on stack %s has no %s override", chart, stack, kind)
+	default:
+		return err
+	}
+}
+
 var overrideDeleteCmd = &cobra.Command{
-	Use:   "delete <name|id> <chart-id>",
+	Use:   "delete <name|id> <chart>",
 	Short: "Delete a value override",
-	Long: `Delete a value override for a specific chart in a stack instance.
+	Long: `Delete the value override of one chart in a stack instance.
+
+<chart> is a chart name or a chart ID of the stack's definition.
 
 This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl override delete my-stack 1
-  stackctl override delete my-stack 1 --yes`,
+  stackctl override delete my-stack my-chart
+  stackctl override delete my-stack 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --yes`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -238,7 +562,7 @@ Examples:
 
 		if printer.Quiet {
 			for _, o := range overrides {
-				fmt.Fprintln(printer.Writer, o.ChartID)
+				fmt.Fprintln(printer.Writer, o.ChartConfigID)
 			}
 			return nil
 		}
@@ -253,8 +577,8 @@ Examples:
 			rows := make([][]string, len(overrides))
 			for i, o := range overrides {
 				rows[i] = []string{
-					o.ChartID,
-					o.InstanceID,
+					o.ChartConfigID,
+					o.StackInstanceID,
 					o.Branch,
 					o.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 				}
@@ -265,20 +589,18 @@ Examples:
 }
 
 var overrideBranchSetCmd = &cobra.Command{
-	Use:   "set <name|id> <chart-id> <branch>",
+	Use:   "set <name|id> <chart> <branch>",
 	Short: "Set a branch override for a chart",
-	Long: `Set a branch override for a specific chart in a stack instance.
+	Long: `Set a branch override for one chart in a stack instance.
+
+<chart> is a chart name or a chart ID of the stack's definition.
 
 Examples:
-  stackctl override branch set my-stack 1 feature/my-branch
-  stackctl override branch set my-stack 1 main -o json`,
+  stackctl override branch set my-stack my-chart feature/my-branch
+  stackctl override branch set my-stack 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b main -o json`,
 	Args:         cobra.ExactArgs(3),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		chartID, err := parseID(args[1])
-		if err != nil {
-			return err
-		}
 		branch := args[2]
 
 		c, err := newClient()
@@ -290,16 +612,20 @@ Examples:
 		if err != nil {
 			return err
 		}
+		chartID, err := resolveChartID(c, instanceID, args[1])
+		if err != nil {
+			return err
+		}
 
 		override, err := c.SetBranchOverride(instanceID, chartID, &types.SetBranchOverrideRequest{
 			Branch: branch,
 		})
 		if err != nil {
-			return err
+			return overrideError(err, "branch", args[1], args[0])
 		}
 
 		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, override.ChartID)
+			fmt.Fprintln(printer.Writer, override.ChartConfigID)
 			return nil
 		}
 
@@ -316,16 +642,18 @@ Examples:
 }
 
 var overrideBranchDeleteCmd = &cobra.Command{
-	Use:   "delete <name|id> <chart-id>",
+	Use:   "delete <name|id> <chart>",
 	Short: "Delete a branch override",
-	Long: `Delete a branch override for a specific chart in a stack instance.
+	Long: `Delete the branch override of one chart in a stack instance.
+
+<chart> is a chart name or a chart ID of the stack's definition.
 
 This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl override branch delete my-stack 1
-  stackctl override branch delete my-stack 1 --yes`,
+  stackctl override branch delete my-stack my-chart
+  stackctl override branch delete my-stack 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --yes`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -381,11 +709,13 @@ Examples:
 			return printer.PrintYAML(quota)
 		default:
 			fields := []output.KeyValue{
-				{Key: "Instance ID", Value: quota.InstanceID},
+				{Key: "Instance ID", Value: quota.StackInstanceID},
 				{Key: "CPU Request", Value: quota.CPURequest},
 				{Key: "CPU Limit", Value: quota.CPULimit},
 				{Key: "Memory Request", Value: quota.MemRequest},
 				{Key: "Memory Limit", Value: quota.MemLimit},
+				{Key: "Storage Limit", Value: quota.StorageLimit},
+				{Key: "Pod Limit", Value: formatOptionalInt(quota.PodLimit)},
 			}
 			return printer.PrintSingle(quota, fields)
 		}
@@ -395,14 +725,15 @@ Examples:
 var overrideQuotaSetCmd = &cobra.Command{
 	Use:   "set <name|id>",
 	Short: "Set quota override for a stack instance",
-	Long: `Set resource quota overrides for a stack instance.
+	Long: `Set the resource quota override for a stack instance.
 
-At least one of the quota flags must be specified.
+At least one of the quota flags must be specified. The API replaces the
+whole quota override: a field without a flag is cleared.
 
 Examples:
   stackctl override quota set my-stack --cpu-request 100m --cpu-limit 500m
   stackctl override quota set my-stack --memory-request 128Mi --memory-limit 512Mi
-  stackctl override quota set my-stack --cpu-request 200m --memory-limit 1Gi`,
+  stackctl override quota set my-stack --storage-limit 10Gi --pod-limit 20`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -410,9 +741,18 @@ Examples:
 		cpuLim, _ := cmd.Flags().GetString("cpu-limit")
 		memReq, _ := cmd.Flags().GetString("memory-request")
 		memLim, _ := cmd.Flags().GetString("memory-limit")
+		storageLim, _ := cmd.Flags().GetString("storage-limit")
+		var podLimit *int
+		if cmd.Flags().Changed("pod-limit") {
+			v, _ := cmd.Flags().GetInt("pod-limit")
+			if v < 0 {
+				return fmt.Errorf("--pod-limit must not be negative")
+			}
+			podLimit = &v
+		}
 
-		if cpuReq == "" && cpuLim == "" && memReq == "" && memLim == "" {
-			return fmt.Errorf("at least one of --cpu-request, --cpu-limit, --memory-request, or --memory-limit is required")
+		if cpuReq == "" && cpuLim == "" && memReq == "" && memLim == "" && storageLim == "" && podLimit == nil {
+			return fmt.Errorf("at least one of --cpu-request, --cpu-limit, --memory-request, --memory-limit, --storage-limit, or --pod-limit is required")
 		}
 
 		c, err := newClient()
@@ -426,10 +766,12 @@ Examples:
 		}
 
 		quota, err := c.SetQuotaOverride(instanceID, &types.SetQuotaOverrideRequest{
-			CPURequest: cpuReq,
-			CPULimit:   cpuLim,
-			MemRequest: memReq,
-			MemLimit:   memLim,
+			CPURequest:   cpuReq,
+			CPULimit:     cpuLim,
+			MemRequest:   memReq,
+			MemLimit:     memLim,
+			StorageLimit: storageLim,
+			PodLimit:     podLimit,
 		})
 		if err != nil {
 			return err
@@ -508,11 +850,6 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 		return nil
 	}
 
-	chartID, err := parseID(args[1])
-	if err != nil {
-		return err
-	}
-
 	c, err := newClient()
 	if err != nil {
 		return err
@@ -522,8 +859,12 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 	if err != nil {
 		return err
 	}
+	chartID, err := resolveChartID(c, instanceID, args[1])
+	if err != nil {
+		return err
+	}
 
-	confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the %s override for chart %s on instance %s. Continue? (y/n): ", kind, chartID, instanceID))
+	confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the %s override for chart %s on instance %s. Continue? (y/n): ", kind, args[1], instanceID))
 	if err != nil {
 		return err
 	}
@@ -533,7 +874,7 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 	}
 
 	if err := deleteFn(c, instanceID, chartID); err != nil {
-		return err
+		return overrideError(err, kind, args[1], args[0])
 	}
 
 	if printer.Quiet {
@@ -541,56 +882,24 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 		return nil
 	}
 
-	printer.PrintMessage("Deleted %s override for chart %s on instance %s", kind, chartID, instanceID)
+	printer.PrintMessage("Deleted %s override for chart %s on instance %s", kind, args[1], instanceID)
 	return nil
 }
 
-// parseScalarValue converts a string value to the appropriate Go type.
-func parseScalarValue(s string) interface{} {
-	if s == "true" {
-		return true
+// formatOptionalInt formats an optional integer, or "-" when it is nil.
+func formatOptionalInt(v *int) string {
+	if v == nil {
+		return "-"
 	}
-	if s == "false" {
-		return false
-	}
-	if s == "null" || s == "" {
-		return nil
-	}
-	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return i
-	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f
-	}
-	return s
-}
-
-// setNestedValue sets a value in a nested map using a dot-separated key path.
-func setNestedValue(m map[string]interface{}, key string, value interface{}) {
-	parts := strings.Split(key, ".")
-	for i, part := range parts {
-		if i == len(parts)-1 {
-			m[part] = value
-			return
-		}
-		next, ok := m[part]
-		if !ok {
-			next = map[string]interface{}{}
-			m[part] = next
-		}
-		nextMap, ok := next.(map[string]interface{})
-		if !ok {
-			nextMap = map[string]interface{}{}
-			m[part] = nextMap
-		}
-		m = nextMap
-	}
+	return strconv.Itoa(*v)
 }
 
 func init() {
 	// override set flags
 	overrideSetCmd.Flags().String("file", "", "JSON or YAML file with values")
-	overrideSetCmd.Flags().StringSlice("set", nil, "Set a value (key=value), repeatable")
+	overrideSetCmd.Flags().StringArray("set", nil, "Set a value (key=value, dots for nested keys, \\. for a literal dot), repeatable; keeps the other keys")
+	overrideSetCmd.Flags().Bool("replace", false, "Replace the whole override instead of merging --set into it")
+	overrideSetCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation when the new values are empty (the override is removed)")
 
 	// override delete flags
 	overrideDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
@@ -605,6 +914,8 @@ func init() {
 	overrideQuotaSetCmd.Flags().String("cpu-limit", "", "CPU limit (e.g. 500m)")
 	overrideQuotaSetCmd.Flags().String("memory-request", "", "Memory request (e.g. 128Mi)")
 	overrideQuotaSetCmd.Flags().String("memory-limit", "", "Memory limit (e.g. 512Mi)")
+	overrideQuotaSetCmd.Flags().String("storage-limit", "", "Storage limit (e.g. 10Gi)")
+	overrideQuotaSetCmd.Flags().Int("pod-limit", 0, "Maximum number of pods")
 
 	// quota delete flags
 	overrideQuotaDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
@@ -622,7 +933,9 @@ func init() {
 
 	// Wire up override subcommands
 	overrideCmd.AddCommand(overrideListCmd)
+	overrideCmd.AddCommand(overrideGetCmd)
 	overrideCmd.AddCommand(overrideSetCmd)
+	overrideCmd.AddCommand(overrideUnsetCmd)
 	overrideCmd.AddCommand(overrideDeleteCmd)
 	overrideCmd.AddCommand(overrideBranchCmd)
 	overrideCmd.AddCommand(overrideQuotaCmd)

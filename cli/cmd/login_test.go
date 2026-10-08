@@ -293,7 +293,12 @@ func TestLoginCmd_EmptyUserFallsBackToInput(t *testing.T) {
 // ---------- Logout command tests ----------
 
 func TestLogoutCmd_Success(t *testing.T) {
-	buf := setupLoginTestCmd(t, "http://unused")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/auth/logout", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	buf := setupLoginTestCmd(t, server.URL)
 
 	// Create a token file first
 	tokenDir := filepath.Join(os.Getenv("STACKCTL_CONFIG_DIR"), "tokens")

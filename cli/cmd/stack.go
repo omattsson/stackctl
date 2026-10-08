@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
-	"sort"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // followLogs streams deployment logs via WebSocket until a terminal status is
@@ -79,7 +81,7 @@ The --definition flag accepts either a definition name or ID.
 Examples:
   stackctl stack list
   stackctl stack list --mine
-  stackctl stack list --status running --cluster 1
+  stackctl stack list --status running --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
   stackctl stack list --definition example-dev
   stackctl stack list -o json
   stackctl stack list -q | xargs -I{} stackctl stack deploy {}`,
@@ -121,7 +123,7 @@ Examples:
 		if cmd.Flags().Changed(flagPageSize) {
 			pageSize, _ := cmd.Flags().GetInt(flagPageSize)
 			if pageSize > 0 {
-				params["page_size"] = strconv.Itoa(pageSize)
+				params["pageSize"] = strconv.Itoa(pageSize)
 			}
 		}
 
@@ -172,6 +174,9 @@ var stackGetCmd = &cobra.Command{
 	Short: "Show stack instance details",
 	Long: `Show detailed information about a stack instance.
 
+The table output shows the expiry time and, for a running stack, the
+access URLs (from the stack status).
+
 Examples:
   stackctl stack get my-stack
   stackctl stack get 550e8400-e29b-41d4-a716-446655440000
@@ -194,7 +199,17 @@ Examples:
 			return err
 		}
 
-		return printInstance(instance)
+		// Access URLs come from the status endpoint. Only a running stack
+		// has them; the call is best-effort: one request, no retry, a short
+		// timeout, and any error omits the URLs.
+		var urls []string
+		if printer.Format == output.FormatTable && !printer.Quiet && strings.EqualFold(instance.Status, "running") {
+			if status, statusErr := bestEffortClient(c).GetStackStatus(id); statusErr == nil {
+				urls = ingressURLs(status)
+			}
+		}
+
+		return printInstanceWithURLs(instance, urls)
 	},
 }
 
@@ -208,7 +223,7 @@ The --definition flag accepts either a definition name or ID.
 Examples:
   stackctl stack create --name my-stack --definition example-dev
   stackctl stack create --name my-stack --definition e9af3b10-4633-436b-a131-975a3b598e3e
-  stackctl stack create --name my-stack --definition example-dev --branch feature/xyz --cluster 2 --ttl 120`,
+  stackctl stack create --name my-stack --definition example-dev --branch feature/xyz --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --ttl 120`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
@@ -426,7 +441,11 @@ Examples:
 var stackStatusCmd = &cobra.Command{
 	Use:   "status <name|id>",
 	Short: "Show pod status for a stack instance",
-	Long: `Show the current status and pod states for a stack instance.
+	Long: `Show the current status and the pods of a stack instance, per chart.
+
+The table shows one row per pod. A chart without pods (for example a
+stopped chart) shows one row with the chart status. Access URLs are listed
+below the table. -o json and -o yaml print the full API response.
 
 Examples:
   stackctl stack status my-stack
@@ -460,29 +479,140 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(status)
 		default:
-			printer.PrintMessage("Status: %s", printer.StatusColor(status.Status))
-			if len(status.Pods) == 0 {
-				printer.PrintMessage("No pods found.")
-				return nil
-			}
-			headers := []string{"NAME", "STATUS", "READY", "RESTARTS", "AGE"}
-			rows := make([][]string, len(status.Pods))
-			for i, p := range status.Pods {
-				ready := "false"
-				if p.Ready {
-					ready = "true"
-				}
-				rows[i] = []string{
-					p.Name,
-					printer.StatusColor(p.Status),
-					ready,
-					strconv.Itoa(p.Restarts),
-					p.Age,
-				}
-			}
-			return printer.PrintTable(headers, rows)
+			return printStatusTable(status)
 		}
 	},
+}
+
+// nowFunc returns the current time. Tests replace it for stable output.
+var nowFunc = time.Now
+
+// extendSafetyMargin is added to the remaining time of a stack before
+// stack extend decides that N minutes cannot shorten the expiry. It covers
+// clock skew and the time between the check and the API call.
+const extendSafetyMargin = 2 * time.Minute
+
+// expiryReference returns the time to compare expires_at against: the
+// server time when known, else the local clock.
+func expiryReference(serverNow time.Time) time.Time {
+	if !serverNow.IsZero() {
+		return serverNow
+	}
+	return nowFunc()
+}
+
+// extendCouldShorten reports whether setting the TTL to minutes from now
+// could make the stack expire earlier than oldExpiry. The remaining time is
+// oldExpiry minus the server time (or the local clock); the TTL is safe only
+// when it is at least the remaining time plus extendSafetyMargin.
+func extendCouldShorten(oldExpiry *time.Time, serverNow time.Time, minutes int) bool {
+	if oldExpiry == nil {
+		return false
+	}
+	remaining := oldExpiry.Sub(expiryReference(serverNow))
+	return time.Duration(minutes)*time.Minute < remaining+extendSafetyMargin
+}
+
+// bestEffortTimeout is the timeout of optional extra calls (see
+// bestEffortClient). A variable so tests can shorten it.
+var bestEffortTimeout = 5 * time.Second
+
+// bestEffortClient returns a client for an optional extra call: same server
+// and credentials as c, one attempt (no retry), no session renewal, and a
+// timeout of bestEffortTimeout.
+func bestEffortClient(c *client.Client) *client.Client {
+	q := client.New(c.BaseURL)
+	q.APIKey = c.APIKey
+	q.Token = c.Token
+	q.Debug = c.Debug
+	q.DebugWriter = c.DebugWriter
+	q.RetryBackoff = []time.Duration{} // non-nil and empty: no retry
+	q.HTTPClient = &http.Client{Timeout: bestEffortTimeout}
+	if c.HTTPClient != nil {
+		q.HTTPClient.Transport = c.HTTPClient.Transport
+	}
+	return q
+}
+
+// printStatusTable prints the per-chart pod table of a stack status.
+func printStatusTable(status *types.InstanceStatus) error {
+	printer.PrintMessage("Status: %s", printer.StatusColor(status.Status))
+	podCount := 0
+	for _, ch := range status.Charts {
+		podCount += len(ch.Pods)
+	}
+	if podCount == 0 {
+		printer.PrintMessage("No pods found.")
+	} else {
+		headers := []string{"CHART", "POD", "PHASE", "READY", "RESTARTS", "AGE", "IMAGE"}
+		var rows [][]string
+		now := nowFunc()
+		for _, ch := range status.Charts {
+			if len(ch.Pods) == 0 {
+				rows = append(rows, []string{ch.ChartName, "-", printer.StatusColor(ch.Status), "-", "-", "-", "-"})
+				continue
+			}
+			for _, p := range ch.Pods {
+				rows = append(rows, []string{
+					ch.ChartName,
+					p.Name,
+					printer.StatusColor(p.Phase),
+					strconv.FormatBool(p.Ready),
+					strconv.Itoa(int(p.RestartCount)),
+					formatAge(p.StartTime, now),
+					p.Image,
+				})
+			}
+		}
+		if err := printer.PrintTable(headers, rows); err != nil {
+			return err
+		}
+	}
+	if urls := ingressURLs(status); len(urls) > 0 {
+		printer.PrintMessage("URLs:")
+		for _, u := range urls {
+			printer.PrintMessage("  %s", u)
+		}
+	}
+	return nil
+}
+
+// ingressURLs returns the unique access URLs of a stack status, in API order.
+func ingressURLs(status *types.InstanceStatus) []string {
+	if status == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var urls []string
+	for _, ing := range status.Ingresses {
+		if ing.URL == "" || seen[ing.URL] {
+			continue
+		}
+		seen[ing.URL] = true
+		urls = append(urls, ing.URL)
+	}
+	return urls
+}
+
+// formatAge returns the age of start relative to now in kubectl style
+// (45s, 12m, 3h, 2d), or "-" when start is unknown.
+func formatAge(start *time.Time, now time.Time) string {
+	if start == nil || start.IsZero() {
+		return "-"
+	}
+	d := now.Sub(*start)
+	switch {
+	case d < 0:
+		return "0s"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
 
 var stackLogsCmd = &cobra.Command{
@@ -579,12 +709,20 @@ Examples:
 
 var stackExtendCmd = &cobra.Command{
 	Use:   "extend <name|id>",
-	Short: "Extend the TTL of a stack instance",
-	Long: `Extend the time-to-live of a stack instance by the specified number of minutes.
+	Short: "Set the TTL of a stack instance to N minutes from now",
+	Long: `Set the TTL of a stack instance to N minutes from now.
+
+The new expiry is now + N minutes, and the TTL of the stack becomes N
+minutes. The new expiry can be earlier than the current expiry. The command
+compares N with the remaining time of the stack (from the server time, plus
+a 2-minute margin). When N could shorten the expiry, it asks for
+confirmation; use --yes to skip the prompt (required in a non-interactive
+shell). The output shows the old and the new expiry.
 
 Examples:
   stackctl stack extend my-stack --minutes 60
-  stackctl stack extend my-stack --minutes 120`,
+  stackctl stack extend my-stack --minutes 240 --yes
+  stackctl stack extend my-stack --minutes 120 -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -603,48 +741,27 @@ Examples:
 			return err
 		}
 
-		_, err = c.ExtendStack(id, minutes)
+		current, serverNow, err := c.GetStackWithServerTime(id)
 		if err != nil {
 			return err
 		}
 
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, id)
-			return nil
+		oldExpiry := current.ExpiresAt
+		if extendCouldShorten(oldExpiry, serverNow, minutes) {
+			newExpiry := expiryReference(serverNow).Add(time.Duration(minutes) * time.Minute)
+			confirmed, err := confirmAction(cmd, fmt.Sprintf(
+				"Stack %s expires at %s. A TTL of %d minutes can move the expiry earlier or keep it about the same (new expiry about %s). Continue? (y/n): ",
+				id, oldExpiry.Format(time.RFC3339), minutes, newExpiry.Format(time.RFC3339)))
+			if err != nil {
+				return err
+			}
+			if !confirmed {
+				printer.PrintMessage("Aborted.")
+				return nil
+			}
 		}
 
-		printer.PrintMessage("Extended stack %s TTL by %d minutes", id, minutes)
-		return nil
-	},
-}
-
-var stackValuesCmd = &cobra.Command{
-	Use:   "values <name|id>",
-	Short: "Show merged Helm values for a stack instance",
-	Long: `Show the fully merged Helm values for a stack instance.
-
-Nested values are displayed as JSON by default. Use -o yaml for YAML format.
-
-Examples:
-  stackctl stack values my-stack
-  stackctl stack values my-stack --chart my-chart
-  stackctl stack values my-stack -o json`,
-	Args:         cobra.ExactArgs(1),
-	SilenceUsage: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		chart, _ := cmd.Flags().GetString("chart")
-
-		c, err := newClient()
-		if err != nil {
-			return err
-		}
-
-		id, err := resolveStackID(c, args[0])
-		if err != nil {
-			return err
-		}
-
-		values, err := c.GetMergedValues(id, chart)
+		updated, err := c.ExtendStack(id, minutes)
 		if err != nil {
 			return err
 		}
@@ -656,19 +773,246 @@ Examples:
 
 		switch printer.Format {
 		case output.FormatJSON:
-			return printer.PrintJSON(values)
+			return printer.PrintJSON(updated)
 		case output.FormatYAML:
-			return printer.PrintYAML(values)
+			return printer.PrintYAML(updated)
 		default:
-			return printer.PrintJSON(values)
+			printer.PrintMessage("Set the TTL of stack %s to %d minutes", id, minutes)
+			printer.PrintMessage("Old expiry: %s", formatTime(oldExpiry))
+			printer.PrintMessage("New expiry: %s", formatTime(updated.ExpiresAt))
+			return nil
 		}
 	},
+}
+
+var stackValuesCmd = &cobra.Command{
+	Use:   "values <name|id>",
+	Short: "Show merged Helm values for a stack instance",
+	Long: `Show the merged Helm values of a stack instance, as deploy uses them.
+
+Without --chart the command prints the values.yaml of every chart of the
+stack's definition. Each chart starts with a "# chart: <name>" header.
+--chart takes a chart name or ID and prints the YAML of that chart only.
+
+--output-file writes the values to a new file instead of stdout. Without
+--chart the file is the ZIP archive from the API (one values.yaml per
+chart). With --chart the file is the YAML of that chart. The file gets mode
+0600 (values can hold secrets). An existing file is not overwritten unless
+--force is given; --force replaces the file (a symlink is replaced, not
+followed).
+
+-o json and -o yaml print a map of chart name to values.
+
+Examples:
+  stackctl stack values my-stack
+  stackctl stack values my-stack --chart my-chart
+  stackctl stack values my-stack --chart 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b
+  stackctl stack values my-stack --output-file my-stack-values.zip
+  stackctl stack values my-stack --chart my-chart --output-file my-chart.yaml --force
+  stackctl stack values my-stack -o json`,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		chart, _ := cmd.Flags().GetString("chart")
+		outputFile, _ := cmd.Flags().GetString("output-file")
+		force, _ := cmd.Flags().GetBool("force")
+		if outputFile != "" {
+			if err := checkNoPathTraversal(outputFile); err != nil {
+				return err
+			}
+			outputFile = filepath.Clean(outputFile)
+			// Check before the API calls; writeFileAtomic checks again.
+			if err := checkOutputFile(outputFile, force); err != nil {
+				return err
+			}
+		} else if force {
+			return fmt.Errorf("--force needs --output-file")
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		id, err := resolveStackID(c, args[0])
+		if err != nil {
+			return err
+		}
+
+		if outputFile != "" && chart == "" {
+			data, _, err := c.ExportValues(id)
+			if err != nil {
+				return err
+			}
+			return writeValuesFile(id, outputFile, data, force)
+		}
+
+		charts, err := stackCharts(c, id)
+		if err != nil {
+			return err
+		}
+		if chart != "" {
+			ch, err := matchChart(charts, strings.TrimSpace(chart), "the definition of stack "+id)
+			if err != nil {
+				return err
+			}
+			charts = []types.ChartConfig{*ch}
+		}
+
+		docs := make([]chartValuesDoc, 0, len(charts))
+		for _, ch := range charts {
+			data, err := c.GetChartValues(id, ch.ID)
+			if err != nil {
+				return fmt.Errorf("reading values of chart %s: %w", ch.ChartName, err)
+			}
+			docs = append(docs, chartValuesDoc{Name: ch.ChartName, YAML: data})
+		}
+
+		if outputFile != "" {
+			return writeValuesFile(id, outputFile, docs[0].YAML, force)
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, id)
+			return nil
+		}
+
+		switch printer.Format {
+		case output.FormatJSON, output.FormatYAML:
+			byChart := make(map[string]interface{}, len(docs))
+			for _, d := range docs {
+				var v interface{}
+				if err := yaml.Unmarshal(d.YAML, &v); err != nil {
+					return fmt.Errorf("parsing values of chart %s: %w", d.Name, err)
+				}
+				byChart[d.Name] = normalizeYAML(v)
+			}
+			if printer.Format == output.FormatJSON {
+				return printer.PrintJSON(byChart)
+			}
+			return printer.PrintYAML(byChart)
+		default:
+			if len(docs) == 0 {
+				printer.PrintMessage("Stack %s has no charts.", id)
+				return nil
+			}
+			if chart != "" {
+				return writeYAMLDoc(docs[0].YAML)
+			}
+			for i, d := range docs {
+				if i > 0 {
+					fmt.Fprintln(printer.Writer, "---")
+				}
+				fmt.Fprintf(printer.Writer, "# chart: %s\n", d.Name)
+				if err := writeYAMLDoc(d.YAML); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	},
+}
+
+// checkOutputFile refuses an existing path unless force is set. It does not
+// follow a symlink (Lstat).
+func checkOutputFile(path string, force bool) error {
+	info, err := os.Lstat(path)
+	switch {
+	case err == nil && info.IsDir():
+		return fmt.Errorf("%s is a directory", path)
+	case err == nil && !force:
+		return fmt.Errorf("%s already exists; use --force to replace it", path)
+	case err != nil && !os.IsNotExist(err):
+		return fmt.Errorf("checking %s: %w", path, err)
+	}
+	return nil
+}
+
+// writeFileAtomic writes data to a new temp file with mode 0600 in the
+// directory of path, then renames it to path. The rename replaces path
+// itself: the mode of an existing file is not kept and a symlink is
+// replaced, not followed. An existing path is refused unless force is set.
+func writeFileAtomic(path string, data []byte, force bool) error {
+	if err := checkOutputFile(path, force); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("writing file %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing file %s: %w", path, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing file %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing file %s: %w", path, err)
+	}
+	if !force {
+		// Link fails when path appeared since the check: no overwrite.
+		if err := os.Link(tmpName, path); err != nil {
+			if os.IsExist(err) {
+				return fmt.Errorf("%s already exists; use --force to replace it", path)
+			}
+			// The file system has no hard links: check again and rename.
+			if err := checkOutputFile(path, false); err != nil {
+				return err
+			}
+		} else {
+			return nil
+		}
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("writing file %s: %w", path, err)
+	}
+	return nil
+}
+
+// chartValuesDoc is the merged values.yaml of one chart.
+type chartValuesDoc struct {
+	Name string
+	YAML []byte
+}
+
+// writeYAMLDoc writes a YAML document to the printer, ending with a newline.
+func writeYAMLDoc(data []byte) error {
+	if _, err := printer.Writer.Write(data); err != nil {
+		return err
+	}
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		_, err := fmt.Fprintln(printer.Writer)
+		return err
+	}
+	return nil
+}
+
+// writeValuesFile writes exported values to path (see writeFileAtomic)
+// and prints a confirmation.
+func writeValuesFile(id, path string, data []byte, force bool) error {
+	if err := writeFileAtomic(path, data, force); err != nil {
+		return err
+	}
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, id)
+		return nil
+	}
+	printer.PrintMessage("Wrote values of stack %s to %s", id, path)
+	return nil
 }
 
 var stackCompareCmd = &cobra.Command{
 	Use:   "compare <name|id> <name|id>",
 	Short: "Compare two stack instances",
-	Long: `Compare two stack instances and show their differences.
+	Long: `Compare the merged Helm values of two stack instances, per chart.
+
+The table shows for each chart whether the merged values differ. -o json
+and -o yaml print the full API response, with the merged values of both
+sides.
 
 Examples:
   stackctl stack compare my-stack other-stack
@@ -711,28 +1055,47 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(result)
 		default:
-			headers := []string{"FIELD", "LEFT", "RIGHT"}
-			var rows [][]string
-			fields := make([]string, 0, len(result.Diffs))
-			for field := range result.Diffs {
-				fields = append(fields, field)
-			}
-			sort.Strings(fields)
-			for _, field := range fields {
-				val := result.Diffs[field]
-				if diffMap, ok := val.(map[string]interface{}); ok {
-					left := fmt.Sprintf("%v", diffMap["left"])
-					right := fmt.Sprintf("%v", diffMap["right"])
-					rows = append(rows, []string{field, left, right})
-				}
-			}
-			if len(rows) == 0 {
-				printer.PrintMessage("No differences found between stack %s and %s", leftID, rightID)
-				return nil
-			}
-			return printer.PrintTable(headers, rows)
+			return printCompareTable(result)
 		}
 	},
+}
+
+// printCompareTable prints one row per chart: "differs", "identical", or
+// the side the chart is missing from.
+func printCompareTable(result *types.CompareResult) error {
+	printer.PrintMessage("Left:  %s (%s, branch %s, owner %s)", result.Left.Name, result.Left.ID, result.Left.Branch, result.Left.Owner)
+	printer.PrintMessage("Right: %s (%s, branch %s, owner %s)", result.Right.Name, result.Right.ID, result.Right.Branch, result.Right.Owner)
+	if len(result.Charts) == 0 {
+		printer.PrintMessage("No charts to compare.")
+		return nil
+	}
+	headers := []string{"CHART", "RESULT"}
+	rows := make([][]string, len(result.Charts))
+	differing := 0
+	for i, ch := range result.Charts {
+		res := "identical"
+		switch {
+		case ch.LeftValues == nil && ch.RightValues != nil:
+			res = "only in right"
+		case ch.LeftValues != nil && ch.RightValues == nil:
+			res = "only in left"
+		case ch.HasDifferences:
+			res = "differs"
+		}
+		if ch.HasDifferences || res != "identical" {
+			differing++
+		}
+		rows[i] = []string{ch.ChartName, res}
+	}
+	if err := printer.PrintTable(headers, rows); err != nil {
+		return err
+	}
+	if differing == 0 {
+		printer.PrintMessage("No differences found.")
+	} else {
+		printer.PrintMessage("%d of %d charts differ. Use -o json or -o yaml to see the merged values of both sides.", differing, len(result.Charts))
+	}
+	return nil
 }
 
 var stackHistoryCmd = &cobra.Command{
@@ -955,11 +1318,14 @@ func init() {
 	stackDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	// stack extend flags
-	stackExtendCmd.Flags().Int("minutes", 0, "Number of minutes to extend TTL by (required)")
+	stackExtendCmd.Flags().Int("minutes", 0, "Set the TTL to N minutes from now (required)")
 	_ = stackExtendCmd.MarkFlagRequired("minutes")
+	stackExtendCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation when the new expiry is earlier")
 
 	// stack values flags
-	stackValuesCmd.Flags().String("chart", "", "Filter by chart name")
+	stackValuesCmd.Flags().String("chart", "", "Chart name or ID (default: all charts)")
+	stackValuesCmd.Flags().String("output-file", "", "Write the values to a new file (mode 0600): the ZIP export of all charts, or the YAML of --chart")
+	stackValuesCmd.Flags().Bool("force", false, "Replace an existing --output-file")
 
 	// stack history flags
 	stackHistoryCmd.Flags().Int("limit", 20, "Maximum number of entries to show")
@@ -1051,8 +1417,8 @@ operators using --api-key should expect a 401.
 Ctrl-C exits cleanly with no orphan goroutines.
 
 Examples:
-  stackctl stack deploy 42 && stackctl stack watch --id 42
-  stackctl stack watch --id 42,43,44   # exits when all three reach terminal
+  stackctl stack deploy 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d && stackctl stack watch --id 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d
+  stackctl stack watch --id 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d,7b2e3d4c-5f6a-4b7c-9d8e-0f1a2b3c4d5e   # exits when both reach terminal
   stackctl stack watch --status deploying
   stackctl stack watch -o json         # one JSON object per event`,
 	SilenceUsage: true,
@@ -1186,6 +1552,12 @@ func formatTime(t *time.Time) string {
 
 // printInstance prints a stack instance in the configured output format.
 func printInstance(instance *types.StackInstance) error {
+	return printInstanceWithURLs(instance, nil)
+}
+
+// printInstanceWithURLs prints a stack instance; the table output adds
+// one "URL" line per access URL.
+func printInstanceWithURLs(instance *types.StackInstance, urls []string) error {
 	if printer.Quiet {
 		fmt.Fprintln(printer.Writer, instance.ID)
 		return nil
@@ -1214,6 +1586,12 @@ func printInstance(instance *types.StackInstance) error {
 			{Key: "Expires At", Value: formatTime(instance.ExpiresAt)},
 			{Key: "Deployed At", Value: formatTime(instance.DeployedAt)},
 			{Key: "Created At", Value: instance.CreatedAt.Format(time.RFC3339)},
+		}
+		if instance.ErrorMessage != "" {
+			fields = append(fields, output.KeyValue{Key: "Error", Value: instance.ErrorMessage})
+		}
+		for _, u := range urls {
+			fields = append(fields, output.KeyValue{Key: "URL", Value: u})
 		}
 		return printer.PrintSingle(instance, fields)
 	}

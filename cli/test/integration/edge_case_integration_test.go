@@ -212,10 +212,10 @@ func TestEdgeCase_InvalidInputValidation(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(types.ValueOverride{
-				Base:       types.Base{ID: "10"},
-				InstanceID: "1",
-				ChartID:    "1",
-				Values:     "{}",
+				ID:              "10",
+				StackInstanceID: "1",
+				ChartConfigID:   "1",
+				Values:          "{}",
 			})
 
 		default:

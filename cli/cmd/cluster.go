@@ -58,19 +58,27 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(clusters)
 		default:
-			headers := []string{"ID", "NAME", "STATUS", "DEFAULT", "NODES"}
+			// Admin and devops users get the full cluster record; other
+			// roles get only id, name and is_default (no created_at). Hide
+			// the columns the API does not fill for this role.
+			full := false
+			for _, cl := range clusters {
+				if cl.CreatedAt != nil {
+					full = true
+					break
+				}
+			}
+			headers := []string{"ID", "NAME", "DEFAULT"}
+			if full {
+				headers = []string{"ID", "NAME", "STATUS", "DEFAULT", "REGION"}
+			}
 			rows := make([][]string, len(clusters))
 			for i, cl := range clusters {
-				isDefault := "false"
-				if cl.IsDefault {
-					isDefault = "true"
-				}
-				rows[i] = []string{
-					cl.ID,
-					cl.Name,
-					printer.StatusColor(cl.Status),
-					isDefault,
-					strconv.Itoa(cl.NodeCount),
+				isDefault := strconv.FormatBool(cl.IsDefault)
+				if full {
+					rows[i] = []string{cl.ID, cl.Name, printer.StatusColor(cl.Status), isDefault, cl.Region}
+				} else {
+					rows[i] = []string{cl.ID, cl.Name, isDefault}
 				}
 			}
 			return printer.PrintTable(headers, rows)
@@ -84,8 +92,8 @@ var clusterGetCmd = &cobra.Command{
 	Long: `Show detailed information about a cluster, including health status.
 
 Examples:
-  stackctl cluster get 1
-  stackctl cluster get 1 -o json`,
+  stackctl cluster get 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
+  stackctl cluster get 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -151,7 +159,7 @@ Examples:
 				{Key: "Description", Value: cluster.Description},
 				{Key: "Status", Value: printer.StatusColor(cluster.Status)},
 				{Key: "Default", Value: isDefault},
-				{Key: "Nodes", Value: strconv.Itoa(cluster.NodeCount)},
+				{Key: "Region", Value: cluster.Region},
 			}
 			if health != nil {
 				fields = append(fields,
@@ -187,8 +195,8 @@ var clusterSharedValuesListCmd = &cobra.Command{
 	Long: `List all shared Helm values configured for a cluster.
 
 Examples:
-  stackctl cluster shared-values list 1
-  stackctl cluster shared-values list 1 -o json`,
+  stackctl cluster shared-values list 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
+  stackctl cluster shared-values list 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -254,9 +262,9 @@ Values are provided via --file (JSON or YAML) and/or --set key=value flags,
 following the same syntax as 'override set'.
 
 Examples:
-  stackctl cluster shared-values set 1 --name "local-dev-defaults" --file values.yaml
-  stackctl cluster shared-values set 1 --name "local-dev-defaults" --set persistence.storageClass=local-path
-  stackctl cluster shared-values set 1 --name "local-dev-defaults" --file values.yaml --priority 10`,
+  stackctl cluster shared-values set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --name "local-dev-defaults" --file values.yaml
+  stackctl cluster shared-values set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --name "local-dev-defaults" --set persistence.storageClass=local-path
+  stackctl cluster shared-values set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --name "local-dev-defaults" --file values.yaml --priority 10`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -267,7 +275,7 @@ Examples:
 
 		name, _ := cmd.Flags().GetString("name")
 		file, _ := cmd.Flags().GetString("file")
-		setFlags, _ := cmd.Flags().GetStringSlice("set")
+		setFlags, _ := cmd.Flags().GetStringArray("set")
 		priority, _ := cmd.Flags().GetInt("priority")
 
 		if file == "" && len(setFlags) == 0 {
@@ -287,19 +295,18 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("reading file %s: %w", file, err)
 			}
-			if err := json.Unmarshal(data, &values); err != nil {
-				if yamlErr := yaml.Unmarshal(data, &values); yamlErr != nil {
-					return fmt.Errorf("invalid JSON/YAML in file %s (json: %v): %w", file, err, yamlErr)
-				}
+			values, err = parseValuesDocument(data)
+			if err != nil {
+				return fmt.Errorf("invalid JSON/YAML in file %s: %w", file, err)
 			}
 		}
 
-		for _, kv := range setFlags {
-			parts := strings.SplitN(kv, "=", 2)
-			if len(parts) != 2 {
-				return fmt.Errorf("invalid --set format %q: expected key=value", kv)
-			}
-			setNestedValue(values, parts[0], parseScalarValue(parts[1]))
+		sets, err := parseSetFlags(setFlags)
+		if err != nil {
+			return err
+		}
+		for _, kv := range sets {
+			setNestedPath(values, kv.path, kv.value)
 		}
 
 		yamlBytes, err := yaml.Marshal(values)
@@ -347,8 +354,8 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl cluster shared-values delete 1 5
-  stackctl cluster shared-values delete 1 5 --yes`,
+  stackctl cluster shared-values delete 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e 6e7f8a9b-0c1d-4e2f-8a3b-4c5d6e7f8a9b
+  stackctl cluster shared-values delete 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e 6e7f8a9b-0c1d-4e2f-8a3b-4c5d6e7f8a9b --yes`,
 	Args:         cobra.ExactArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -431,7 +438,7 @@ func printCluster(cluster *types.Cluster) error {
 			{Key: "Description", Value: cluster.Description},
 			{Key: "Status", Value: printer.StatusColor(cluster.Status)},
 			{Key: "Default", Value: isDefault},
-			{Key: "Nodes", Value: strconv.Itoa(cluster.NodeCount)},
+			{Key: "Region", Value: cluster.Region},
 		}
 		return printer.PrintSingle(cluster, fields)
 	}
@@ -655,8 +662,8 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl cluster delete 1
-  stackctl cluster delete 1 --yes`,
+  stackctl cluster delete 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
+  stackctl cluster delete 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --yes`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -1011,9 +1018,9 @@ fields you want to change. With --from-file, the file contents are sent
 verbatim — no merge — so include every field you want to keep.
 
 Examples:
-  stackctl cluster quota set 1 --from-file quota.json
-  stackctl cluster quota set 1 --cpu-limit 8 --memory-limit 16Gi --pod-limit 50
-  stackctl cluster quota set 1 --pod-limit 100   # other fields preserved from current quota`,
+  stackctl cluster quota set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --from-file quota.json
+  stackctl cluster quota set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --cpu-limit 8 --memory-limit 16Gi --pod-limit 50
+  stackctl cluster quota set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --pod-limit 100   # other fields preserved from current quota`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -1143,8 +1150,8 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Examples:
-  stackctl cluster quota delete 1
-  stackctl cluster quota delete 1 --yes`,
+  stackctl cluster quota delete 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
+  stackctl cluster quota delete 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --yes`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -1161,7 +1168,7 @@ func init() {
 	// shared-values set flags
 	clusterSharedValuesSetCmd.Flags().String("name", "", "Name for the shared values entry (required)")
 	clusterSharedValuesSetCmd.Flags().String("file", "", "JSON or YAML file with values")
-	clusterSharedValuesSetCmd.Flags().StringSlice("set", nil, "Set a value (key=value), repeatable")
+	clusterSharedValuesSetCmd.Flags().StringArray("set", nil, "Set a value (key=value, dots for nested keys, \\. for a literal dot), repeatable")
 	clusterSharedValuesSetCmd.Flags().Int("priority", 0, "Merge priority (higher = applied later)")
 	_ = clusterSharedValuesSetCmd.MarkFlagRequired("name")
 

@@ -26,12 +26,14 @@ func setupClusterTestCmd(t *testing.T, apiURL string) *bytes.Buffer {
 func sampleCluster() types.Cluster {
 	now := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	return types.Cluster{
-		Base:        types.Base{ID: "1", CreatedAt: now, UpdatedAt: now, Version: "1"},
+		ID:          "1",
+		CreatedAt:   &now,
+		UpdatedAt:   &now,
 		Name:        "dev-cluster",
 		Description: "Development cluster",
 		Status:      "online",
 		IsDefault:   true,
-		NodeCount:   3,
+		Region:      "eu-west",
 	}
 }
 
@@ -70,12 +72,71 @@ func TestClusterListCmd_TableOutput(t *testing.T) {
 	assert.Contains(t, out, "NAME")
 	assert.Contains(t, out, "STATUS")
 	assert.Contains(t, out, "DEFAULT")
-	assert.Contains(t, out, "NODES")
+	assert.Contains(t, out, "REGION")
+	assert.NotContains(t, out, "NODES")
 	assert.Contains(t, out, "1")
 	assert.Contains(t, out, "dev-cluster")
 	assert.Contains(t, out, "online")
 	assert.Contains(t, out, "true")
-	assert.Contains(t, out, "3")
+	assert.Contains(t, out, "eu-west")
+}
+
+// TestClusterListCmd_NonAdminSummary: a user without the admin or devops
+// role gets only id, name and is_default. The table hides the other columns.
+func TestClusterListCmd_NonAdminSummary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e","name":"shared-cluster","is_default":true}]`))
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	err := clusterListCmd.RunE(clusterListCmd, []string{})
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.Len(t, lines, 2)
+	assert.Equal(t, []string{"ID", "NAME", "DEFAULT"}, strings.Fields(lines[0]))
+	assert.Equal(t, []string{"5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e", "shared-cluster", "true"}, strings.Fields(lines[1]))
+}
+
+// TestClusterListCmd_NonAdminJSONNoZeroTimestamps: the summary has no
+// timestamps; -o json must not print created_at 0001-01-01.
+func TestClusterListCmd_NonAdminJSONNoZeroTimestamps(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e","name":"shared-cluster","is_default":true}]`))
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+
+	require.NoError(t, clusterListCmd.RunE(clusterListCmd, []string{}))
+	assert.NotContains(t, buf.String(), "created_at")
+	assert.NotContains(t, buf.String(), "0001-01-01")
+	assert.JSONEq(t, `[{"id":"5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e","name":"shared-cluster","is_default":true}]`, buf.String())
+}
+
+// TestClusterListCmd_DecodesHealthStatus: the API field is health_status.
+func TestClusterListCmd_DecodesHealthStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e","name":"c1","created_at":"2026-01-01T00:00:00Z","health_status":"","region":"eu-north","is_default":false}]`))
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+
+	err := clusterListCmd.RunE(clusterListCmd, []string{})
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.Len(t, lines, 2)
+	assert.Equal(t, []string{"ID", "NAME", "STATUS", "DEFAULT", "REGION"}, strings.Fields(lines[0]))
+	// An admin record with an empty health_status still shows the full table.
+	assert.Equal(t, []string{"5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e", "c1", "false", "eu-north"}, strings.Fields(lines[1]))
 }
 
 func TestClusterListCmd_JSONOutput(t *testing.T) {

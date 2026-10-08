@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"bufio"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +9,7 @@ import (
 	"time"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
+	"github.com/omattsson/stackctl/cli/pkg/config"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
@@ -24,6 +23,12 @@ var loginCmd = &cobra.Command{
 
 Credentials can be provided via flags or entered interactively.
 The returned JWT token is stored locally for the current context.
+
+A username/password login also stores the refresh token of the session.
+stackctl renews the short-lived access token automatically, so commands
+keep working until the session ends: 12 hours after login, or after 30
+minutes without use (server defaults). Then run 'stackctl login' again.
+An SSO login (--sso) gets a longer-lived token that is not renewed.
 
 Examples:
   stackctl login
@@ -103,10 +108,11 @@ Environment variables:
 			return err
 		}
 
-		resp, err := c.Login(username, password)
+		resp, refreshToken, err := c.LoginSession(username, password)
 		if err != nil {
 			return err
 		}
+		receivedAt := time.Now()
 
 		if resp.Token == "" {
 			return fmt.Errorf("server returned an empty token")
@@ -124,13 +130,19 @@ Environment variables:
 				}
 			}
 		}
+		// Prefer the JWT lifetime on the local clock (receive time + exp - iat):
+		// renewal compares the expiry with the local clock, and the server
+		// clock can differ.
+		if exp, jwtErr := client.LocalExpiry(resp.Token, receivedAt); jwtErr == nil {
+			expiresAt = exp
+		}
 
 		loginUser := resp.User.Username
 		if loginUser == "" {
 			loginUser = username
 		}
 
-		if err := saveToken(resp.Token, loginUser, expiresAt); err != nil {
+		if err := replaceSession(resp.Token, refreshToken, loginUser, expiresAt); err != nil {
 			return fmt.Errorf("saving token: %w", err)
 		}
 
@@ -141,14 +153,20 @@ Environment variables:
 
 var logoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Clear stored authentication token",
-	Long: `Clear the stored JWT token for the current context.
+	Short: "End the session and clear the stored authentication token",
+	Long: `End the session on the server and clear the stored JWT token for the
+current context.
+
+stackctl sends the access token and the refresh token to the server, which
+blocks the access token and revokes the refresh token. When the server
+cannot be reached, stackctl prints a warning and still removes the local
+token.
 
 Example:
   stackctl logout`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := deleteToken(); err != nil {
+		if err := logoutSession(cmd.ErrOrStderr()); err != nil {
 			return err
 		}
 		ctx := cfg.CurrentContext
@@ -254,12 +272,12 @@ func loginSSO(cmd *cobra.Command) error {
 		return fmt.Errorf("server returned an empty token")
 	}
 
-	expiresAt, err := parseJWTExpiry(result.Token)
+	expiresAt, err := client.LocalExpiry(result.Token, time.Now())
 	if err != nil {
 		return fmt.Errorf("parsing token expiry: %w", err)
 	}
 
-	if err := saveToken(result.Token, result.Username, expiresAt); err != nil {
+	if err := replaceSession(result.Token, "", result.Username, expiresAt); err != nil {
 		return fmt.Errorf("saving token: %w", err)
 	}
 
@@ -305,24 +323,102 @@ func pollForToken(c *client.Client, sessionID string, expiresIn int, w io.Writer
 
 // parseJWTExpiry extracts the expiry time from a JWT token without verifying the signature.
 func parseJWTExpiry(token string) (time.Time, error) {
-	parts := strings.SplitN(token, ".", 3)
-	if len(parts) != 3 {
-		return time.Time{}, fmt.Errorf("invalid JWT format")
+	return client.TokenExpiry(token)
+}
+
+// sessionLogoutTimeout bounds the best-effort logout calls at login.
+const sessionLogoutTimeout = 5 * time.Second
+
+// storeSave writes a token file. Tests replace it to simulate a failed save.
+var storeSave = func(s *config.TokenStore, st *storedToken) error { return s.Save(st) }
+
+// replaceSession stores a new login for the current context and ends the
+// previous session on the server, all under one token lock:
+//
+//  1. load the old session;
+//  2. save the new session;
+//  3. best effort: revoke the old session (POST /auth/logout).
+//
+// When the save fails, the old session stays valid and the new session is
+// revoked instead, so no session is left without a stored refresh token.
+func replaceSession(token, refreshToken, username string, expiresAt time.Time) error {
+	store := tokenStore()
+	if store == nil {
+		return fmt.Errorf("no current context set")
 	}
-	data, err := base64.RawURLEncoding.DecodeString(parts[1])
+	unlock, err := store.Lock()
 	if err != nil {
-		return time.Time{}, fmt.Errorf("decoding JWT payload: %w", err)
+		return err
 	}
-	var claims struct {
-		Exp int64 `json:"exp"`
+	defer unlock()
+
+	apiURL := resolveAPIURL()
+	old, _ := store.Load()
+	if err := storeSave(store, &storedToken{
+		Token:        token,
+		ExpiresAt:    expiresAt,
+		Username:     username,
+		RefreshToken: refreshToken,
+		APIURL:       apiURL,
+	}); err != nil {
+		bestEffortLogout(apiURL, token, refreshToken)
+		return err
 	}
-	if err := json.Unmarshal(data, &claims); err != nil {
-		return time.Time{}, fmt.Errorf("parsing JWT claims: %w", err)
+
+	if old != nil && old.Token != token && (old.Token != "" || old.RefreshToken != "") &&
+		(old.APIURL == "" || client.SameAPIURL(old.APIURL, apiURL)) {
+		bestEffortLogout(apiURL, old.Token, old.RefreshToken)
 	}
-	if claims.Exp == 0 {
-		return time.Time{}, fmt.Errorf("JWT missing exp claim")
+	return nil
+}
+
+// bestEffortLogout sends POST /auth/logout with a short timeout and ignores
+// errors.
+func bestEffortLogout(apiURL, token, refreshToken string) {
+	if apiURL == "" {
+		return
 	}
-	return time.Unix(claims.Exp, 0), nil
+	c := client.New(apiURL)
+	applyInsecureTLS(c)
+	c.HTTPClient.Timeout = sessionLogoutTimeout
+	c.Token = token
+	_ = c.Logout(refreshToken)
+}
+
+// logoutSession ends the stored session on the server and removes the
+// local token. It holds the token lock, so no other stackctl process renews
+// the session at the same time. A server error is written to warn as a
+// warning; the local token is removed in all cases. A session of another
+// API URL is not sent to the current one.
+func logoutSession(warn io.Writer) error {
+	store := tokenStore()
+	if store == nil {
+		return nil
+	}
+
+	unlock, lockErr := store.Lock()
+	if lockErr == nil {
+		defer unlock()
+	}
+
+	st, loadErr := store.Load()
+	if loadErr == nil && st != nil && (st.Token != "" || st.RefreshToken != "") {
+		apiURL := resolveAPIURL()
+		switch {
+		case apiURL == "":
+		case st.APIURL != "" && !client.SameAPIURL(st.APIURL, apiURL):
+			fmt.Fprintf(warn, "Warning: the stored session belongs to %s, not %s; it is not ended on the server.\n", st.APIURL, apiURL)
+		default:
+			c := client.New(apiURL)
+			applyInsecureTLS(c)
+			c.Token = st.Token
+			if err := c.Logout(st.RefreshToken); err != nil {
+				fmt.Fprintf(warn, "Warning: could not end the session on the server: %v\n", err)
+			}
+		}
+	}
+
+	return store.Delete()
 }
 
 // readPassword reads a password from stdin. When fromStdin is true the

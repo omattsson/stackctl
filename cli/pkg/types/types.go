@@ -29,6 +29,7 @@ type StackInstance struct {
 	TTLMinutes        int        `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
 	DeployedAt        *time.Time `json:"last_deployed_at,omitempty" yaml:"last_deployed_at,omitempty"`
+	ErrorMessage      string     `json:"error_message,omitempty" yaml:"error_message,omitempty"`
 }
 
 // StackDefinition represents a stack definition with its chart configurations.
@@ -58,28 +59,42 @@ type StackTemplate struct {
 // Required are populated only on template-chart responses.
 type ChartConfig struct {
 	Base
-	Name            string `json:"name" yaml:"name"`
-	RepoURL         string `json:"repository_url" yaml:"repository_url"`
-	SourceRepoURL   string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
-	ChartName       string `json:"chart_name" yaml:"chart_name"`
-	ChartPath       string `json:"chart_path,omitempty" yaml:"chart_path,omitempty"`
-	ChartVersion    string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
-	ReleaseName     string `json:"release_name,omitempty" yaml:"release_name,omitempty"`
-	DefaultValues   string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
-	LockedValues    string `json:"locked_values,omitempty" yaml:"locked_values,omitempty"`
-	DeployOrder     int    `json:"deploy_order,omitempty" yaml:"deploy_order,omitempty"`
-	Required        bool   `json:"required,omitempty" yaml:"required,omitempty"`
-	BuildPipelineID string `json:"build_pipeline_id,omitempty" yaml:"build_pipeline_id,omitempty"`
+	StackDefinitionID string `json:"stack_definition_id,omitempty" yaml:"stack_definition_id,omitempty"`
+	Name              string `json:"name" yaml:"name"`
+	RepoURL           string `json:"repository_url" yaml:"repository_url"`
+	SourceRepoURL     string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
+	ChartName         string `json:"chart_name" yaml:"chart_name"`
+	ChartPath         string `json:"chart_path,omitempty" yaml:"chart_path,omitempty"`
+	ChartVersion      string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
+	ReleaseName       string `json:"release_name,omitempty" yaml:"release_name,omitempty"`
+	DefaultValues     string `json:"default_values,omitempty" yaml:"default_values,omitempty"`
+	LockedValues      string `json:"locked_values,omitempty" yaml:"locked_values,omitempty"`
+	DeployOrder       int    `json:"deploy_order,omitempty" yaml:"deploy_order,omitempty"`
+	Required          bool   `json:"required,omitempty" yaml:"required,omitempty"`
+	BuildPipelineID   string `json:"build_pipeline_id,omitempty" yaml:"build_pipeline_id,omitempty"`
 }
 
-// Cluster represents a registered Kubernetes cluster.
+// Cluster represents a registered Kubernetes cluster. Admin and devops
+// users get the full backend models.Cluster from GET /api/v1/clusters;
+// other roles get only the handlers.ClusterSummary fields (id, name,
+// is_default), so every other field is empty for them. CreatedAt is nil
+// for that summary; callers use it to tell the two shapes apart.
 type Cluster struct {
-	Base
-	Name        string `json:"name" yaml:"name"`
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
-	Status      string `json:"status" yaml:"status"`
-	IsDefault   bool   `json:"is_default" yaml:"is_default"`
-	NodeCount   int    `json:"node_count,omitempty" yaml:"node_count,omitempty"`
+	CreatedAt           *time.Time `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
+	ID                  string     `json:"id" yaml:"id"`
+	Name                string     `json:"name" yaml:"name"`
+	Description         string     `json:"description,omitempty" yaml:"description,omitempty"`
+	Status              string     `json:"health_status,omitempty" yaml:"health_status,omitempty"`
+	IsDefault           bool       `json:"is_default" yaml:"is_default"`
+	APIServerURL        string     `json:"api_server_url,omitempty" yaml:"api_server_url,omitempty"`
+	Region              string     `json:"region,omitempty" yaml:"region,omitempty"`
+	MaxNamespaces       int        `json:"max_namespaces,omitempty" yaml:"max_namespaces,omitempty"`
+	MaxInstancesPerUser int        `json:"max_instances_per_user,omitempty" yaml:"max_instances_per_user,omitempty"`
+	UseInCluster        bool       `json:"use_in_cluster,omitempty" yaml:"use_in_cluster,omitempty"`
+	RegistryURL         string     `json:"registry_url,omitempty" yaml:"registry_url,omitempty"`
+	RegistryUsername    string     `json:"registry_username,omitempty" yaml:"registry_username,omitempty"`
+	ImagePullSecretName string     `json:"image_pull_secret_name,omitempty" yaml:"image_pull_secret_name,omitempty"`
 }
 
 // CreateClusterRequest is the request body for POST /api/v1/clusters.
@@ -577,26 +592,32 @@ type BulkResponse struct {
 	Results    []BulkOperationResult `json:"results" yaml:"results"`
 }
 
-// ValueOverride represents a per-chart value override.
+// ValueOverride is a per-chart value override. Mirrors backend
+// models.ValueOverride (GET/PUT /api/v1/stack-instances/:id/overrides[/:chartId]).
+// Values is a YAML document.
 type ValueOverride struct {
-	Base
-	InstanceID string `json:"instance_id" yaml:"instance_id"`
-	ChartID    string `json:"chart_id" yaml:"chart_id"`
-	Values     string `json:"values" yaml:"values"`
+	ID              string    `json:"id" yaml:"id"`
+	StackInstanceID string    `json:"stack_instance_id" yaml:"stack_instance_id"`
+	ChartConfigID   string    `json:"chart_config_id" yaml:"chart_config_id"`
+	Values          string    `json:"values" yaml:"values"`
+	UpdatedAt       time.Time `json:"updated_at" yaml:"updated_at"`
 }
 
-// BranchOverride represents a per-chart branch override.
+// BranchOverride is a per-chart branch override. Mirrors backend
+// models.ChartBranchOverride (/api/v1/stack-instances/:id/branches[/:chartId]).
 type BranchOverride struct {
-	Base
-	InstanceID string `json:"instance_id" yaml:"instance_id"`
-	ChartID    string `json:"chart_id" yaml:"chart_id"`
-	Branch     string `json:"branch" yaml:"branch"`
+	ID              string    `json:"id" yaml:"id"`
+	StackInstanceID string    `json:"stack_instance_id" yaml:"stack_instance_id"`
+	ChartConfigID   string    `json:"chart_config_id" yaml:"chart_config_id"`
+	Branch          string    `json:"branch" yaml:"branch"`
+	UpdatedAt       time.Time `json:"updated_at" yaml:"updated_at"`
 }
 
-// GitBranch represents a branch from the git provider.
+// GitBranch is a branch from the git provider. Mirrors backend
+// gitprovider.Branch (GET /api/v1/git/branches).
 type GitBranch struct {
-	Name   string `json:"name" yaml:"name"`
-	IsHead bool   `json:"is_head,omitempty" yaml:"is_head,omitempty"`
+	Name      string `json:"name" yaml:"name"`
+	IsDefault bool   `json:"is_default" yaml:"is_default"`
 }
 
 // InstantiateTemplateRequest is the request body for POST /api/v1/templates/:id/instantiate.
@@ -683,11 +704,10 @@ type BulkTemplatesRequest struct {
 	TemplateIDs []string `json:"template_ids" yaml:"template_ids"`
 }
 
-// GitValidateResponse represents the result of branch validation.
+// GitValidateResponse is the result of GET /api/v1/git/validate-branch.
 type GitValidateResponse struct {
-	Valid   bool   `json:"valid" yaml:"valid"`
-	Branch  string `json:"branch" yaml:"branch"`
-	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+	Valid  bool   `json:"valid" yaml:"valid"`
+	Branch string `json:"branch" yaml:"branch"`
 }
 
 // ClusterHealthSummary is the success-path response of
@@ -896,30 +916,115 @@ type HealthResponse struct {
 	Status string `json:"status"`
 }
 
-// PodStatus represents the status of a Kubernetes pod.
-type PodStatus struct {
-	Name     string `json:"name" yaml:"name"`
-	Status   string `json:"status" yaml:"status"`
-	Ready    bool   `json:"ready" yaml:"ready"`
-	Restarts int    `json:"restarts" yaml:"restarts"`
-	Age      string `json:"age,omitempty" yaml:"age,omitempty"`
-}
-
-// InstanceStatus represents the full status of a stack instance.
+// InstanceStatus is the Kubernetes status of a stack instance, returned by
+// GET /api/v1/stack-instances/:id/status. Mirrors backend k8s.NamespaceStatus:
+// the pods are nested per chart under Charts. Every backend field is
+// modelled so -o json / -o yaml pass the API shape through unchanged.
 type InstanceStatus struct {
-	Status string      `json:"status"`
-	Pods   []PodStatus `json:"pods,omitempty"`
+	LastChecked time.Time     `json:"last_checked" yaml:"last_checked"`
+	Namespace   string        `json:"namespace" yaml:"namespace"`
+	Status      string        `json:"status" yaml:"status"`
+	Charts      []ChartStatus `json:"charts" yaml:"charts"`
+	Ingresses   []IngressInfo `json:"ingresses,omitempty" yaml:"ingresses,omitempty"`
+	Events      []PodEvent    `json:"events,omitempty" yaml:"events,omitempty"`
 }
 
-// QuotaOverride represents a per-instance resource quota override.
-// Unlike other override types, the API returns quota overrides without standard Base fields (ID, Version).
+// ChartStatus is the status of one Helm release (k8s.ChartStatus).
+type ChartStatus struct {
+	ReleaseName string           `json:"release_name" yaml:"release_name"`
+	ChartName   string           `json:"chart_name" yaml:"chart_name"`
+	Status      string           `json:"status" yaml:"status"`
+	Deployments []DeploymentInfo `json:"deployments" yaml:"deployments"`
+	Pods        []PodStatus      `json:"pods" yaml:"pods"`
+	Services    []ServiceInfo    `json:"services" yaml:"services"`
+}
+
+// PodStatus is the status of one Kubernetes pod (k8s.PodInfo).
+type PodStatus struct {
+	StartTime       *time.Time           `json:"start_time,omitempty" yaml:"start_time,omitempty"`
+	ContainerStates []ContainerStateInfo `json:"container_states" yaml:"container_states"`
+	Conditions      []PodConditionInfo   `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+	Name            string               `json:"name" yaml:"name"`
+	Phase           string               `json:"phase" yaml:"phase"`
+	Image           string               `json:"image" yaml:"image"`
+	NodeName        string               `json:"node_name,omitempty" yaml:"node_name,omitempty"`
+	RestartCount    int32                `json:"restart_count" yaml:"restart_count"`
+	Ready           bool                 `json:"ready" yaml:"ready"`
+}
+
+// ContainerStateInfo is the state of one container (k8s.ContainerStateInfo).
+type ContainerStateInfo struct {
+	ExitCode     *int32 `json:"exit_code,omitempty" yaml:"exit_code,omitempty"`
+	Name         string `json:"name" yaml:"name"`
+	State        string `json:"state" yaml:"state"`
+	Reason       string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Message      string `json:"message,omitempty" yaml:"message,omitempty"`
+	Image        string `json:"image" yaml:"image"`
+	RestartCount int32  `json:"restart_count" yaml:"restart_count"`
+	Ready        bool   `json:"ready" yaml:"ready"`
+}
+
+// PodConditionInfo is one pod condition (k8s.PodConditionInfo).
+type PodConditionInfo struct {
+	Type    string `json:"type" yaml:"type"`
+	Status  string `json:"status" yaml:"status"`
+	Reason  string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+// DeploymentInfo is the status of one Deployment (k8s.DeploymentInfo).
+type DeploymentInfo struct {
+	Name            string `json:"name" yaml:"name"`
+	ReadyReplicas   int32  `json:"ready_replicas" yaml:"ready_replicas"`
+	DesiredReplicas int32  `json:"desired_replicas" yaml:"desired_replicas"`
+	UpdatedReplicas int32  `json:"updated_replicas" yaml:"updated_replicas"`
+	Available       bool   `json:"available" yaml:"available"`
+}
+
+// ServiceInfo is one Kubernetes Service (k8s.ServiceInfo).
+type ServiceInfo struct {
+	Name         string   `json:"name" yaml:"name"`
+	Type         string   `json:"type" yaml:"type"`
+	ClusterIP    string   `json:"cluster_ip" yaml:"cluster_ip"`
+	ExternalIP   string   `json:"external_ip,omitempty" yaml:"external_ip,omitempty"`
+	Ports        []string `json:"ports,omitempty" yaml:"ports,omitempty"`
+	NodePorts    []int32  `json:"node_ports,omitempty" yaml:"node_ports,omitempty"`
+	IngressHosts []string `json:"ingress_hosts,omitempty" yaml:"ingress_hosts,omitempty"`
+}
+
+// IngressInfo is one access URL of the namespace (k8s.IngressInfo).
+type IngressInfo struct {
+	Name string `json:"name" yaml:"name"`
+	Host string `json:"host" yaml:"host"`
+	Path string `json:"path" yaml:"path"`
+	URL  string `json:"url" yaml:"url"`
+	TLS  bool   `json:"tls" yaml:"tls"`
+}
+
+// PodEvent is one Kubernetes event (k8s.PodEvent).
+type PodEvent struct {
+	FirstSeen time.Time `json:"first_seen" yaml:"first_seen"`
+	LastSeen  time.Time `json:"last_seen" yaml:"last_seen"`
+	Type      string    `json:"type" yaml:"type"`
+	Reason    string    `json:"reason" yaml:"reason"`
+	Message   string    `json:"message" yaml:"message"`
+	Object    string    `json:"object" yaml:"object"`
+	Count     int32     `json:"count" yaml:"count"`
+}
+
+// QuotaOverride is the per-instance resource quota override. Mirrors
+// backend models.InstanceQuotaOverride (/api/v1/stack-instances/:id/quota-overrides).
 type QuotaOverride struct {
-	InstanceID string    `json:"instance_id" yaml:"instance_id"`
-	CPURequest string    `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
-	CPULimit   string    `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
-	MemRequest string    `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
-	MemLimit   string    `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
-	UpdatedAt  time.Time `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
+	CreatedAt       time.Time `json:"created_at" yaml:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at" yaml:"updated_at"`
+	ID              string    `json:"id" yaml:"id"`
+	StackInstanceID string    `json:"stack_instance_id" yaml:"stack_instance_id"`
+	CPURequest      string    `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
+	CPULimit        string    `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
+	MemRequest      string    `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
+	MemLimit        string    `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
+	StorageLimit    string    `json:"storage_limit,omitempty" yaml:"storage_limit,omitempty"`
+	PodLimit        *int      `json:"pod_limit,omitempty" yaml:"pod_limit,omitempty"`
 }
 
 // SetValueOverrideRequest is the request body for setting value overrides.
@@ -933,18 +1038,17 @@ type SetBranchOverrideRequest struct {
 	Branch string `json:"branch"`
 }
 
-// SetQuotaOverrideRequest is the request body for setting quota overrides.
+// SetQuotaOverrideRequest is the request body of
+// PUT /api/v1/stack-instances/:id/quota-overrides (backend
+// handlers.setQuotaOverrideRequest). The backend replaces the whole
+// override: a field that is not sent is cleared.
 type SetQuotaOverrideRequest struct {
-	CPURequest string `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
-	CPULimit   string `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
-	MemRequest string `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
-	MemLimit   string `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
-}
-
-// MergedValues represents the merged Helm values for an instance.
-type MergedValues struct {
-	InstanceID string                            `json:"instance_id" yaml:"instance_id"`
-	Charts     map[string]map[string]interface{} `json:"charts" yaml:"charts"`
+	CPURequest   string `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
+	CPULimit     string `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
+	MemRequest   string `json:"memory_request,omitempty" yaml:"memory_request,omitempty"`
+	MemLimit     string `json:"memory_limit,omitempty" yaml:"memory_limit,omitempty"`
+	StorageLimit string `json:"storage_limit,omitempty" yaml:"storage_limit,omitempty"`
+	PodLimit     *int   `json:"pod_limit,omitempty" yaml:"pod_limit,omitempty"`
 }
 
 // SharedValues represents cluster-level shared Helm values.
@@ -1038,11 +1142,31 @@ type WatchEvent struct {
 	Type         string    `json:"type" yaml:"type"`
 }
 
-// CompareResult represents the comparison between two stack instances.
+// CompareResult is the response of GET /api/v1/stack-instances/compare.
+// Mirrors backend handlers.CompareInstancesResponse.
 type CompareResult struct {
-	Left  *StackInstance         `json:"left" yaml:"left"`
-	Right *StackInstance         `json:"right" yaml:"right"`
-	Diffs map[string]interface{} `json:"diffs,omitempty" yaml:"diffs,omitempty"`
+	Left   CompareInstanceSummary `json:"left" yaml:"left"`
+	Right  CompareInstanceSummary `json:"right" yaml:"right"`
+	Charts []CompareChartDiff     `json:"charts" yaml:"charts"`
+}
+
+// CompareInstanceSummary is one side of a comparison. Owner is the
+// owner's username.
+type CompareInstanceSummary struct {
+	ID             string `json:"id" yaml:"id"`
+	Name           string `json:"name" yaml:"name"`
+	DefinitionName string `json:"definition_name" yaml:"definition_name"`
+	Branch         string `json:"branch" yaml:"branch"`
+	Owner          string `json:"owner" yaml:"owner"`
+}
+
+// CompareChartDiff holds the merged values of one chart on both sides.
+// LeftValues or RightValues is nil when the chart exists on one side only.
+type CompareChartDiff struct {
+	ChartName      string  `json:"chart_name" yaml:"chart_name"`
+	LeftValues     *string `json:"left_values" yaml:"left_values"`
+	RightValues    *string `json:"right_values" yaml:"right_values"`
+	HasDifferences bool    `json:"has_differences" yaml:"has_differences"`
 }
 
 // CreateTemplateRequest is the request body for POST /api/v1/templates.

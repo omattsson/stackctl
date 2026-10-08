@@ -21,9 +21,9 @@ func setupGitTestCmd(t *testing.T, apiURL string) *bytes.Buffer {
 
 func sampleBranches() []types.GitBranch {
 	return []types.GitBranch{
-		{Name: "main", IsHead: true},
-		{Name: "develop", IsHead: false},
-		{Name: "feature/xyz", IsHead: false},
+		{Name: "main", IsDefault: true},
+		{Name: "develop", IsDefault: false},
+		{Name: "feature/xyz", IsDefault: false},
 	}
 }
 
@@ -51,11 +51,34 @@ func TestGitBranchesCmd_TableOutput(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "NAME")
-	assert.Contains(t, out, "HEAD")
+	assert.Contains(t, out, "DEFAULT")
 	assert.Contains(t, out, "main")
 	assert.Contains(t, out, "*")
 	assert.Contains(t, out, "develop")
 	assert.Contains(t, out, "feature/xyz")
+}
+
+// TestGitBranchesCmd_DefaultColumn: the API marks the default branch with
+// is_default; the table shows it in the DEFAULT column.
+func TestGitBranchesCmd_DefaultColumn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"name":"develop","is_default":false},{"name":"master","is_default":true}]`))
+	}))
+	defer server.Close()
+
+	buf := setupGitTestCmd(t, server.URL)
+
+	gitBranchesCmd.Flags().Set("repo", "https://example.com/org/repo")
+	t.Cleanup(func() { gitBranchesCmd.Flags().Set("repo", "") })
+
+	require.NoError(t, gitBranchesCmd.RunE(gitBranchesCmd, []string{}))
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.Len(t, lines, 3)
+	assert.Equal(t, []string{"NAME", "DEFAULT"}, strings.Fields(lines[0]))
+	assert.Equal(t, []string{"develop"}, strings.Fields(lines[1]))
+	assert.Equal(t, []string{"master", "*"}, strings.Fields(lines[2]))
 }
 
 func TestGitBranchesCmd_JSONOutput(t *testing.T) {
@@ -80,7 +103,7 @@ func TestGitBranchesCmd_JSONOutput(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.Len(t, result, 3)
 	assert.Equal(t, "main", result[0].Name)
-	assert.True(t, result[0].IsHead)
+	assert.True(t, result[0].IsDefault)
 }
 
 func TestGitBranchesCmd_YAMLOutput(t *testing.T) {
@@ -124,7 +147,7 @@ func TestGitBranchesCmd_EmptyResult(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "NAME")
-	assert.Contains(t, out, "HEAD")
+	assert.Contains(t, out, "DEFAULT")
 }
 
 func TestGitBranchesCmd_APIError(t *testing.T) {
@@ -167,7 +190,7 @@ func TestGitBranchesCmd_Unauthorized(t *testing.T) {
 
 func TestGitValidateCmd_ValidBranch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/git/validate", r.URL.Path)
+		require.Equal(t, "/api/v1/git/validate-branch", r.URL.Path)
 		require.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "https://github.com/org/repo", r.URL.Query().Get("repo"))
 		assert.Equal(t, "main", r.URL.Query().Get("branch"))
@@ -203,11 +226,8 @@ func TestGitValidateCmd_InvalidBranch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.GitValidateResponse{
-			Valid:   false,
-			Branch:  "nonexistent",
-			Message: "branch does not exist",
-		})
+		// Recorded shape of GET /git/validate-branch.
+		_, _ = w.Write([]byte(`{"valid":false,"branch":"nonexistent"}`))
 	}))
 	defer server.Close()
 
@@ -225,7 +245,8 @@ func TestGitValidateCmd_InvalidBranch(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "false")
-	assert.Contains(t, out, "branch does not exist")
+	assert.Contains(t, out, "nonexistent")
+	assert.NotContains(t, out, "MESSAGE")
 }
 
 func TestGitValidateCmd_JSONOutput(t *testing.T) {
@@ -263,9 +284,8 @@ func TestGitValidateCmd_YAMLOutput(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.GitValidateResponse{
-			Valid:   true,
-			Branch:  "main",
-			Message: "",
+			Valid:  true,
+			Branch: "main",
 		})
 	}))
 	defer server.Close()
