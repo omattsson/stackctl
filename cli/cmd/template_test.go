@@ -1844,3 +1844,30 @@ func TestTemplateUpdateChartCmd_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestTemplateGetCmd_OwnerDisplayName(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		wantRe   string
+	}{
+		{name: "username present", username: "alice", wantRe: `Owner:\s+alice \(admin\)`},
+		{name: "username absent", username: "", wantRe: `Owner:\s+admin\n`},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl := sampleTemplate()
+			tmpl.OwnerUsername = tt.username
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(tmpl)
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			require.NoError(t, templateGetCmd.RunE(templateGetCmd, []string{"10"}))
+			assert.Regexp(t, tt.wantRe, buf.String())
+		})
+	}
+}

@@ -50,6 +50,27 @@ var (
 	auditFlagOutputFile string
 )
 
+// auditFilterValuesHelp lists the main values of --action and
+// --entity-type (backend middleware.KnownAuditActions and
+// KnownAuditEntityTypes). The filters match the exact stored value.
+const auditFilterValuesHelp = `
+Filter values (exact match, k8s-stack-manager v0.7.0 or later):
+  --action       create, update, delete, deploy, stop, clean, rollback,
+                 extend_ttl, clone, invoke_action, publish, unpublish,
+                 instantiate, import, upgrade, test, test_connection,
+                 set_default, run, disable, enable, reset_password,
+                 quick_deploy, expired, cleanup_policy_executed
+  --entity-type  stack_instance, stack_definition, stack_template,
+                 chart_config, value_override, branch_override,
+                 quota_override, user, api_key, cluster, quota,
+                 shared_values, cleanup_policy, notification_channel,
+                 notification_subscription, notification_preference,
+                 favorite, namespace
+Older servers (and entries written before v0.7.0) use the HTTP method as
+the action and the last route segment as the entity type. For example, an
+old deploy entry has --action create --entity-type deploy.
+`
+
 var auditLogListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List audit log entries",
@@ -60,11 +81,12 @@ Time filters (--since / --until) accept either an absolute RFC3339 timestamp
 for 7 days). Day/week units ("7d", "1w") are NOT accepted — Go's standard
 time.ParseDuration only understands ns/us/ms/s/m/h. Relative values are
 negated and added to time.Now() before being sent to the backend as RFC3339.
-
+` + auditFilterValuesHelp + `
 Examples:
   stackctl audit log list
-  stackctl audit log list --user u-123 --action stack.deploy
-  stackctl audit log list --entity-type stack --since 24h
+  stackctl audit log list --user u-123 --action deploy
+  stackctl audit log list --entity-type stack_instance --since 24h
+  stackctl audit log list --entity-type stack_template --action publish
   stackctl audit log list --since 2026-05-01T00:00:00Z --limit 100
   stackctl audit log list --cursor eyJpZCI6...`,
 	SilenceUsage: true,
@@ -138,7 +160,7 @@ a 403 surfaced as a command error.
 The --format flag is independent of the global --output (-o) flag: --output
 controls how the command's own progress messages are formatted (table is
 fine), --format controls the server's response encoding.
-
+` + auditFilterValuesHelp + `
 Examples:
   stackctl audit log export                       # JSON to stdout
   stackctl audit log export --format csv > log.csv
@@ -285,8 +307,8 @@ func init() {
 	// to two distinct Flags() sets (which would silently override defaults
 	// and share state across commands within one Execute()).
 	auditLogCmd.PersistentFlags().StringVar(&auditFlagUser, "user", "", "Filter by user ID")
-	auditLogCmd.PersistentFlags().StringVar(&auditFlagAction, "action", "", "Filter by action name (e.g. stack.deploy)")
-	auditLogCmd.PersistentFlags().StringVar(&auditFlagEntityType, "entity-type", "", "Filter by entity type (e.g. stack, template)")
+	auditLogCmd.PersistentFlags().StringVar(&auditFlagAction, "action", "", "Filter by action (e.g. deploy, create, publish)")
+	auditLogCmd.PersistentFlags().StringVar(&auditFlagEntityType, "entity-type", "", "Filter by entity type (e.g. stack_instance, stack_template)")
 	auditLogCmd.PersistentFlags().StringVar(&auditFlagEntityID, "entity-id", "", "Filter by entity ID")
 	auditLogCmd.PersistentFlags().StringVar(&auditFlagSince, "since", "", "Lower bound (RFC3339 or duration like 24h)")
 	auditLogCmd.PersistentFlags().StringVar(&auditFlagUntil, "until", "", "Upper bound (RFC3339 or duration like 24h)")

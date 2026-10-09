@@ -1461,3 +1461,46 @@ func TestDefinitionUpdateChartCmd_UnknownChartName(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `chart "nope" is not part of definition `+valuesTestDefID+` (charts: my-db, my-api)`)
 }
+
+// ---------- owner display name ----------
+
+func TestDefinitionOwnerDisplayName(t *testing.T) {
+	tests := []struct {
+		name      string
+		username  string
+		wantList  string
+		wantGetRe string
+	}{
+		{name: "username present", username: "alice", wantList: "alice", wantGetRe: `Owner:\s+alice \(admin\)`},
+		{name: "username absent", username: "", wantList: "admin", wantGetRe: `Owner:\s+admin\n`},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			def := sampleDefinition()
+			def.OwnerUsername = tt.username
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/stack-definitions" {
+					_ = json.NewEncoder(w).Encode(types.ListResponse[types.StackDefinition]{
+						Data: []types.StackDefinition{def}, Total: 1, Page: 1, PageSize: 20, TotalPages: 1,
+					})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(def)
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			require.NoError(t, definitionListCmd.RunE(definitionListCmd, []string{}))
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			require.Len(t, lines, 2)
+			fields := strings.Fields(lines[1])
+			assert.Equal(t, tt.wantList, fields[len(fields)-1])
+
+			buf.Reset()
+			require.NoError(t, definitionGetCmd.RunE(definitionGetCmd, []string{"5"}))
+			assert.Regexp(t, tt.wantGetRe, buf.String())
+		})
+	}
+}

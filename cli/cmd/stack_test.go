@@ -2814,3 +2814,336 @@ func TestBestEffortClient(t *testing.T) {
 	assert.Equal(t, 1, calls, "a 503 must not be retried")
 	assert.Equal(t, "Bearer test-token", gotAuth)
 }
+
+// ========== values drift, server warnings and display names ==========
+
+// captureStderr sends the stderr of cmd to a buffer until the test ends.
+func captureStderr(t *testing.T, cmd *cobra.Command) *bytes.Buffer {
+	t.Helper()
+	var errBuf bytes.Buffer
+	cmd.SetErr(&errBuf)
+	t.Cleanup(func() { cmd.SetErr(nil) })
+	return &errBuf
+}
+
+// stoppedStackServer serves GET /stack-instances/42 with body.
+func stoppedStackServer(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/stack-instances/42", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+}
+
+func TestStackGetCmd_ValuesDrift(t *testing.T) {
+	const driftBody = `{"id":"42","name":"my-stack","owner_id":"u1","status":"stopped","stack_definition_id":"5","values_drift":true}`
+	const cleanBody = `{"id":"42","name":"my-stack","owner_id":"u1","status":"stopped","stack_definition_id":"5"}`
+
+	tests := []struct {
+		name        string
+		body        string
+		format      output.Format
+		wantWarning bool
+	}{
+		{name: "table with drift", body: driftBody, format: output.FormatTable, wantWarning: true},
+		{name: "json with drift", body: driftBody, format: output.FormatJSON, wantWarning: true},
+		{name: "yaml with drift", body: driftBody, format: output.FormatYAML, wantWarning: true},
+		{name: "table without drift", body: cleanBody, format: output.FormatTable},
+		{name: "json without drift", body: cleanBody, format: output.FormatJSON},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			server := stoppedStackServer(t, tt.body)
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			printer.Format = tt.format
+			errBuf := captureStderr(t, stackGetCmd)
+
+			require.NoError(t, stackGetCmd.RunE(stackGetCmd, []string{"42"}))
+
+			if !tt.wantWarning {
+				assert.Empty(t, errBuf.String())
+				assert.NotContains(t, buf.String(), "values_drift")
+				return
+			}
+			assert.Equal(t, "Warning: "+types.ValuesDriftWarning+"\n", errBuf.String())
+			switch tt.format {
+			case output.FormatJSON:
+				var got map[string]interface{}
+				require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+				assert.Equal(t, true, got["values_drift"])
+				assert.Equal(t, types.ValuesDriftWarning, got["warning"])
+			case output.FormatYAML:
+				var got map[string]interface{}
+				require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+				assert.Equal(t, true, got["values_drift"])
+				assert.Equal(t, types.ValuesDriftWarning, got["warning"])
+			default:
+				assert.NotContains(t, buf.String(), "Warning:", "the warning goes to stderr, not stdout")
+			}
+		})
+	}
+}
+
+func TestStackGetCmd_ValuesDriftServerText(t *testing.T) {
+	server := stoppedStackServer(t, `{"id":"42","name":"my-stack","status":"stopped","values_drift":true,"warning":"Next deploy\u001b[31m undoes the rollback."}`)
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	errBuf := captureStderr(t, stackGetCmd)
+
+	require.NoError(t, stackGetCmd.RunE(stackGetCmd, []string{"42"}))
+	assert.Equal(t, "Warning: Next deploy [31m undoes the rollback.\n", errBuf.String(), "the server text is used and sanitized")
+}
+
+func TestStackGetCmd_DisplayNames(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "names present",
+			body: `{"id":"42","name":"my-stack","status":"stopped","owner_id":"u1","owner_username":"alice",` +
+				`"cluster_id":"c1","cluster_name":"dev-cluster","stack_definition_id":"d1","definition_name":"api-service"}`,
+			want: []string{`Owner:\s+alice \(u1\)`, `Cluster:\s+dev-cluster \(c1\)`, `Definition:\s+api-service \(d1\)`},
+		},
+		{
+			name: "names absent",
+			body: `{"id":"42","name":"my-stack","status":"stopped","owner_id":"u1","cluster_id":"c1","stack_definition_id":"d1"}`,
+			want: []string{`Owner:\s+u1\n`, `Cluster:\s+c1\n`, `Definition:\s+d1\n`},
+		},
+		{
+			name: "no cluster",
+			body: `{"id":"42","name":"my-stack","status":"stopped","owner_id":"u1","stack_definition_id":"d1"}`,
+			want: []string{`Cluster:\s+-\n`},
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			server := stoppedStackServer(t, tt.body)
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			require.NoError(t, stackGetCmd.RunE(stackGetCmd, []string{"42"}))
+			for _, re := range tt.want {
+				assert.Regexp(t, re, buf.String())
+			}
+		})
+	}
+}
+
+func TestStackListCmd_OwnerDisplayName(t *testing.T) {
+	tests := []struct {
+		name      string
+		item      string
+		wantOwner string
+		wantClust string
+	}{
+		{
+			name:      "names present",
+			item:      `{"id":"42","name":"my-stack","status":"running","owner_id":"u1","owner_username":"alice","cluster_id":"c1","cluster_name":"dev-cluster"}`,
+			wantOwner: "alice",
+			wantClust: "dev-cluster",
+		},
+		{
+			name:      "names absent",
+			item:      `{"id":"42","name":"my-stack","status":"running","owner_id":"u1","cluster_id":"c1"}`,
+			wantOwner: "u1",
+			wantClust: "c1",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":[` + tt.item + `],"total":1,"page":1,"pageSize":25,"totalPages":1}`))
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			require.NoError(t, stackListCmd.RunE(stackListCmd, []string{}))
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			require.Len(t, lines, 2)
+			fields := strings.Fields(lines[1])
+			require.GreaterOrEqual(t, len(fields), 5)
+			assert.Equal(t, tt.wantOwner, fields[3])
+			assert.Equal(t, tt.wantClust, fields[4])
+		})
+	}
+}
+
+func TestStackRollbackCmd_Warning(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		wantErr  string
+	}{
+		{
+			name:     "drift with server text",
+			response: `{"log_id":"400","message":"Rollback started","target_log_id":"300","values_drift":true,"warning":"The next deploy applies the stored overrides again."}`,
+			wantErr:  "Warning: The next deploy applies the stored overrides again.\n",
+		},
+		{
+			name:     "drift without text",
+			response: `{"log_id":"400","message":"Rollback started","target_log_id":"300","values_drift":true}`,
+			wantErr:  "Warning: " + types.ValuesDriftWarning + "\n",
+		},
+		{
+			name:     "no drift",
+			response: `{"log_id":"400","message":"Rollback started","target_log_id":"300","values_drift":false}`,
+		},
+		{
+			name:     "older server",
+			response: `{"log_id":"400","message":"Rollback started"}`,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/api/v1/stack-instances/42/rollback", r.URL.Path)
+				var req types.RollbackRequest
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+				assert.Equal(t, "300", req.TargetLogID)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(tt.response))
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			errBuf := captureStderr(t, stackRollbackCmd)
+			require.NoError(t, stackRollbackCmd.Flags().Set("yes", "true"))
+			require.NoError(t, stackRollbackCmd.Flags().Set("target-log", "300"))
+			t.Cleanup(func() {
+				stackRollbackCmd.Flags().Set("yes", "false")
+				stackRollbackCmd.Flags().Set("target-log", "")
+			})
+
+			require.NoError(t, stackRollbackCmd.RunE(stackRollbackCmd, []string{"42"}))
+			assert.Contains(t, buf.String(), "Rollback started for stack 42 (log ID: 400)")
+			assert.Equal(t, tt.wantErr, errBuf.String())
+		})
+	}
+}
+
+func TestStackRollbackCmd_StructuredOutput(t *testing.T) {
+	const response = `{"log_id":"400","message":"Rollback started","target_log_id":"300","values_drift":true,"warning":"The next deploy applies the stored overrides again."}`
+	tests := []struct {
+		name   string
+		format output.Format
+		decode func([]byte, interface{}) error
+	}{
+		{name: "json", format: output.FormatJSON, decode: json.Unmarshal},
+		{name: "yaml", format: output.FormatYAML, decode: yaml.Unmarshal},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(response))
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			printer.Format = tt.format
+			errBuf := captureStderr(t, stackRollbackCmd)
+			require.NoError(t, stackRollbackCmd.Flags().Set("yes", "true"))
+			require.NoError(t, stackRollbackCmd.Flags().Set("target-log", "300"))
+			t.Cleanup(func() {
+				stackRollbackCmd.Flags().Set("yes", "false")
+				stackRollbackCmd.Flags().Set("target-log", "")
+			})
+
+			require.NoError(t, stackRollbackCmd.RunE(stackRollbackCmd, []string{"42"}))
+			var got map[string]interface{}
+			require.NoError(t, tt.decode(buf.Bytes(), &got))
+			assert.Equal(t, "400", got["log_id"])
+			assert.Equal(t, "300", got["target_log_id"])
+			assert.Equal(t, true, got["values_drift"])
+			assert.Equal(t, "The next deploy applies the stored overrides again.", got["warning"])
+			assert.Contains(t, errBuf.String(), "Warning: ")
+		})
+	}
+}
+
+func TestStackCloneCmd_Warning(t *testing.T) {
+	const quotaWarning = "The quota override of the source was not copied: it exceeds the cluster quota (cpu_limit 64 exceeds the cluster quota 16). The clone uses the cluster quota; only admin or devops can grant more."
+	tests := []struct {
+		name    string
+		quiet   bool
+		body    string
+		wantOut string
+		wantErr string
+	}{
+		{
+			name:    "warning",
+			body:    `{"id":"55","name":"my-stack-copy","warning":"` + quotaWarning + `"}`,
+			wantOut: "Cloned stack 42 → new stack 55\n",
+			wantErr: "Warning: " + quotaWarning + "\n",
+		},
+		{
+			name:    "warning in quiet mode",
+			quiet:   true,
+			body:    `{"id":"55","name":"my-stack-copy","warning":"` + quotaWarning + `"}`,
+			wantOut: "55\n",
+			wantErr: "Warning: " + quotaWarning + "\n",
+		},
+		{
+			name:    "no warning",
+			body:    `{"id":"55","name":"my-stack-copy"}`,
+			wantOut: "Cloned stack 42 → new stack 55\n",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/api/v1/stack-instances/42/clone", r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			printer.Quiet = tt.quiet
+			errBuf := captureStderr(t, stackCloneCmd)
+
+			require.NoError(t, stackCloneCmd.RunE(stackCloneCmd, []string{"42"}))
+			assert.Equal(t, tt.wantOut, buf.String())
+			assert.Equal(t, tt.wantErr, errBuf.String())
+		})
+	}
+}
+
+func TestDisplayNameHelpers(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, display, id string
+		wantName, wantID  string
+	}{
+		{name: "both", display: "alice", id: "u1", wantName: "alice", wantID: "alice (u1)"},
+		{name: "id only", display: "", id: "u1", wantName: "u1", wantID: "u1"},
+		{name: "blank name", display: "  ", id: "u1", wantName: "u1", wantID: "u1"},
+		{name: "name only", display: "alice", id: "", wantName: "alice", wantID: "alice"},
+		{name: "same", display: "u1", id: "u1", wantName: "u1", wantID: "u1"},
+		{name: "none", display: "", id: "", wantName: "", wantID: "-"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.wantName, displayName(tt.display, tt.id))
+			assert.Equal(t, tt.wantID, displayNameWithID(tt.display, tt.id))
+		})
+	}
+}

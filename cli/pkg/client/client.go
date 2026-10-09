@@ -110,6 +110,12 @@ func (e *APIError) UserFacingError() string {
 	}
 }
 
+// SanitizeServerText cleans up a server text (for example the warning of a
+// response body) for safe display on a terminal, like server error messages.
+func SanitizeServerText(msg string) string {
+	return sanitizeServerMessage(msg)
+}
+
 // sanitizeServerMessage cleans up a server error message for safe display.
 // It trims whitespace, replaces control characters, collapses runs of
 // whitespace, and truncates to maxServerMessageLen runes (with "..." appended

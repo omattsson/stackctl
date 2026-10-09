@@ -5158,3 +5158,10 @@ func TestSanitizeServerMessage_ControlAndBidi(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeServerText(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "next deploy [31m applies", SanitizeServerText(" next deploy\x1b[31m applies\n"))
+	assert.Equal(t, "", SanitizeServerText("  "))
+	assert.Equal(t, "abc", SanitizeServerText("a\u202eb\u2066c"))
+}

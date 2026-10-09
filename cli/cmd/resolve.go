@@ -49,7 +49,7 @@ func resolveStackID(c *client.Client, nameOrID string) (string, error) {
 	default:
 		msg := fmt.Sprintf("multiple stacks match name %q — use the ID instead:\n", nameOrID)
 		for _, s := range resp.Data {
-			msg += fmt.Sprintf("  %s  (owner: %s, status: %s)\n", s.ID, s.Owner, s.Status)
+			msg += fmt.Sprintf("  %s  (owner: %s, status: %s)\n", s.ID, displayName(s.OwnerUsername, s.Owner), s.Status)
 		}
 		return "", fmt.Errorf("%s", msg)
 	}
@@ -81,7 +81,7 @@ func resolveDefinitionID(c *client.Client, nameOrID string) (string, error) {
 	default:
 		msg := fmt.Sprintf("multiple definitions match name %q — use the ID instead:\n", nameOrID)
 		for _, d := range resp.Data {
-			msg += fmt.Sprintf("  %s  (owner: %s)\n", d.ID, d.Owner)
+			msg += fmt.Sprintf("  %s  (owner: %s)\n", d.ID, displayName(d.OwnerUsername, d.Owner))
 		}
 		return "", fmt.Errorf("%s", msg)
 	}

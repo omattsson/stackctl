@@ -942,7 +942,7 @@ func templateFields(tmpl *types.StackTemplate) []output.KeyValue {
 	}
 	fields = append(fields,
 		output.KeyValue{Key: "Published", Value: published},
-		output.KeyValue{Key: "Owner", Value: tmpl.Owner},
+		output.KeyValue{Key: "Owner", Value: displayNameWithID(tmpl.OwnerUsername, tmpl.Owner)},
 	)
 	return fields
 }

@@ -15,12 +15,24 @@ type Base struct {
 }
 
 // StackInstance represents a deployed stack instance.
+//
+// OwnerUsername, DefinitionName and ClusterName are display names. Servers
+// that do not send them leave them empty; the table output then shows the
+// IDs.
+//
+// ValuesDrift is true when the running values come from a rollback and the
+// stored overrides produce other values: the next deploy applies the stored
+// overrides again. Only GET /api/v1/stack-instances/:id computes it
+// (k8s-stack-manager v0.6.0+). Warning is set by the clone response (a
+// quota override that is not copied). "stack get" sets Warning to
+// ValuesDriftWarning when ValuesDrift is true and the server sends no text.
 type StackInstance struct {
 	Base
 	Name              string     `json:"name" yaml:"name"`
 	StackDefinitionID string     `json:"stack_definition_id" yaml:"stack_definition_id"`
 	DefinitionName    string     `json:"definition_name,omitempty" yaml:"definition_name,omitempty"`
 	Owner             string     `json:"owner_id" yaml:"owner_id"`
+	OwnerUsername     string     `json:"owner_username,omitempty" yaml:"owner_username,omitempty"`
 	Branch            string     `json:"branch" yaml:"branch"`
 	Namespace         string     `json:"namespace" yaml:"namespace"`
 	Status            string     `json:"status" yaml:"status"`
@@ -30,7 +42,16 @@ type StackInstance struct {
 	ExpiresAt         *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
 	DeployedAt        *time.Time `json:"last_deployed_at,omitempty" yaml:"last_deployed_at,omitempty"`
 	ErrorMessage      string     `json:"error_message,omitempty" yaml:"error_message,omitempty"`
+	ValuesDrift       bool       `json:"values_drift,omitempty" yaml:"values_drift,omitempty"`
+	Warning           string     `json:"warning,omitempty" yaml:"warning,omitempty"`
 }
+
+// ValuesDriftWarning is a copy of the server constant msgValuesDrift
+// (k8s-stack-manager backend/internal/api/handlers/instance_rollback.go).
+// The swagger file does not contain the text, so no test compares them;
+// keep both in sync. "stack get" uses it when the server sends values_drift
+// without a warning text.
+const ValuesDriftWarning = "The stored overrides differ from the running values. The next deploy applies the stored overrides again."
 
 // StackDefinition represents a stack definition with its chart configurations.
 type StackDefinition struct {
@@ -39,6 +60,7 @@ type StackDefinition struct {
 	Description   string        `json:"description,omitempty" yaml:"description,omitempty"`
 	DefaultBranch string        `json:"default_branch" yaml:"default_branch"`
 	Owner         string        `json:"owner_id" yaml:"owner_id"`
+	OwnerUsername string        `json:"owner_username,omitempty" yaml:"owner_username,omitempty"`
 	Charts        []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
 }
 
@@ -58,6 +80,7 @@ type StackTemplate struct {
 	DefaultBranch         string        `json:"default_branch,omitempty" yaml:"default_branch,omitempty"`
 	Published             bool          `json:"is_published" yaml:"is_published"`
 	Owner                 string        `json:"owner_id" yaml:"owner_id"`
+	OwnerUsername         string        `json:"owner_username,omitempty" yaml:"owner_username,omitempty"`
 	Charts                []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
 	DefinitionCount       int           `json:"definition_count,omitempty" yaml:"definition_count,omitempty"`
 	PublishedVersion      *string       `json:"published_version,omitempty" yaml:"published_version,omitempty"`
@@ -549,9 +572,17 @@ type RollbackRequest struct {
 }
 
 // RollbackResponse is the response from POST /api/v1/stack-instances/:id/rollback.
+//
+// For a rollback to a target deploy (k8s-stack-manager v0.6.0+), ValuesDrift
+// is true when the stored overrides produce other values than the target:
+// the next deploy changes the running values again. Warning explains it.
+// Both are absent for a rollback by one revision and on older servers.
 type RollbackResponse struct {
-	LogID   string `json:"log_id" yaml:"log_id"`
-	Message string `json:"message" yaml:"message"`
+	LogID       string `json:"log_id" yaml:"log_id"`
+	Message     string `json:"message" yaml:"message"`
+	TargetLogID string `json:"target_log_id,omitempty" yaml:"target_log_id,omitempty"`
+	ValuesDrift *bool  `json:"values_drift,omitempty" yaml:"values_drift,omitempty"`
+	Warning     string `json:"warning,omitempty" yaml:"warning,omitempty"`
 }
 
 // DeploymentLogResult holds paginated deployment log results from the backend.

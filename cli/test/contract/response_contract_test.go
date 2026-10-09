@@ -48,10 +48,19 @@ func TestResponseSchemas_MatchBackend(t *testing.T) {
 			name:       "StackInstance",
 			goType:     types.StackInstance{},
 			swaggerDef: "models.StackInstance",
-			// definition_name and cluster_name are display fields the
-			// backend does not send on instance responses (yet).
-			excludeGoTags: append([]string{"definition_name", "cluster_name"}, baseOnly...),
+			// definition_name, cluster_name and owner_username are display
+			// fields the backend does not send on instance responses yet
+			// (k8s-stack-manager#470). warning comes only with the clone
+			// response (handlers.CloneInstanceResponse).
+			excludeGoTags: append([]string{"definition_name", "cluster_name", "owner_username", "warning"}, baseOnly...),
 		},
+		{
+			name:          "CloneInstanceResponse",
+			goType:        types.StackInstance{},
+			swaggerDef:    "handlers.CloneInstanceResponse",
+			excludeGoTags: append([]string{"definition_name", "cluster_name", "owner_username"}, baseOnly...),
+		},
+		{name: "RollbackResponse", goType: types.RollbackResponse{}, swaggerDef: "handlers.RollbackResponse"},
 	}
 
 	for _, tc := range cases {

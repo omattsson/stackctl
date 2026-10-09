@@ -188,8 +188,12 @@ stackctl stack extend my-app --minutes 120
 # Deployment history and rollback
 stackctl stack history my-app
 stackctl stack history-values my-app <log-id>
-stackctl stack rollback my-app --target <log-id>
+stackctl stack rollback my-app --target-log <log-id>
 ```
+
+`stack rollback --target-log` does not change the stored overrides. When the stored overrides produce other values than the target deploy, the server sets `values_drift` and stackctl writes a warning to stderr: the next deploy applies the stored overrides again. `stack get` writes the same warning while the drift exists; `-o json` and `-o yaml` include `values_drift` and `warning`. `stack rollback -o json|yaml` prints the rollback response, with `values_drift` and `warning`. `stack clone` writes the server warning to stderr when the quota override of the source is not copied, for example because it is above the cluster quota (k8s-stack-manager v0.7.0 or later).
+
+`stack list`, `stack get`, `definition list/get` and `template get` show the owner, cluster and definition names when the server sends them (`owner_username`, `cluster_name`, `definition_name`; k8s-stack-manager v0.7.0 or later, server issue #470). Otherwise they show the IDs. The `stack get` table shows `Cluster` and `Definition` (before: `Cluster ID` and `Definition ID`) as "name (id)" or the ID.
 
 `stack extend --minutes N` adds N minutes to the current expiry, or to now when the stack has expired. It never makes the expiry earlier and does not change the TTL of the stack. The server caps the new expiry at 30 days from now. `--minutes` needs k8s-stack-manager v0.6.0 or later. An older server ignores `--minutes` and resets the expiry to now + TTL. stackctl detects this: it prints the old and the new expiry, then fails (exit code 1) with "the server did not add N minutes ... upgrade k8s-stack-manager to v0.6.0 or later". `--reset-ttl M` (deprecated) keeps the old behaviour: the TTL becomes M minutes and the expiry now + M minutes, which can be earlier. `--yes` has no effect and is accepted for older scripts.
 
@@ -299,6 +303,11 @@ stackctl override branch set my-app my-chart feature/hotfix
 # Quota overrides
 stackctl override quota get my-app
 stackctl override quota set my-app --cpu-request 200m --cpu-limit 500m --memory-request 256Mi --memory-limit 1Gi
+# Change one field; the other fields stay. An empty value clears a CPU, memory or storage field.
+stackctl override quota set my-app --memory-limit 2Gi
+stackctl override quota set my-app --cpu-limit ""
+# Replace the whole quota override with only the given fields
+stackctl override quota set my-app --replace --memory-limit 1Gi
 stackctl override quota delete my-app
 
 # View merged values (YAML per chart), one chart, or save the ZIP export
@@ -309,6 +318,20 @@ stackctl stack values my-app --output-file my-app-values.zip
 # Compare two instances side by side
 stackctl stack compare my-app other-app
 ```
+
+`override quota set` reads the current quota override and changes only the given fields (the API replaces the whole override). A change by another user between the read and the write is overwritten. `--pod-limit 0` means no pod limit; an empty value cannot clear `pod_limit` (use `--replace` or `override quota delete`). The command refuses an empty override; use `override quota delete` instead.
+
+The stack owner, admin and devops can set a quota override. A user without the admin or devops role cannot set a value above the cluster quota (403, k8s-stack-manager v0.7.0 or later). A value equal to the stored value is allowed. Admin and devops can set values above the cluster quota.
+
+### Audit Log
+
+```bash
+stackctl audit log list --entity-type stack_instance --action deploy --since 24h
+stackctl audit log list --entity-type stack_template --action publish
+stackctl audit log export --since 168h --format csv --output-file weekly.csv
+```
+
+`--action` and `--entity-type` match the stored value exactly. `stackctl audit log list --help` lists the values (for example `deploy`, `rollback`, `extend_ttl`, `quick_deploy`; `stack_instance`, `stack_definition`, `stack_template`, `quota_override`). These values need k8s-stack-manager v0.7.0 or later. Older servers, and entries written before v0.7.0, use the HTTP method and the last route segment, for example `--action create --entity-type deploy` for a deploy.
 
 ### Bulk Operations
 
