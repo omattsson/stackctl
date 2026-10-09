@@ -727,31 +727,58 @@ var overrideQuotaSetCmd = &cobra.Command{
 	Short: "Set quota override for a stack instance",
 	Long: `Set the resource quota override for a stack instance.
 
-At least one of the quota flags must be specified. The API replaces the
-whole quota override: a field without a flag is cleared.
+Specify at least one quota flag. By default the command reads the current
+override and changes only the given fields; the other fields keep their
+values. An empty value (for example --cpu-limit "") clears a CPU, memory
+or storage field. --replace starts from an empty override: the override
+becomes exactly the given fields. The API (PUT) replaces the whole
+override, so a field that is not sent is cleared. The command refuses an
+empty result; use "stackctl override quota delete" to remove the override.
+
+--pod-limit 0 means no pod limit. An empty value cannot clear pod_limit;
+use --replace without --pod-limit, or "stackctl override quota delete".
+
+The read and the write are two requests. A change that another user (for
+example an admin) makes between them is overwritten. Run "stackctl
+override quota get" afterwards when other users change the same override.
+
+Who can set what:
+  - The stack owner, admin and devops can set a quota override.
+  - A user without the admin or devops role cannot set a value above the
+    cluster quota of the stack's cluster. The server then returns 403
+    (k8s-stack-manager v0.7.0 or later). --pod-limit 0 (no limit) counts
+    as above a cluster pod limit.
+  - A value equal to the stored value is allowed. An owner can change one
+    field and keep a higher value that an admin set on another field.
+  - Admin and devops can set values above the cluster quota.
 
 Examples:
   stackctl override quota set my-stack --cpu-request 100m --cpu-limit 500m
   stackctl override quota set my-stack --memory-request 128Mi --memory-limit 512Mi
-  stackctl override quota set my-stack --storage-limit 10Gi --pod-limit 20`,
+  stackctl override quota set my-stack --storage-limit 10Gi --pod-limit 20
+  stackctl override quota set my-stack --cpu-limit ""
+  stackctl override quota set my-stack --replace --memory-limit 1Gi`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cpuReq, _ := cmd.Flags().GetString("cpu-request")
-		cpuLim, _ := cmd.Flags().GetString("cpu-limit")
-		memReq, _ := cmd.Flags().GetString("memory-request")
-		memLim, _ := cmd.Flags().GetString("memory-limit")
-		storageLim, _ := cmd.Flags().GetString("storage-limit")
+		flags := cmd.Flags()
+		replace, _ := flags.GetBool("replace")
 		var podLimit *int
-		if cmd.Flags().Changed("pod-limit") {
-			v, _ := cmd.Flags().GetInt("pod-limit")
+		if flags.Changed("pod-limit") {
+			v, _ := flags.GetInt("pod-limit")
 			if v < 0 {
 				return fmt.Errorf("--pod-limit must not be negative")
 			}
 			podLimit = &v
 		}
 
-		if cpuReq == "" && cpuLim == "" && memReq == "" && memLim == "" && storageLim == "" && podLimit == nil {
+		changed := podLimit != nil
+		for _, name := range quotaStringFlags {
+			if flags.Changed(name) {
+				changed = true
+			}
+		}
+		if !changed {
 			return fmt.Errorf("at least one of --cpu-request, --cpu-limit, --memory-request, --memory-limit, --storage-limit, or --pod-limit is required")
 		}
 
@@ -765,14 +792,28 @@ Examples:
 			return err
 		}
 
-		quota, err := c.SetQuotaOverride(instanceID, &types.SetQuotaOverrideRequest{
-			CPURequest:   cpuReq,
-			CPULimit:     cpuLim,
-			MemRequest:   memReq,
-			MemLimit:     memLim,
-			StorageLimit: storageLim,
-			PodLimit:     podLimit,
-		})
+		req := &types.SetQuotaOverrideRequest{}
+		if !replace {
+			current, err := c.GetQuotaOverride(instanceID)
+			switch {
+			case err == nil:
+				req = quotaRequestFrom(current)
+			case isAPINotFound(err, "quota override not found"):
+				// No override yet: the server answers 404 "Instance quota
+				// override not found" (mapError with
+				// entityInstanceQuotaOverride). Start from an empty
+				// override. Other 404s (for example a missing stack) are
+				// errors.
+			default:
+				return err
+			}
+		}
+		applyQuotaFlags(cmd, req, podLimit)
+		if *req == (types.SetQuotaOverrideRequest{}) {
+			return fmt.Errorf("the quota override would be empty; to remove it, run: stackctl override quota delete %s", args[0])
+		}
+
+		quota, err := c.SetQuotaOverride(instanceID, req)
 		if err != nil {
 			return err
 		}
@@ -792,6 +833,47 @@ Examples:
 			return nil
 		}
 	},
+}
+
+// quotaStringFlags are the string flags of "override quota set".
+var quotaStringFlags = []string{"cpu-request", "cpu-limit", "memory-request", "memory-limit", "storage-limit"}
+
+// quotaRequestFrom returns a request that keeps every field of the stored
+// override q.
+func quotaRequestFrom(q *types.QuotaOverride) *types.SetQuotaOverrideRequest {
+	req := &types.SetQuotaOverrideRequest{
+		CPURequest:   q.CPURequest,
+		CPULimit:     q.CPULimit,
+		MemRequest:   q.MemRequest,
+		MemLimit:     q.MemLimit,
+		StorageLimit: q.StorageLimit,
+	}
+	if q.PodLimit != nil {
+		v := *q.PodLimit
+		req.PodLimit = &v
+	}
+	return req
+}
+
+// applyQuotaFlags sets the fields of req whose flags are given. An empty
+// string flag clears the field.
+func applyQuotaFlags(cmd *cobra.Command, req *types.SetQuotaOverrideRequest, podLimit *int) {
+	targets := map[string]*string{
+		"cpu-request":    &req.CPURequest,
+		"cpu-limit":      &req.CPULimit,
+		"memory-request": &req.MemRequest,
+		"memory-limit":   &req.MemLimit,
+		"storage-limit":  &req.StorageLimit,
+	}
+	for _, name := range quotaStringFlags {
+		if cmd.Flags().Changed(name) {
+			v, _ := cmd.Flags().GetString(name)
+			*targets[name] = strings.TrimSpace(v)
+		}
+	}
+	if podLimit != nil {
+		req.PodLimit = podLimit
+	}
 }
 
 var overrideQuotaDeleteCmd = &cobra.Command{
@@ -916,6 +998,7 @@ func init() {
 	overrideQuotaSetCmd.Flags().String("memory-limit", "", "Memory limit (e.g. 512Mi)")
 	overrideQuotaSetCmd.Flags().String("storage-limit", "", "Storage limit (e.g. 10Gi)")
 	overrideQuotaSetCmd.Flags().Int("pod-limit", 0, "Maximum number of pods")
+	overrideQuotaSetCmd.Flags().Bool("replace", false, "Replace the whole override instead of merging the given fields into it")
 
 	// quota delete flags
 	overrideQuotaDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)

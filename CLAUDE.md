@@ -18,7 +18,7 @@ cli/
     stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend/values/compare
     template.go               # template list/get/create/update/publish/versions/instantiate/quick-deploy
     definition.go             # definition list/get/create/update/delete/export/import
-    override.go               # override list/set/delete, branch overrides, quota overrides
+    override.go               # override list/set/delete, branch overrides, quota overrides (quota set merges with GET, --replace)
     bulk.go                   # bulk deploy/stop/clean/delete (--ids flag or positional args)
     git.go                    # git branches/validate
     cluster.go                # cluster list/get (with health summary)
@@ -138,6 +138,10 @@ All API calls go to `/api/v1/*`. Key route groups:
 - `/api/v1/stack-instances` — CRUD + deploy/stop/clean/status/logs/clone/extend/values/compare
   - `POST /:id/extend` with `{"minutes": N}` adds N minutes to the expiry (never earlier, TTL unchanged, capped at now + 30 days; N <= 0 or no TTL and no expiry → 400). `stack extend --minutes` uses this body and needs k8s-stack-manager v0.6.0 or later. After the call it checks that the new expiry is at least max(old expiry, server time) + N − 2 min (server time = `updated_at` of the response, else the local clock) or at the 30-day cap; if not (an older server ignored `minutes`), it prints the result and fails with "upgrade k8s-stack-manager to v0.6.0 or later". The deprecated `{"ttl_minutes": N}` resets the expiry to now + N and sets the TTL; the server adds a `Warning` header. Only `stack extend --reset-ttl` (deprecated) sends it. `--yes` on `stack extend` is hidden and has no effect (script compatibility).
 - `/api/v1/stack-instances/bulk` — bulk operations
+  - `GET /:id` returns `values_drift` (v0.6.0+, not on lists); the rollback response has `values_drift` (`*bool`, only for `target_log_id`) and `warning`; the clone response adds `warning` (quota override not copied; v0.7.0+). `stack rollback -o json|yaml` prints the response. `stack get`, `stack rollback` and `stack clone` write these warnings to stderr as `Warning: <text>` (`printServerWarning`, sanitized). `stack get` fills `warning` with `types.ValuesDriftWarning` when the server sends `values_drift` without text, so `-o json` has both fields.
+  - `owner_username`, `cluster_name`, `definition_name` (k8s-stack-manager#470, v0.7.0+) are optional; tables show the name (`displayName`) or "name (id)" (`displayNameWithID`), else the ID. No extra API calls.
+  - `PUT /:id/quota-overrides` replaces the whole override. `override quota set` does GET (only 404 "Instance quota override not found" = no override), applies the given flags (`""` clears a string field; pod_limit only via `--replace` or delete; `--pod-limit 0` = no limit) and PUTs; `--replace` skips the GET. An empty result is refused (points to `override quota delete`). GET and PUT are not atomic: a concurrent change is overwritten. Owners without admin/devops get 403 above the cluster quota (v0.7.0+); a value equal to the stored value passes.
+- `/api/v1/audit-logs` — list/export; `--action` and `--entity-type` are exact matches (`deploy`, `stack_instance`, …; v0.7.0+, see `auditFilterValuesHelp`). Older servers: HTTP method + last route segment (`create` / `deploy`)
 - `/api/v1/stack-definitions` — CRUD + export/import
 - `/api/v1/templates` — list/get/instantiate/quick-deploy/publish/versions
   - Draft and release (k8s-stack-manager v0.6.0+): `PUT /:id` and the template chart routes change only the working copy. Users, quick deploy, instantiate and definition upgrades get the latest release. After `template update-chart`, run `template publish <name|id> --version <new>` so users get the change.

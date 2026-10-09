@@ -12,6 +12,7 @@ import (
 
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,10 +27,10 @@ func sampleAuditEntries() []types.AuditLogEntry {
 	t2 := time.Date(2026, 5, 2, 11, 30, 0, 0, time.UTC)
 	return []types.AuditLogEntry{
 		{
-			Action:     "stack.deploy",
+			Action:     "deploy",
 			Details:    "deployed via UI",
 			EntityID:   "stack-1",
-			EntityType: "stack",
+			EntityType: "stack_instance",
 			ID:         "a1",
 			Timestamp:  t1,
 			UserID:     "u1",
@@ -39,7 +40,7 @@ func sampleAuditEntries() []types.AuditLogEntry {
 			Action:     "template.publish",
 			Details:    "",
 			EntityID:   "tpl-9",
-			EntityType: "template",
+			EntityType: "stack_template",
 			ID:         "a2",
 			Timestamp:  t2,
 			UserID:     "u2",
@@ -97,8 +98,8 @@ func TestBuildAuditListParams_AllFilters(t *testing.T) {
 	resetAuditFlagsForTest()
 	defer resetAuditFlagsForTest()
 	auditFlagUser = "u1"
-	auditFlagAction = "stack.deploy"
-	auditFlagEntityType = "stack"
+	auditFlagAction = "deploy"
+	auditFlagEntityType = "stack_instance"
 	auditFlagEntityID = "stack-1"
 	auditFlagSince = "2026-05-01T00:00:00Z"
 	auditFlagUntil = "2026-05-02T00:00:00Z"
@@ -109,8 +110,8 @@ func TestBuildAuditListParams_AllFilters(t *testing.T) {
 	p, err := buildAuditListParams()
 	require.NoError(t, err)
 	assert.Equal(t, "u1", p.UserID)
-	assert.Equal(t, "stack.deploy", p.Action)
-	assert.Equal(t, "stack", p.EntityType)
+	assert.Equal(t, "deploy", p.Action)
+	assert.Equal(t, "stack_instance", p.EntityType)
 	assert.Equal(t, "stack-1", p.EntityID)
 	assert.Equal(t, "c-abc", p.Cursor)
 	assert.Equal(t, 50, p.Limit)
@@ -150,7 +151,7 @@ func TestAuditLogListCmd_TableOutput(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "TIMESTAMP")
-	assert.Contains(t, out, "stack.deploy")
+	assert.Contains(t, out, "deploy")
 	assert.Contains(t, out, "template.publish")
 	assert.Contains(t, out, "alice")
 }
@@ -168,8 +169,8 @@ func TestAuditLogListCmd_ForwardsFiltersAsQueryParams(t *testing.T) {
 	resetAuditFlagsForTest()
 	defer resetAuditFlagsForTest()
 	auditFlagUser = "u-42"
-	auditFlagAction = "stack.deploy"
-	auditFlagEntityType = "stack"
+	auditFlagAction = "deploy"
+	auditFlagEntityType = "stack_instance"
 	auditFlagEntityID = "s-1"
 	auditFlagSince = "2026-05-01T00:00:00Z"
 	auditFlagUntil = "2026-05-02T00:00:00Z"
@@ -179,8 +180,8 @@ func TestAuditLogListCmd_ForwardsFiltersAsQueryParams(t *testing.T) {
 	require.NoError(t, auditLogListCmd.RunE(auditLogListCmd, []string{}))
 
 	assert.Contains(t, gotQuery, "user_id=u-42")
-	assert.Contains(t, gotQuery, "action=stack.deploy")
-	assert.Contains(t, gotQuery, "entity_type=stack")
+	assert.Contains(t, gotQuery, "action=deploy")
+	assert.Contains(t, gotQuery, "entity_type=stack_instance")
 	assert.Contains(t, gotQuery, "entity_id=s-1")
 	assert.Contains(t, gotQuery, "start_date=2026-05-01T00%3A00%3A00Z")
 	assert.Contains(t, gotQuery, "end_date=2026-05-02T00%3A00%3A00Z")
@@ -241,7 +242,7 @@ func TestAuditLogListCmd_YAMLOutput(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "total: 2")
-	assert.Contains(t, out, "action: stack.deploy")
+	assert.Contains(t, out, "action: deploy")
 	assert.Contains(t, out, "id: a1")
 }
 
@@ -297,7 +298,7 @@ func TestAuditLogListCmd_InvalidSinceFlagRejectedBeforeAPICall(t *testing.T) {
 // ---------- audit log export ----------
 
 func TestAuditLogExportCmd_JSONToStdout(t *testing.T) {
-	want := []byte(`[{"id":"a1","action":"stack.deploy"}]`)
+	want := []byte(`[{"id":"a1","action":"deploy"}]`)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/audit-logs/export", r.URL.Path)
 		assert.Equal(t, "json", r.URL.Query().Get("format"))
@@ -481,3 +482,15 @@ func TestAuditUserLabel(t *testing.T) {
 	assert.Equal(t, "-", auditUserLabel(types.AuditLogEntry{}))
 }
 
+func TestAuditHelp_UsesServerNames(t *testing.T) {
+	for _, cmd := range []*cobra.Command{auditLogListCmd, auditLogExportCmd} {
+		assert.Contains(t, cmd.Long, "stack_instance")
+		assert.Contains(t, cmd.Long, "cleanup_policy_executed")
+		assert.NotContains(t, cmd.Long, "stack.deploy")
+		assert.NotContains(t, cmd.Long, "--entity-type stack ")
+		assert.Contains(t, cmd.Long, "k8s-stack-manager v0.7.0 or later")
+		assert.Contains(t, cmd.Long, "--action create --entity-type deploy")
+	}
+	assert.Contains(t, auditLogCmd.PersistentFlags().Lookup("entity-type").Usage, "stack_instance")
+	assert.NotContains(t, auditLogCmd.PersistentFlags().Lookup("action").Usage, "stack.deploy")
+}

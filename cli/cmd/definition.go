@@ -89,7 +89,7 @@ Examples:
 					d.ID,
 					d.Name,
 					d.Description,
-					d.Owner,
+					displayName(d.OwnerUsername, d.Owner),
 				}
 			}
 			return printer.PrintTable(headers, rows)
@@ -565,7 +565,7 @@ func printDefinition(def *types.StackDefinition) error {
 			{Key: "ID", Value: def.ID},
 			{Key: "Name", Value: def.Name},
 			{Key: "Description", Value: def.Description},
-			{Key: "Owner", Value: def.Owner},
+			{Key: "Owner", Value: displayNameWithID(def.OwnerUsername, def.Owner)},
 			{Key: "Default Branch", Value: def.DefaultBranch},
 		}
 		if err := printer.PrintSingle(def, fields); err != nil {

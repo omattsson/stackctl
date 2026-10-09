@@ -1073,97 +1073,132 @@ func TestOverrideQuotaGetCmd_NotFound(t *testing.T) {
 
 // ===================== override quota set =====================
 
-func TestOverrideQuotaSetCmd_AllFlags(t *testing.T) {
-	quota := sampleQuotaOverride()
-	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
+// quotaSetServer emulates GET and PUT of /stack-instances/42/quota-overrides.
+// current is the stored override; nil gives the 404 of the server. The PUT
+// body is stored in *putBody (nil: no PUT). allowGet false fails the test on
+// a GET of the override.
+func quotaSetServer(t *testing.T, current *types.QuotaOverride, allowGet bool, putBody *[]byte) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/stack-instances/42/quota-overrides", r.URL.Path)
-		require.Equal(t, http.MethodPut, r.Method)
-
-		var body types.SetQuotaOverrideRequest
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, "100m", body.CPURequest)
-		assert.Equal(t, "500m", body.CPULimit)
-		assert.Equal(t, "128Mi", body.MemRequest)
-		assert.Equal(t, "512Mi", body.MemLimit)
-
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(quota)
+		switch r.Method {
+		case http.MethodGet:
+			if !allowGet {
+				t.Errorf("unexpected GET of the quota override")
+			}
+			if current == nil {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"Instance quota override not found"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(current)
+		case http.MethodPut:
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			*putBody = body
+			var req types.SetQuotaOverrideRequest
+			require.NoError(t, json.Unmarshal(body, &req))
+			_ = json.NewEncoder(w).Encode(types.QuotaOverride{
+				ID:              "q1",
+				StackInstanceID: "42",
+				CPURequest:      req.CPURequest,
+				CPULimit:        req.CPULimit,
+				MemRequest:      req.MemRequest,
+				MemLimit:        req.MemLimit,
+				StorageLimit:    req.StorageLimit,
+				PodLimit:        req.PodLimit,
+			})
+		default:
+			t.Errorf("unexpected method %s", r.Method)
+		}
 	}))
+}
+
+// setQuotaFlags sets flags on overrideQuotaSetCmd and resets all its flags
+// (value and Changed) when the test ends.
+func setQuotaFlags(t *testing.T, kv ...string) {
+	t.Helper()
+	t.Cleanup(func() {
+		fs := overrideQuotaSetCmd.Flags()
+		for _, name := range quotaStringFlags {
+			resetFlag(t, fs, name, "")
+		}
+		resetFlag(t, fs, "pod-limit", "0")
+		resetFlag(t, fs, "replace", "false")
+	})
+	for i := 0; i+1 < len(kv); i += 2 {
+		require.NoError(t, overrideQuotaSetCmd.Flags().Set(kv[i], kv[i+1]))
+	}
+}
+
+func TestOverrideQuotaSetCmd_NoOverrideYet(t *testing.T) {
+	var put []byte
+	server := quotaSetServer(t, nil, true, &put)
 	defer server.Close()
 
 	buf := setupStackTestCmd(t, server.URL)
+	setQuotaFlags(t, "cpu-request", "100m", "cpu-limit", "500m", "memory-request", "128Mi", "memory-limit", "512Mi")
 
-	overrideQuotaSetCmd.Flags().Set("cpu-request", "100m")
-	overrideQuotaSetCmd.Flags().Set("cpu-limit", "500m")
-	overrideQuotaSetCmd.Flags().Set("memory-request", "128Mi")
-	overrideQuotaSetCmd.Flags().Set("memory-limit", "512Mi")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
-
-	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
-	require.NoError(t, err)
+	require.NoError(t, overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"}))
+	assert.JSONEq(t, `{"cpu_request":"100m","cpu_limit":"500m","memory_request":"128Mi","memory_limit":"512Mi"}`, string(put))
 	assert.Contains(t, buf.String(), "Set quota override for instance 42")
 }
 
-func TestOverrideQuotaSetCmd_CPURequestOnly(t *testing.T) {
-	quota := sampleQuotaOverride()
-	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
-		var body types.SetQuotaOverrideRequest
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, "200m", body.CPURequest)
-		assert.Empty(t, body.CPULimit)
+func TestOverrideQuotaSetCmd_MergesWithCurrent(t *testing.T) {
+	pods := 10
+	current := sampleQuotaOverride()
+	current.StorageLimit = "5Gi"
+	current.PodLimit = &pods
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(quota)
-	}))
-	defer server.Close()
+	tests := []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{
+			name:  "one field keeps the others",
+			flags: []string{"memory-limit", "1Gi"},
+			want:  `{"cpu_request":"100m","cpu_limit":"500m","memory_request":"128Mi","memory_limit":"1Gi","storage_limit":"5Gi","pod_limit":10}`,
+		},
+		{
+			name:  "pod limit keeps the strings",
+			flags: []string{"pod-limit", "20"},
+			want:  `{"cpu_request":"100m","cpu_limit":"500m","memory_request":"128Mi","memory_limit":"512Mi","storage_limit":"5Gi","pod_limit":20}`,
+		},
+		{
+			name:  "empty value clears the field",
+			flags: []string{"cpu-limit", "", "storage-limit", " "},
+			want:  `{"cpu_request":"100m","memory_request":"128Mi","memory_limit":"512Mi","pod_limit":10}`,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			var put []byte
+			server := quotaSetServer(t, &current, true, &put)
+			defer server.Close()
 
-	_ = setupStackTestCmd(t, server.URL)
+			_ = setupStackTestCmd(t, server.URL)
+			setQuotaFlags(t, tt.flags...)
 
-	overrideQuotaSetCmd.Flags().Set("cpu-request", "200m")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
-
-	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
-	require.NoError(t, err)
+			require.NoError(t, overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"}))
+			assert.JSONEq(t, tt.want, string(put))
+		})
+	}
 }
 
-func TestOverrideQuotaSetCmd_MemoryLimitOnly(t *testing.T) {
-	quota := sampleQuotaOverride()
-	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
-		var body types.SetQuotaOverrideRequest
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, "1Gi", body.MemLimit)
-		assert.Empty(t, body.CPURequest)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(quota)
-	}))
+func TestOverrideQuotaSetCmd_Replace(t *testing.T) {
+	current := sampleQuotaOverride()
+	var put []byte
+	server := quotaSetServer(t, &current, false, &put)
 	defer server.Close()
 
 	_ = setupStackTestCmd(t, server.URL)
+	setQuotaFlags(t, "replace", "true", "memory-limit", "1Gi")
 
-	overrideQuotaSetCmd.Flags().Set("memory-limit", "1Gi")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
-
-	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
-	require.NoError(t, err)
+	require.NoError(t, overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"}))
+	assert.JSONEq(t, `{"memory_limit":"1Gi"}`, string(put))
 }
 
 func TestOverrideQuotaSetCmd_NoFlags(t *testing.T) {
@@ -1173,122 +1208,195 @@ func TestOverrideQuotaSetCmd_NoFlags(t *testing.T) {
 	defer server.Close()
 
 	_ = setupStackTestCmd(t, server.URL)
-
-	overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-	overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-	overrideQuotaSetCmd.Flags().Set("memory-request", "")
-	overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
+	setQuotaFlags(t, "replace", "true")
 
 	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one of")
 }
 
+func TestOverrideQuotaSetCmd_NegativePodLimit(t *testing.T) {
+	_ = setupStackTestCmd(t, "http://127.0.0.1:1")
+	setQuotaFlags(t, "pod-limit", "-1")
+
+	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--pod-limit must not be negative")
+}
+
 func TestOverrideQuotaSetCmd_JSONOutput(t *testing.T) {
-	quota := sampleQuotaOverride()
-	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(quota)
-	}))
+	var put []byte
+	server := quotaSetServer(t, nil, true, &put)
 	defer server.Close()
 
 	buf := setupStackTestCmd(t, server.URL)
 	printer.Format = output.FormatJSON
+	setQuotaFlags(t, "cpu-request", "100m")
 
-	overrideQuotaSetCmd.Flags().Set("cpu-request", "100m")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
-
-	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
-	require.NoError(t, err)
-
+	require.NoError(t, overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"}))
 	var result types.QuotaOverride
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.Equal(t, "42", result.StackInstanceID)
+	assert.Equal(t, "100m", result.CPURequest)
 }
 
 func TestOverrideQuotaSetCmd_YAMLOutput(t *testing.T) {
-	quota := sampleQuotaOverride()
-	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(quota)
-	}))
+	var put []byte
+	server := quotaSetServer(t, nil, true, &put)
 	defer server.Close()
 
 	buf := setupStackTestCmd(t, server.URL)
 	printer.Format = output.FormatYAML
+	setQuotaFlags(t, "cpu-limit", "500m")
 
-	overrideQuotaSetCmd.Flags().Set("cpu-limit", "500m")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
-
-	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "instance_id: \"42\"")
+	require.NoError(t, overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"}))
+	assert.Contains(t, buf.String(), "stack_instance_id: \"42\"")
+	assert.Contains(t, buf.String(), "cpu_limit: 500m")
 }
 
 func TestOverrideQuotaSetCmd_QuietOutput(t *testing.T) {
-	quota := sampleQuotaOverride()
-	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(quota)
-	}))
+	var put []byte
+	server := quotaSetServer(t, nil, true, &put)
 	defer server.Close()
 
 	buf := setupStackTestCmd(t, server.URL)
 	printer.Quiet = true
+	setQuotaFlags(t, "cpu-request", "100m")
 
-	overrideQuotaSetCmd.Flags().Set("cpu-request", "100m")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
-
-	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
-	require.NoError(t, err)
+	require.NoError(t, overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"}))
 	assert.Equal(t, "42\n", buf.String())
 }
 
-func TestOverrideQuotaSetCmd_ServerError(t *testing.T) {
-	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
+func TestOverrideQuotaSetCmd_StorageAndPodLimit(t *testing.T) {
+	var put []byte
+	server := quotaSetServer(t, nil, true, &put)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	printer.Format = output.FormatJSON
+	setQuotaFlags(t, "storage-limit", "10Gi", "pod-limit", "20")
+
+	require.NoError(t, overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"}))
+	assert.JSONEq(t, `{"storage_limit":"10Gi","pod_limit":20}`, string(put))
+	var got types.QuotaOverride
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	require.NotNil(t, got.PodLimit)
+	assert.Equal(t, 20, *got.PodLimit)
+}
+
+func TestOverrideQuotaSetCmd_Errors(t *testing.T) {
+	tests := []struct {
+		name      string
+		method    string
+		status    int
+		message   string
+		wantInErr string
+	}{
+		{name: "get fails", method: http.MethodGet, status: http.StatusInternalServerError, message: "db down", wantInErr: "db down"},
+		{name: "put fails", method: http.MethodPut, status: http.StatusInternalServerError, message: "quota set failed", wantInErr: "quota set failed"},
+		{
+			name: "above cluster quota", method: http.MethodPut, status: http.StatusForbidden,
+			message:   "cpu_limit 64 exceeds the cluster quota 16; only admin or devops can set a higher quota",
+			wantInErr: "only admin or devops can set a higher quota",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			puts := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodPut {
+					puts++
+				}
+				if r.Method == tt.method {
+					w.WriteHeader(tt.status)
+					_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: tt.message})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(sampleQuotaOverride())
+			}))
+			defer server.Close()
+
+			_ = setupStackTestCmd(t, server.URL)
+			setQuotaFlags(t, "cpu-limit", "64")
+
+			err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantInErr)
+			if tt.method == http.MethodGet {
+				assert.Zero(t, puts, "no PUT after a failed read")
+			}
+		})
+	}
+}
+
+func TestOverrideQuotaSetCmd_EmptyResultRefused(t *testing.T) {
+	current := types.QuotaOverride{StackInstanceID: "42", CPULimit: "500m"}
+	tests := []struct {
+		name    string
+		current *types.QuotaOverride
+		flags   []string
+	}{
+		{name: "no override and only empty values", flags: []string{"cpu-limit", "", "memory-limit", ""}},
+		{name: "clear the last field", current: &current, flags: []string{"cpu-limit", ""}},
+		{name: "replace with only empty values", flags: []string{"replace", "true", "cpu-limit", ""}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			var put []byte
+			server := quotaSetServer(t, tt.current, true, &put)
+			defer server.Close()
+
+			_ = setupStackTestCmd(t, server.URL)
+			setQuotaFlags(t, tt.flags...)
+
+			err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "stackctl override quota delete 42")
+			assert.Nil(t, put, "no PUT for an empty override")
+		})
+	}
+}
+
+func TestOverrideQuotaSetCmd_OtherNotFoundIsError(t *testing.T) {
+	puts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			puts++
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "quota set failed"})
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"Stack instance not found"}`))
 	}))
 	defer server.Close()
 
 	_ = setupStackTestCmd(t, server.URL)
-
-	overrideQuotaSetCmd.Flags().Set("cpu-request", "100m")
-	t.Cleanup(func() {
-		overrideQuotaSetCmd.Flags().Set("cpu-request", "")
-		overrideQuotaSetCmd.Flags().Set("cpu-limit", "")
-		overrideQuotaSetCmd.Flags().Set("memory-request", "")
-		overrideQuotaSetCmd.Flags().Set("memory-limit", "")
-	})
+	setQuotaFlags(t, "cpu-limit", "500m")
 
 	err := overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "quota set failed")
+	assert.Contains(t, err.Error(), "Stack instance not found")
+	assert.Zero(t, puts)
+}
+
+func TestOverrideQuotaSetCmd_HelpText(t *testing.T) {
+	long := overrideQuotaSetCmd.Long
+	for _, want := range []string{
+		"The stack owner, admin and devops can set a quota override.",
+		"cannot set a value above the",
+		"returns 403",
+		"A value equal to the stored value is allowed.",
+		"Admin and devops can set values above the cluster quota.",
+		"--replace",
+		"--pod-limit 0 means no pod limit",
+		"overwritten",
+		"k8s-stack-manager v0.7.0 or later",
+	} {
+		assert.Contains(t, long, want)
+	}
+	require.NotNil(t, overrideQuotaSetCmd.Flags().Lookup("replace"))
 }
 
 // ===================== override quota delete =====================
@@ -1913,33 +2021,6 @@ func TestOverrideListCmd_ShowsIDsFromAPIShape(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	require.Len(t, lines, 2)
 	assert.Equal(t, []string{valuesTestChartA, "6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "true", "2026-10-01T12:00:00Z"}, strings.Fields(lines[1]))
-}
-
-func TestOverrideQuotaSetCmd_StorageAndPodLimit(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodPut, r.Method)
-		body, _ := io.ReadAll(r.Body)
-		assert.JSONEq(t, `{"storage_limit":"10Gi","pod_limit":20}`, string(body))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"q1","stack_instance_id":"42","storage_limit":"10Gi","pod_limit":20}`))
-	}))
-	defer server.Close()
-
-	buf := setupStackTestCmd(t, server.URL)
-	printer.Format = output.FormatJSON
-	require.NoError(t, overrideQuotaSetCmd.Flags().Set("storage-limit", "10Gi"))
-	require.NoError(t, overrideQuotaSetCmd.Flags().Set("pod-limit", "20"))
-	t.Cleanup(func() {
-		resetFlag(t, overrideQuotaSetCmd.Flags(), "storage-limit", "")
-		resetFlag(t, overrideQuotaSetCmd.Flags(), "pod-limit", "0")
-	})
-
-	require.NoError(t, overrideQuotaSetCmd.RunE(overrideQuotaSetCmd, []string{"42"}))
-	var got types.QuotaOverride
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
-	assert.Equal(t, "42", got.StackInstanceID)
-	require.NotNil(t, got.PodLimit)
-	assert.Equal(t, 20, *got.PodLimit)
 }
 
 func TestDiffValueKeys(t *testing.T) {

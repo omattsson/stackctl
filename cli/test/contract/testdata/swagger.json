@@ -58,7 +58,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a new cleanup policy and reloads the scheduler",
+                "description": "Creates a new cleanup policy and reloads the scheduler. condition is a comma-separated list of key:value pairs (all must match): status:\u003cstatus\u003e; idle_days:\u003cN\u003e (no deploy for N days, creation time when never deployed); age_days:\u003cN\u003e (created more than N days ago); stopped_days:\u003cN\u003e (stopped, and the last stop finished N or more days ago; instances without a recorded stop time never match); ttl_expired.",
                 "consumes": [
                     "application/json"
                 ],
@@ -115,7 +115,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates an existing cleanup policy and reloads the scheduler",
+                "description": "Updates an existing cleanup policy and reloads the scheduler. See the create endpoint for the condition syntax (status, idle_days, age_days, stopped_days, ttl_expired).",
                 "consumes": [
                     "application/json"
                 ],
@@ -3938,7 +3938,7 @@
                 }
             },
             "post": {
-                "description": "Create a new stack definition",
+                "description": "Create a new stack definition. Definition names are unique per owner.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3975,13 +3975,40 @@
                                 "type": "string"
                             }
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The owner already has a definition with this name",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/stack-definitions/import": {
             "post": {
-                "description": "Import a stack definition from a portable JSON bundle, creating a new definition with fresh IDs",
+                "description": "Import a stack definition from a portable JSON bundle, creating a new definition with fresh IDs. Definition names are unique per owner: when the caller already has a definition with the bundle name, the import uses \"\u003cname\u003e (imported)\", then \"\u003cname\u003e (imported 2)\", ... The response holds the final name (409 when no free name is found).",
                 "consumes": [
                     "application/json"
                 ],
@@ -4069,7 +4096,7 @@
                 }
             },
             "put": {
-                "description": "Update an existing stack definition",
+                "description": "Update an existing stack definition. A changed name must be unique for the owner of the definition.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4114,8 +4141,35 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The owner already has a definition with this name",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4396,7 +4450,10 @@
         },
         "/api/v1/stack-definitions/{id}/check-upgrade": {
             "get": {
-                "description": "Check if the source template has a newer version than the definition's current version",
+                "description": "Check if the latest published snapshot of the source template has another version than the definition's current version. An unpublished template, or one without a snapshot, gives upgrade_available=false.\nchart_diffs has the shape of the version diff chart_diffs: left = the definition charts now (locked values from the current source version snapshot), right = the latest snapshot. change_type \"removed\" means the chart is only in the definition; the upgrade keeps it.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -4417,12 +4474,20 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/handlers.upgradeCheckResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4509,7 +4574,7 @@
         },
         "/api/v1/stack-definitions/{id}/upgrade": {
             "post": {
-                "description": "Upgrade a definition to the latest template version, adding new charts and updating defaults",
+                "description": "Upgrade a definition to the latest published snapshot of its source template, adding new charts and updating defaults, repository URL, deploy order and (when the snapshot has them) chart version, chart path, source repo and build pipeline. Charts that are only in the definition stay.\nAn unpublished template, or one without a snapshot, gives 409 \"Template has no published version\".",
                 "consumes": [
                     "application/json"
                 ],
@@ -4545,6 +4610,15 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -4555,7 +4629,7 @@
                         }
                     },
                     "409": {
-                        "description": "Conflict",
+                        "description": "Already at the latest version, or no published version",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4998,7 +5072,7 @@
         },
         "/api/v1/stack-instances/{id}": {
             "get": {
-                "description": "Get a stack instance by ID",
+                "description": "Get a stack instance by ID. values_drift is true when the running values come from a successful rollback and the stored overrides produce different values: the next deploy undoes the rollback. Only this endpoint computes values_drift; list responses omit it.",
                 "produces": [
                     "application/json"
                 ],
@@ -5022,8 +5096,35 @@
                             "$ref": "#/definitions/models.StackInstance"
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5034,7 +5135,7 @@
                 }
             },
             "put": {
-                "description": "Update a stack instance (branch, name, etc.)",
+                "description": "Update a stack instance (branch, name, etc.). A changed name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters); an unchanged name is not checked, so older instances with other names stay editable. A rename does not change the namespace.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5100,7 +5201,7 @@
                 }
             },
             "delete": {
-                "description": "Deletes a stack instance. If the instance has running resources (status running/stopped/error), a cleanup is initiated first — helm releases are uninstalled and the namespace is deleted before the database record is removed. Returns 204 for immediate deletion (draft instances) or 202 when async cleanup is required.",
+                "description": "Deletes a stack instance. If the instance has running resources (status running/stopped/error), a cleanup is initiated first — helm releases are uninstalled and the namespace is deleted before the database record is removed. Returns 204 for immediate deletion (draft instances) or 202 when async cleanup is required. When quick deploy created the stack definition of the instance (owner_instance_id) and no other instance uses it, the definition and its charts are deleted with the instance.",
                 "produces": [
                     "application/json"
                 ],
@@ -5575,7 +5676,10 @@
         },
         "/api/v1/stack-instances/{id}/clone": {
             "post": {
-                "description": "Create a new stack instance as a copy of an existing one",
+                "description": "Create a new draft stack instance as a copy of an existing one. The clone belongs to the caller and uses the cluster and definition of the source.\nIt copies the TTL (unless ttl_minutes is given), the value overrides and the branch overrides. It copies the instance quota override only when the caller owns the source or is admin or devops; for an owner without the admin or devops role only when the override stays within the cluster quota. When it is not copied for that reason (or the cluster quota lookup fails), the response has a warning and the clone uses the cluster quota.\nThe body is optional. Without a name, the server picks the first free name of \u003csource\u003e-copy, \u003csource\u003e-copy-2, ... (the namespace stack-\u003cname\u003e-\u003cowner\u003e must be free). A given name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -5586,17 +5690,52 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Instance ID",
+                        "description": "Source instance ID",
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Optional clone name, branch and TTL",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.cloneInstanceRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/models.StackInstance"
+                            "$ref": "#/definitions/handlers.CloneInstanceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid body, name or TTL",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "404": {
@@ -5609,9 +5748,18 @@
                         }
                     },
                     "409": {
-                        "description": "Namespace already exists",
+                        "description": "Namespace already exists (given name), or no free generated name",
                         "schema": {
                             "$ref": "#/definitions/handlers.NamespaceConflictResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -5619,7 +5767,7 @@
         },
         "/api/v1/stack-instances/{id}/deploy": {
             "post": {
-                "description": "Trigger Helm deployment for a stack instance",
+                "description": "Trigger Helm deployment for a stack instance. Allowed for draft, stopped, error, partial and running instances (running = redeploy, a Helm upgrade with the current values). With a TTL, the expiry becomes now + ttl_minutes, unless the current expiry is later (a redeploy never makes the expiry earlier).",
                 "produces": [
                     "application/json"
                 ],
@@ -5828,7 +5976,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Compare pending merged values against last-deployed values per chart. Pending values use the deploy pipeline: cluster shared values (by priority), chart defaults, instance overrides, locked template values. A shared values load error returns 500 (fail closed).",
+                "description": "Compare pending merged values against the running values per chart. Pending values use the deploy pipeline: cluster shared values (by priority), chart defaults, instance overrides, locked template values. Previous values are the values of the last deploy, or of the last successful rollback. has_changes compares the YAML content (key order and formatting do not matter). values_drift is true when the last operation was a successful rollback and at least one chart has changes: the next deploy undoes the rollback. A shared values load error returns 500 (fail closed).",
                 "produces": [
                     "application/json"
                 ],
@@ -5893,7 +6041,7 @@
         },
         "/api/v1/stack-instances/{id}/extend": {
             "post": {
-                "description": "Extend the expiry time of a stack instance. Uses provided ttl_minutes or the instance's existing TTLMinutes.",
+                "description": "Extend the expiry time of a stack instance. The extend never makes the expiry earlier and never changes ttl_minutes.\n- {\"minutes\": N}: adds N minutes (N \u003e 0) to the current expires_at, or to now when the instance already expired or has no expiry time. The new expiry is capped at now + 43200 minutes (30 days).\n- Empty body: adds the instance's ttl_minutes in the same way (400 when ttl_minutes is 0).\n- Deprecated {\"ttl_minutes\": N} (without minutes): the old behaviour for older clients (stackctl 0.4.0 and earlier). It sets ttl_minutes to N and expires_at to now + N, which can make the expiry earlier. The response has a Warning header; the server logs a deprecation warning.\nAn instance without TTL and without expiry time has nothing to extend (400).",
                 "consumes": [
                     "application/json"
                 ],
@@ -5913,7 +6061,7 @@
                         "required": true
                     },
                     {
-                        "description": "Optional TTL override",
+                        "description": "Minutes to add (or the deprecated ttl_minutes)",
                         "name": "body",
                         "in": "body",
                         "schema": {
@@ -5923,13 +6071,28 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "The instance with the new expires_at",
                         "schema": {
                             "$ref": "#/definitions/models.StackInstance"
+                        },
+                        "headers": {
+                            "Warning": {
+                                "type": "string",
+                                "description": "Set when the deprecated ttl_minutes body is used"
+                            }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5948,6 +6111,15 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -6428,7 +6600,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Upsert the per-instance resource quota override for a stack instance. Each non-empty quantity must be a valid Kubernetes quantity (for example 500m, 2, 512Mi, 10Gi) and not negative; cpu_request must not exceed cpu_limit and memory_request must not exceed memory_limit; pod_limit must not be negative. Values are trimmed. The effective quota (cluster quota of the instance's cluster merged with this override) must follow the same rules, for example \"cpu_request 4 (instance override) exceeds the effective cpu_limit 2 (cluster quota)\". Invalid input returns 400 with the field name.",
+                "description": "Upsert the per-instance resource quota override for a stack instance. Each non-empty quantity must be a valid Kubernetes quantity (for example 500m, 2, 512Mi, 10Gi) and not negative; cpu_request must not exceed cpu_limit and memory_request must not exceed memory_limit; pod_limit must not be negative. Values are trimmed. The effective quota (cluster quota of the instance's cluster merged with this override) must follow the same rules, for example \"cpu_request 4 (instance override) exceeds the effective cpu_limit 2 (cluster quota)\". Invalid input returns 400 with the field name. Authorization: the instance owner, admin or devops. An owner without the admin or devops role cannot set a value above the cluster quota of the instance's cluster (403, for example \"cpu_limit 64 exceeds the cluster quota 16; only admin or devops can set a higher quota\"); a field without a cluster value has no cap, and pod_limit 0 (no limit) counts as above a cluster pod_limit. A value equal to the stored override passes, so an owner can change one field without losing an admin grant. Admin and devops may exceed the cluster quota. The check runs on write (and on clone), not on deploy.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6566,7 +6738,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Rollback all Helm releases in a stack instance to their previous revision",
+                "description": "Without target_log_id: roll back every Helm release of the instance by one revision (helm rollback).\nWith target_log_id: restore the values of that deploy. The log must be a successful deploy of this instance with a values snapshot (404 when the log does not exist or belongs to another instance, 400 otherwise). Each chart of the target deploy is upgraded (helm upgrade --install) with the merged values of that deploy and the chart version that the deploy recorded; deploys from before the version recording use the current chart version. Charts that the target deploy did not include are left unchanged.\nA rollback to a target restores the stored VALUES of that deploy (including the shared and locked values of that time), not the images. Image tags that are branch names can point to newer images now. A chart without a recorded version (the deploy used an empty chart version) installs the newest chart. Pre-deploy hooks do not run for a rollback; subscribe image gates to pre-rollback, which gets the same chart list (name, version, branch, image_tag) plus metadata rollback_mode, target_log_id and target_branch.\nThe pre-rollback hook runs in the background after the 202 answer, with progress streaming like pre-deploy. A rejection ends the rollback log with status error and the hook reason; the instance gets its previous status back. For a one-revision rollback the hook chart branches come from the previous successful deploy log when it recorded a branch.\nIn both modes a release stuck in pending-* is cleared before each chart, and after the rollback the instance waits for pod readiness (stabilizing) when readiness gating is configured, as for a deploy. A one-revision rollback that fails records the values of the charts that it already rolled back.\nThe rollback does not change the stored value or branch overrides. After a successful rollback the deploy preview compares against the running values; values_drift (in this response for a target, and in the deploy preview) shows that the next deploy applies the stored overrides again.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6586,11 +6758,11 @@
                         "required": true
                     },
                     {
-                        "description": "Optional: {\\",
+                        "description": "Optional rollback target",
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/handlers.rollbackRequest"
                         }
                     }
                 ],
@@ -6598,14 +6770,20 @@
                     "202": {
                         "description": "Accepted",
                         "schema": {
+                            "$ref": "#/definitions/handlers.RollbackResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid body, no charts, or the target is not a successful deploy with a values snapshot",
+                        "schema": {
                             "type": "object",
                             "additionalProperties": {
                                 "type": "string"
                             }
                         }
                     },
-                    "400": {
-                        "description": "Bad Request",
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -6623,7 +6801,7 @@
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Instance or target deploy log not found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -6900,7 +7078,7 @@
         },
         "/api/v1/templates": {
             "get": {
-                "description": "List published templates for regular users, all templates for devops/admin. Includes definition_count and owner_username. Supports server-side pagination.",
+                "description": "List published templates for regular users, all templates for devops/admin. Includes definition_count and owner_username. Supports server-side pagination.\nname filters by exact template name (same as the stack-definitions name filter); the response keeps the paged envelope.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6912,6 +7090,12 @@
                 ],
                 "summary": "List stack templates",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by exact name",
+                        "name": "name",
+                        "in": "query"
+                    },
                     {
                         "minimum": 1,
                         "type": "integer",
@@ -6948,7 +7132,7 @@
                 }
             },
             "post": {
-                "description": "Create a new stack template (devops/admin only). May include a `charts` array to register the initial chart set in the same transaction.",
+                "description": "Create a new stack template (devops/admin only). May include a `charts` array to register the initial chart set in the same transaction.\nWith is_published=true the template is published in the same transaction (first version snapshot; version is then required). A failed publish rolls the create back.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6979,6 +7163,33 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7052,7 +7263,7 @@
         },
         "/api/v1/templates/bulk/publish": {
             "post": {
-                "description": "Publish multiple stack templates in a single request, making them visible to all users.",
+                "description": "Publish multiple stack templates in a single request, making them visible to all users. Each template is published as POST /templates/{id}/publish without a body: the working copy version is used, an unchanged template creates no snapshot, and a version that already exists with other content fails for that template.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7174,7 +7385,10 @@
         },
         "/api/v1/templates/{id}": {
             "get": {
-                "description": "Get a stack template by ID, including its chart configurations",
+                "description": "Get a stack template by ID, including its chart configurations. The template fields and charts are the working copy (draft).\npublished_version and published_version_id describe the latest published snapshot (null when there is none). has_unpublished_changes is true when the working copy differs from that snapshot (or there is no snapshot).\npublished_charts are the charts of that snapshot (what Use Template and Quick Deploy apply; null when there is none). Their IDs are valid chart_overrides keys for Use Template.\ncharts are the working copy charts only for the template owner and admins. For other users charts equals published_charts (an empty list without a snapshot), version is the published version (empty without a snapshot) and has_unpublished_changes is false, so draft information is not exposed.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7198,8 +7412,35 @@
                             "$ref": "#/definitions/handlers.TemplateDetailResponse"
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7210,7 +7451,7 @@
                 }
             },
             "put": {
-                "description": "Update an existing stack template (devops/admin only)",
+                "description": "Update the working copy (draft) of a stack template (template owner or admin). Allowed while the template is published: users keep getting the latest published snapshot until the next publish.\nPartial update: only the fields in the body change. version is trimmed.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7230,12 +7471,12 @@
                         "required": true
                     },
                     {
-                        "description": "Template object",
+                        "description": "Fields to change",
                         "name": "template",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.StackTemplate"
+                            "$ref": "#/definitions/handlers.updateTemplateRequest"
                         }
                     }
                 ],
@@ -7255,8 +7496,35 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7267,7 +7535,10 @@
                 }
             },
             "delete": {
-                "description": "Delete a stack template if no definitions link to it (devops/admin only)",
+                "description": "Delete a stack template if no definitions link to it (template owner or admin)",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7288,6 +7559,24 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -7305,13 +7594,22 @@
                                 "type": "string"
                             }
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/templates/{id}/charts": {
             "post": {
-                "description": "Add a new chart configuration to a stack template",
+                "description": "Add a new chart configuration to the working copy (draft) of a stack template. Users get the change after the next publish. Template owner or admin only.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7356,8 +7654,35 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7370,7 +7695,7 @@
         },
         "/api/v1/templates/{id}/charts/{chartId}": {
             "put": {
-                "description": "Update a chart configuration within a stack template",
+                "description": "Update a chart configuration in the working copy (draft) of a stack template. Users get the change after the next publish. Template owner or admin only.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7422,8 +7747,35 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7434,7 +7786,7 @@
                 }
             },
             "delete": {
-                "description": "Remove a chart configuration from a stack template",
+                "description": "Remove a chart configuration from the working copy (draft) of a stack template. Users get the change after the next publish. Template owner or admin only.",
                 "produces": [
                     "application/json"
                 ],
@@ -7462,8 +7814,35 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7514,7 +7893,7 @@
         },
         "/api/v1/templates/{id}/instantiate": {
             "post": {
-                "description": "Create a StackDefinition and ChartConfigs from a template",
+                "description": "Create a StackDefinition and ChartConfigs from the latest published snapshot of a template (not the working copy). Definition names are unique per owner.\nA template that is not published, or has no snapshot, gives 409 \"Template has no published version\".\nchart_overrides replace chart default values; keys are published_charts[].id, working copy charts[].id (mapped by chart name) or chart names. Keys for charts not in the published snapshot are ignored.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7534,12 +7913,12 @@
                         "required": true
                     },
                     {
-                        "description": "Definition overrides (name, description)",
+                        "description": "Definition name, description and optional chart_overrides (default values per chart)",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.StackDefinition"
+                            "$ref": "#/definitions/handlers.instantiateTemplateRequest"
                         }
                     }
                 ],
@@ -7559,8 +7938,35 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The caller already has a definition with this name, or the template has no published version",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7573,7 +7979,10 @@
         },
         "/api/v1/templates/{id}/publish": {
             "post": {
-                "description": "Make a template visible to all users (devops/admin only)",
+                "description": "Store the working copy (template fields + charts) as a new version snapshot and make the template visible to all users (template owner or admin).\nThe body is optional. version (trimmed) defaults to the version of the working copy; the working copy takes the published version.\nA version that already exists for the template gives 409 \"Version x already exists\".\nWhen the working copy equals the latest snapshot (same content and version), no snapshot is created (snapshot_created=false) and the response is 200: publish is idempotent.\nUse Template, Quick Deploy and definition upgrades read the latest snapshot, never the working copy.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7588,17 +7997,70 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Version and change summary (optional)",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.publishTemplateRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.StackTemplate"
+                            "$ref": "#/definitions/handlers.publishTemplateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Version already exists",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7616,7 +8078,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Instantiate a template, create an instance, set branch overrides, and trigger deployment in a single call",
+                "description": "Instantiate a template, create an instance, set branch overrides, and trigger deployment in a single call.\ninstance_name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).\nThe template content comes from the latest published snapshot, not the working copy. A template that is not published, or has no snapshot, gives 409 \"Template has no published version\".\nThe new stack definition is owned by the instance (owner_instance_id): deleting the instance deletes the definition when no other instance uses it. The definition is named after the instance; when the caller already has a definition with that name, the name gets the suffix \" (2)\", \" (3)\", ...",
                 "consumes": [
                     "application/json"
                 ],
@@ -7661,6 +8123,24 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -7668,6 +8148,12 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    },
+                    "409": {
+                        "description": "Namespace already exists, or the template has no published version ({error})",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.NamespaceConflictResponse"
                         }
                     },
                     "500": {
@@ -7684,7 +8170,10 @@
         },
         "/api/v1/templates/{id}/unpublish": {
             "post": {
-                "description": "Hide a template from regular users (devops/admin only)",
+                "description": "Hide a template from regular users (template owner or admin). Use Template and Quick Deploy return 409 until the next publish. The version history stays.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7708,8 +8197,35 @@
                             "$ref": "#/definitions/models.StackTemplate"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7722,7 +8238,10 @@
         },
         "/api/v1/templates/{id}/versions": {
             "get": {
-                "description": "List all version snapshots for a template, ordered newest first",
+                "description": "List all version snapshots for a template, ordered newest first. The first entry is the published version that users get. created_by_username is the author's username (omitted when unknown).",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7745,12 +8264,21 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/models.TemplateVersion"
+                                "$ref": "#/definitions/handlers.templateVersionListItem"
                             }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7781,7 +8309,10 @@
         },
         "/api/v1/templates/{id}/versions/diff": {
             "get": {
-                "description": "Compare two template version snapshots side by side",
+                "description": "Compare two template version snapshots side by side. Either side may be \"working\" to compare the working copy (draft), for example left=\u003clatest version ID\u003e\u0026right=working shows the unpublished changes.\nOnly the template owner and admins can compare the working copy (others get 403).\nleft.version and right.version are version strings; the other side fields (id, created_by, created_by_username, created_at, is_working_copy) describe the side.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7799,14 +8330,14 @@
                     },
                     {
                         "type": "string",
-                        "description": "Left version ID",
+                        "description": "Left version ID, or \\",
                         "name": "left",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Right version ID",
+                        "description": "Right version ID, or \\",
                         "name": "right",
                         "in": "query",
                         "required": true
@@ -7816,12 +8347,29 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/handlers.versionDiffResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7852,7 +8400,10 @@
         },
         "/api/v1/templates/{id}/versions/{versionId}": {
             "get": {
-                "description": "Get a specific template version with its parsed snapshot",
+                "description": "Get a specific template version with its parsed snapshot and created_by_username",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7885,6 +8436,15 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8596,7 +9156,7 @@
         },
         "/ws": {
             "get": {
-                "description": "Upgrades the HTTP connection to a WebSocket for real-time events. Authenticate via one of: `Sec-WebSocket-Protocol: bearer, \u003cjwt\u003e` subprotocol header, `Authorization: Bearer \u003cjwt\u003e` header, or `?token=\u003cjwt\u003e` query parameter (the query token is redacted from access logs and traces by middleware before the handler runs).",
+                "description": "Upgrades the HTTP connection to a WebSocket for real-time events. Authenticate via one of: `Sec-WebSocket-Protocol: bearer, \u003cjwt\u003e` subprotocol header, `Authorization: Bearer \u003cjwt\u003e` header, or `?token=\u003cjwt\u003e` query parameter (the query token is redacted from access logs and traces by middleware before the handler runs). The upgrade runs the same checks as the HTTP JWT auth: a revoked token (logout), a token issued at or before a user block (user deleted, disabled or password reset), a deleted user and a disabled user get 401. The server closes an open socket with close code 1008 when the session is revoked and when the access token expires; the client must reconnect with a fresh token.",
                 "tags": [
                     "websocket"
                 ],
@@ -8633,6 +9193,15 @@
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8834,6 +9403,65 @@
                     "type": "string"
                 },
                 "previous_values": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.CloneInstanceResponse": {
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "type": "string"
+                },
+                "cluster_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_deployed_at": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "stack_definition_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "stopped_at": {
+                    "description": "StoppedAt is the time the last successful stop finished. It is nil\nwhen the instance is not stopped. A deploy or a clean clears it.\nCleanup policies use it for the stopped_days condition.",
+                    "type": "string"
+                },
+                "ttl_minutes": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "values_drift": {
+                    "description": "ValuesDrift is computed, not stored. GET /stack-instances/{id} sets it\nto true when the running values come from a successful rollback and\nthe stored overrides produce different values (the next deploy undoes\nthe rollback). List responses do not compute it.",
+                    "type": "boolean"
+                },
+                "warning": {
+                    "description": "Warning is set when the clone did not get the quota override of the\nsource (above the cluster quota, or the cluster quota lookup failed).\nThe clone then uses the cluster quota.",
                     "type": "string"
                 }
             }
@@ -9220,6 +9848,10 @@
                 "owner_id": {
                     "type": "string"
                 },
+                "owner_instance_id": {
+                    "description": "OwnerInstanceID is set when quick deploy created the definition for one\ninstance. Deleting that instance also deletes the definition when no\nother instance uses it. Empty for definitions that users create.",
+                    "type": "string"
+                },
                 "source_template_id": {
                     "type": "string"
                 },
@@ -9244,6 +9876,14 @@
                     "type": "string"
                 },
                 "instance_name": {
+                    "type": "string"
+                },
+                "values_drift": {
+                    "description": "ValuesDrift is true when the running values come from a rollback (the\nlast operation was a successful rollback) and the stored overrides\nproduce different values: the next deploy undoes the rollback.",
+                    "type": "boolean"
+                },
+                "warning": {
+                    "description": "Warning explains ValuesDrift when it is true.",
                     "type": "string"
                 }
             }
@@ -9406,6 +10046,29 @@
                 }
             }
         },
+        "handlers.RollbackResponse": {
+            "type": "object",
+            "properties": {
+                "log_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "target_log_id": {
+                    "description": "TargetLogID is the deploy whose values the rollback restores. Empty\nfor a rollback by one Helm revision.",
+                    "type": "string"
+                },
+                "values_drift": {
+                    "description": "ValuesDrift is set for a rollback to a target: true when the values\nbuilt from the stored overrides differ from the target values. The\nrollback does not change the stored overrides, so the next deploy then\nchanges the running values again. Not set for a rollback by one\nrevision; use GET /deploy-preview after the rollback.",
+                    "type": "boolean"
+                },
+                "warning": {
+                    "description": "Warning explains ValuesDrift when it is true.",
+                    "type": "string"
+                }
+            }
+        },
         "handlers.TemplateDetailResponse": {
             "type": "object",
             "properties": {
@@ -9427,6 +10090,9 @@
                 "description": {
                     "type": "string"
                 },
+                "has_unpublished_changes": {
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -9437,6 +10103,19 @@
                     "type": "string"
                 },
                 "owner_id": {
+                    "type": "string"
+                },
+                "published_charts": {
+                    "description": "PublishedCharts are the charts of the latest snapshot: what Use\nTemplate and Quick Deploy apply. The IDs are the template chart config\nIDs at publish time; Use Template accepts them as chart_overrides keys.\nNull when the template has no snapshot.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.TemplateChartConfig"
+                    }
+                },
+                "published_version": {
+                    "type": "string"
+                },
+                "published_version_id": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -9612,6 +10291,81 @@
                 }
             }
         },
+        "handlers.chartDiffEntry": {
+            "type": "object",
+            "properties": {
+                "change_type": {
+                    "description": "\"added\", \"removed\", \"modified\", \"unchanged\"",
+                    "type": "string"
+                },
+                "chart_name": {
+                    "type": "string"
+                },
+                "has_differences": {
+                    "type": "boolean"
+                },
+                "left_chart_path": {
+                    "type": "string"
+                },
+                "left_chart_version": {
+                    "description": "Chart source fields; compared only when both sides store them\n(snapshot schema version 1 or the working copy).",
+                    "type": "string"
+                },
+                "left_locked": {
+                    "type": "string"
+                },
+                "left_repo_url": {
+                    "type": "string"
+                },
+                "left_required": {
+                    "type": "boolean"
+                },
+                "left_sort_order": {
+                    "type": "integer"
+                },
+                "left_values": {
+                    "type": "string"
+                },
+                "right_chart_path": {
+                    "type": "string"
+                },
+                "right_chart_version": {
+                    "type": "string"
+                },
+                "right_locked": {
+                    "type": "string"
+                },
+                "right_repo_url": {
+                    "type": "string"
+                },
+                "right_required": {
+                    "type": "boolean"
+                },
+                "right_sort_order": {
+                    "type": "integer"
+                },
+                "right_values": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.cloneInstanceRequest": {
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "description": "Branch of the clone. Default: the branch of the source.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name of the clone. Must be a DNS label (lowercase a-z, 0-9, '-', start\nand end alphanumeric, at most 50 characters). When empty, the server\npicks the first free name of \u003csource\u003e-copy, \u003csource\u003e-copy-2, ...",
+                    "type": "string"
+                },
+                "ttl_minutes": {
+                    "description": "TTLMinutes of the clone (0 = no expiry). Default: the TTL of the source.",
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.createChannelRequest": {
             "type": "object",
             "required": [
@@ -9668,8 +10422,31 @@
         "handlers.extendTTLRequest": {
             "type": "object",
             "properties": {
-                "ttl_minutes": {
+                "minutes": {
+                    "description": "Minutes adds this many minutes to the current expiry (or to now when\nthe instance already expired or has no expiry time). Must be \u003e 0.",
                     "type": "integer"
+                },
+                "ttl_minutes": {
+                    "description": "TTLMinutes is deprecated. Sent alone, it keeps the old behaviour: set\nthe TTL to this value and the expiry to now + TTL. Use minutes instead.",
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.instantiateTemplateRequest": {
+            "type": "object",
+            "properties": {
+                "chart_overrides": {
+                    "description": "ChartOverrides replace the default values of charts in the new\ndefinition. Key: a published_charts[].id, a working copy charts[].id\n(mapped by chart name) or a chart name. Keys for charts that are not in\nthe published snapshot are ignored.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
                 }
             }
         },
@@ -9704,6 +10481,66 @@
                     "type": "string"
                 },
                 "webhook_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.publishTemplateRequest": {
+            "type": "object",
+            "properties": {
+                "change_summary": {
+                    "description": "ChangeSummary is stored with the snapshot.",
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Version of the new snapshot. Default: the version of the working copy.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.publishTemplateResponse": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "default_branch": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "has_unpublished_changes": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_published": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "published_version": {
+                    "type": "string"
+                },
+                "published_version_id": {
+                    "type": "string"
+                },
+                "snapshot_created": {
+                    "type": "boolean"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
                     "type": "string"
                 }
             }
@@ -9748,6 +10585,15 @@
                 }
             }
         },
+        "handlers.rollbackRequest": {
+            "type": "object",
+            "properties": {
+                "target_log_id": {
+                    "description": "TargetLogID is the ID of a successful deploy log of this instance.",
+                    "type": "string"
+                }
+            }
+        },
         "handlers.setBranchOverrideRequest": {
             "type": "object",
             "properties": {
@@ -9783,6 +10629,32 @@
                 "storage_limit": {
                     "type": "string",
                     "example": "10Gi"
+                }
+            }
+        },
+        "handlers.templateVersionListItem": {
+            "type": "object",
+            "properties": {
+                "change_summary": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "created_by_username": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "template_id": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -9828,6 +10700,78 @@
                 }
             }
         },
+        "handlers.updateTemplateRequest": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "default_branch": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.upgradeChanges": {
+            "type": "object",
+            "properties": {
+                "charts_added": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "charts_modified": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "charts_removed": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "charts_unchanged": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "handlers.upgradeCheckResponse": {
+            "type": "object",
+            "properties": {
+                "changes": {
+                    "$ref": "#/definitions/handlers.upgradeChanges"
+                },
+                "chart_diffs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.chartDiffEntry"
+                    }
+                },
+                "current_version": {
+                    "type": "string"
+                },
+                "latest_version": {
+                    "type": "string"
+                },
+                "upgrade_available": {
+                    "type": "boolean"
+                }
+            }
+        },
         "handlers.versionDetailResponse": {
             "type": "object",
             "properties": {
@@ -9840,6 +10784,10 @@
                 "created_by": {
                     "type": "string"
                 },
+                "created_by_username": {
+                    "description": "CreatedByUsername is the author's username (omitted when unknown).",
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -9848,6 +10796,52 @@
                 },
                 "template_id": {
                     "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.versionDiffResponse": {
+            "type": "object",
+            "properties": {
+                "chart_diffs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.chartDiffEntry"
+                    }
+                },
+                "left": {
+                    "$ref": "#/definitions/handlers.versionDiffSide"
+                },
+                "right": {
+                    "$ref": "#/definitions/handlers.versionDiffSide"
+                }
+            }
+        },
+        "handlers.versionDiffSide": {
+            "type": "object",
+            "properties": {
+                "change_summary": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "created_by_username": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_working_copy": {
+                    "type": "boolean"
+                },
+                "snapshot": {
+                    "$ref": "#/definitions/models.TemplateSnapshot"
                 },
                 "version": {
                     "type": "string"
@@ -10373,7 +11367,7 @@
                     "type": "string"
                 },
                 "condition": {
-                    "description": "e.g. \"idle_days:7\", \"status:stopped,age_days:14\", \"ttl_expired\"",
+                    "description": "e.g. \"idle_days:7\", \"status:stopped,age_days:14\", \"stopped_days:3\", \"ttl_expired\"",
                     "type": "string"
                 },
                 "created_at": {
@@ -10461,6 +11455,14 @@
             "properties": {
                 "action": {
                     "description": "\"deploy\", \"stop\", \"clean\", \"rollback\"",
+                    "type": "string"
+                },
+                "branch": {
+                    "description": "Branch is the instance branch of a deploy, or the branch of the target\ndeploy for a rollback to a target. Empty for older logs and for stop\nand clean logs.",
+                    "type": "string"
+                },
+                "chart_versions": {
+                    "description": "ChartVersions is a JSON object chart name -\u003e chart version that a\ndeploy used. A rollback to this deploy installs the same versions.\nEmpty for logs written before the column existed.",
                     "type": "string"
                 },
                 "completed_at": {
@@ -10778,6 +11780,10 @@
                 "owner_id": {
                     "type": "string"
                 },
+                "owner_instance_id": {
+                    "description": "OwnerInstanceID is set when quick deploy created the definition for one\ninstance. Deleting that instance also deletes the definition when no\nother instance uses it. Empty for definitions that users create.",
+                    "type": "string"
+                },
                 "source_template_id": {
                     "type": "string"
                 },
@@ -10828,11 +11834,19 @@
                 "status": {
                     "type": "string"
                 },
+                "stopped_at": {
+                    "description": "StoppedAt is the time the last successful stop finished. It is nil\nwhen the instance is not stopped. A deploy or a clean clears it.\nCleanup policies use it for the stopped_days condition.",
+                    "type": "string"
+                },
                 "ttl_minutes": {
                     "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "values_drift": {
+                    "description": "ValuesDrift is computed, not stored. GET /stack-instances/{id} sets it\nto true when the running values come from a successful rollback and\nthe stored overrides produce different values (the next deploy undoes\nthe rollback). List responses do not compute it.",
+                    "type": "boolean"
                 }
             }
         },
@@ -10919,10 +11933,23 @@
         "models.TemplateChartSnapshotData": {
             "type": "object",
             "properties": {
+                "build_pipeline_id": {
+                    "type": "string"
+                },
                 "chart_name": {
                     "type": "string"
                 },
+                "chart_path": {
+                    "type": "string"
+                },
+                "chart_version": {
+                    "type": "string"
+                },
                 "default_values": {
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Fields below exist from schema version 1.\nID is the template chart config ID in the working copy at publish time.\nIt is not content: SameTemplateContent ignores it.",
                     "type": "string"
                 },
                 "is_required": {
@@ -10936,6 +11963,9 @@
                 },
                 "sort_order": {
                     "type": "integer"
+                },
+                "source_repo_url": {
+                    "type": "string"
                 }
             }
         },
@@ -10947,6 +11977,9 @@
                     "items": {
                         "$ref": "#/definitions/models.TemplateChartSnapshotData"
                     }
+                },
+                "schema_version": {
+                    "type": "integer"
                 },
                 "template": {
                     "$ref": "#/definitions/models.TemplateSnapshotData"
@@ -10969,29 +12002,6 @@
                     "type": "boolean"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.TemplateVersion": {
-            "type": "object",
-            "properties": {
-                "change_summary": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "created_by": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "template_id": {
                     "type": "string"
                 },
                 "version": {

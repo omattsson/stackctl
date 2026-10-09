@@ -158,7 +158,7 @@ Examples:
 					s.ID,
 					s.Name,
 					printer.StatusColor(s.Status),
-					s.Owner,
+					displayName(s.OwnerUsername, s.Owner),
 					s.Branch,
 					cluster,
 					formatTime(s.DeployedAt),
@@ -175,7 +175,14 @@ var stackGetCmd = &cobra.Command{
 	Long: `Show detailed information about a stack instance.
 
 The table output shows the expiry time and, for a running stack, the
-access URLs (from the stack status).
+access URLs (from the stack status). The owner, cluster and definition
+show the name and the ID when the server sends the name (k8s-stack-manager
+v0.7.0 or later), else the ID.
+
+After a rollback the running values can differ from the stored overrides
+(values_drift). The command then writes a warning to stderr: the next
+deploy applies the stored overrides again. -o json and -o yaml include
+values_drift and warning.
 
 Examples:
   stackctl stack get my-stack
@@ -198,6 +205,9 @@ Examples:
 		if err != nil {
 			return err
 		}
+		if instance.ValuesDrift && strings.TrimSpace(instance.Warning) == "" {
+			instance.Warning = types.ValuesDriftWarning
+		}
 
 		// Access URLs come from the status endpoint. Only a running stack
 		// has them; the call is best-effort: one request, no retry, a short
@@ -209,7 +219,13 @@ Examples:
 			}
 		}
 
-		return printInstanceWithURLs(instance, urls)
+		if err := printInstanceWithURLs(instance, urls); err != nil {
+			return err
+		}
+		if instance.ValuesDrift {
+			printServerWarning(cmd, instance.Warning)
+		}
+		return nil
 	},
 }
 
@@ -650,6 +666,12 @@ var stackCloneCmd = &cobra.Command{
 	Short: "Clone a stack instance",
 	Long: `Clone a stack instance, creating a new instance with the same configuration.
 
+The clone gets the quota override of the source only when you can change
+the source (owner, admin or devops) and the override is within the cluster
+quota (admin and devops can copy a higher override). When the server does
+not copy the quota override, the command writes its warning to stderr
+(k8s-stack-manager v0.7.0 or later).
+
 Examples:
   stackctl stack clone my-stack
   stackctl stack clone my-stack -q`,
@@ -670,6 +692,7 @@ Examples:
 		if err != nil {
 			return err
 		}
+		printServerWarning(cmd, instance.Warning)
 
 		if printer.Quiet {
 			fmt.Fprintln(printer.Writer, instance.ID)
@@ -1210,6 +1233,11 @@ This is a potentially disruptive operation. You will be prompted for
 confirmation unless --yes is specified. Use --follow to stream logs in real-time.
 
 Optionally specify --target-log to rollback to a specific past deployment.
+The rollback does not change the stored overrides. When the stored
+overrides produce other values than the target deploy, the command writes
+a warning to stderr: the next deploy applies the stored overrides again.
+-o json and -o yaml print the response (log_id, message, target_log_id,
+values_drift, warning).
 
 Examples:
   stackctl stack rollback my-stack
@@ -1248,6 +1276,11 @@ Examples:
 		if err != nil {
 			return err
 		}
+		warning := resp.Warning
+		if resp.ValuesDrift != nil && *resp.ValuesDrift && strings.TrimSpace(warning) == "" {
+			warning = types.ValuesDriftWarning
+		}
+		printServerWarning(cmd, warning)
 
 		follow, _ := cmd.Flags().GetBool("follow")
 		if follow {
@@ -1259,8 +1292,15 @@ Examples:
 			return nil
 		}
 
-		printer.PrintMessage("Rollback started for stack %s (log ID: %s)", id, resp.LogID)
-		return nil
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(resp)
+		case output.FormatYAML:
+			return printer.PrintYAML(resp)
+		default:
+			printer.PrintMessage("Rollback started for stack %s (log ID: %s)", id, resp.LogID)
+			return nil
+		}
 	},
 }
 
@@ -1605,7 +1645,7 @@ func printInstanceWithURLs(instance *types.StackInstance, urls []string) error {
 	case output.FormatYAML:
 		return printer.PrintYAML(instance)
 	default:
-		clusterID := "-"
+		clusterID := ""
 		if instance.ClusterID != nil {
 			clusterID = *instance.ClusterID
 		}
@@ -1613,11 +1653,11 @@ func printInstanceWithURLs(instance *types.StackInstance, urls []string) error {
 			{Key: "ID", Value: instance.ID},
 			{Key: "Name", Value: instance.Name},
 			{Key: "Status", Value: printer.StatusColor(instance.Status)},
-			{Key: "Owner", Value: instance.Owner},
+			{Key: "Owner", Value: displayNameWithID(instance.OwnerUsername, instance.Owner)},
 			{Key: "Branch", Value: instance.Branch},
 			{Key: "Namespace", Value: instance.Namespace},
-			{Key: "Cluster ID", Value: clusterID},
-			{Key: "Definition ID", Value: instance.StackDefinitionID},
+			{Key: "Cluster", Value: displayNameWithID(instance.ClusterName, clusterID)},
+			{Key: "Definition", Value: displayNameWithID(instance.DefinitionName, instance.StackDefinitionID)},
 			{Key: "TTL", Value: strconv.Itoa(instance.TTLMinutes) + " minutes"},
 			{Key: "Expires At", Value: formatTime(instance.ExpiresAt)},
 			{Key: "Deployed At", Value: formatTime(instance.DeployedAt)},
@@ -1630,5 +1670,41 @@ func printInstanceWithURLs(instance *types.StackInstance, urls []string) error {
 			fields = append(fields, output.KeyValue{Key: "URL", Value: u})
 		}
 		return printer.PrintSingle(instance, fields)
+	}
+}
+
+// displayName returns name when it is set, else id. Servers that do not
+// send display names (owner_username, cluster_name, definition_name) get
+// the ID.
+func displayName(name, id string) string {
+	if strings.TrimSpace(name) != "" {
+		return name
+	}
+	return id
+}
+
+// displayNameWithID returns "name (id)" when both are set, the one that is
+// set otherwise, and "-" when both are empty.
+func displayNameWithID(name, id string) string {
+	name = strings.TrimSpace(name)
+	switch {
+	case name != "" && id != "" && name != id:
+		return name + " (" + id + ")"
+	case name != "":
+		return name
+	case id != "":
+		return id
+	default:
+		return "-"
+	}
+}
+
+// printServerWarning writes a warning text of a server response to stderr
+// as "Warning: <text>". It sanitizes the text and writes nothing for an
+// empty text. Warnings go to stderr in all output modes, so stdout stays
+// valid JSON, YAML or ID output.
+func printServerWarning(cmd *cobra.Command, text string) {
+	if text = client.SanitizeServerText(text); text != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", text)
 	}
 }
