@@ -208,14 +208,40 @@ stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
 # Or step by step
 stackctl template instantiate 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --branch main
 
+# Create a template with a version, update the working copy (GET-then-PUT keeps other fields)
+stackctl template create --name my-template --version 1.0.0
+stackctl template update 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --description "Web stack" --version 1.1.0
+
 # Update a chart config in a template (GET-merge-PUT preserves unspecified fields)
 stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --chart-version 0.3.7
 stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --file values.yaml --locked-file locked.yaml
 stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --build-pipeline-id 42
 
+# Release the working copy to users (name or ID)
+stackctl template publish my-template --version 1.2.0 --change-summary "app-core chart 0.3.7"
+
+# Show the released version, unpublished changes and the chart differences
+stackctl template get 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+stackctl template get 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --released
+
+# Version history; compare the latest release with the working copy
+stackctl template versions list 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+stackctl template versions diff 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f <version-id> working
+
 # Delete a template
 stackctl template delete 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
 ```
+
+Templates use a draft-and-release model (k8s-stack-manager v0.6.0 or later):
+
+- `template update` and `template update-chart` change only the working copy (draft).
+- Users get the latest released version. Quick deploy, instantiate and definition upgrades use it.
+- After `template update-chart`, run `stackctl template publish <name|id> --version <new-version>` so users get the change.
+- Each version can be released only once. Publish without changes creates no new version.
+- Quick deploy or instantiate of a template without a release fails with "template X has no published version; publish it first: stackctl template publish X --version <version>". When the template has a release but is unpublished, the hint is a plain `stackctl template publish X`.
+- `--version` and `--change-summary` on `template publish` need v0.6.0 or later. The command reads the template first; on an older server it stops with an upgrade hint and publishes nothing.
+- `template update` sends only the changed fields to v0.6.0 or later, and the full record to older servers. `--description ""` clears the description.
+- Template names (`template publish`, bulk template commands) must match exactly. This also works on servers that ignore the `name` filter.
 
 ### Stack Definitions
 

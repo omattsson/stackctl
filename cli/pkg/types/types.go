@@ -43,14 +43,44 @@ type StackDefinition struct {
 }
 
 // StackTemplate represents a reusable stack template.
+//
+// The template fields and Charts are the working copy (draft). Base.Version
+// is the version string of the working copy. From k8s-stack-manager v0.6.0
+// GET /api/v1/templates/:id also returns the latest published release:
+// PublishedVersion, PublishedVersionID and PublishedCharts (null when the
+// template has no release) and HasUnpublishedChanges. Older servers do not
+// send these fields; HasUnpublishedChanges is then nil.
 type StackTemplate struct {
 	Base
-	Name            string        `json:"name" yaml:"name"`
-	Description     string        `json:"description,omitempty" yaml:"description,omitempty"`
-	Published       bool          `json:"is_published" yaml:"is_published"`
-	Owner           string        `json:"owner_id" yaml:"owner_id"`
-	Charts          []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
-	DefinitionCount int           `json:"definition_count,omitempty" yaml:"definition_count,omitempty"`
+	Name                  string        `json:"name" yaml:"name"`
+	Description           string        `json:"description,omitempty" yaml:"description,omitempty"`
+	Category              string        `json:"category,omitempty" yaml:"category,omitempty"`
+	DefaultBranch         string        `json:"default_branch,omitempty" yaml:"default_branch,omitempty"`
+	Published             bool          `json:"is_published" yaml:"is_published"`
+	Owner                 string        `json:"owner_id" yaml:"owner_id"`
+	Charts                []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+	DefinitionCount       int           `json:"definition_count,omitempty" yaml:"definition_count,omitempty"`
+	PublishedVersion      *string       `json:"published_version,omitempty" yaml:"published_version,omitempty"`
+	PublishedVersionID    *string       `json:"published_version_id,omitempty" yaml:"published_version_id,omitempty"`
+	PublishedCharts       []ChartConfig `json:"published_charts,omitempty" yaml:"published_charts,omitempty"`
+	HasUnpublishedChanges *bool         `json:"has_unpublished_changes,omitempty" yaml:"has_unpublished_changes,omitempty"`
+}
+
+// PublishTemplateRequest is the optional body of POST /api/v1/templates/:id/publish
+// (k8s-stack-manager v0.6.0+). An empty Version makes the server use the
+// version of the working copy.
+type PublishTemplateRequest struct {
+	Version       string `json:"version,omitempty" yaml:"version,omitempty"`
+	ChangeSummary string `json:"change_summary,omitempty" yaml:"change_summary,omitempty"`
+}
+
+// PublishTemplateResponse is the response of POST /api/v1/templates/:id/publish:
+// the template plus the release that users now get. SnapshotCreated is false
+// when the working copy equals the latest release (no new version). Older
+// servers return only the template; SnapshotCreated is then nil.
+type PublishTemplateResponse struct {
+	StackTemplate
+	SnapshotCreated *bool `json:"snapshot_created,omitempty" yaml:"snapshot_created,omitempty"`
 }
 
 // ChartConfig represents a Helm chart configuration within a definition or
@@ -1171,16 +1201,41 @@ type CompareChartDiff struct {
 
 // CreateTemplateRequest is the request body for POST /api/v1/templates.
 type CreateTemplateRequest struct {
-	Name        string        `json:"name" yaml:"name"`
-	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
-	Charts      []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+	Name          string        `json:"name" yaml:"name"`
+	Description   string        `json:"description,omitempty" yaml:"description,omitempty"`
+	Category      string        `json:"category,omitempty" yaml:"category,omitempty"`
+	Version       string        `json:"version,omitempty" yaml:"version,omitempty"`
+	DefaultBranch string        `json:"default_branch,omitempty" yaml:"default_branch,omitempty"`
+	Charts        []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
 }
 
 // UpdateTemplateRequest is the request body for PUT /api/v1/templates/:id.
+//
+// Servers before k8s-stack-manager v0.6.0 replace name, description,
+// category, version and default_branch with the request values, so an
+// absent field becomes empty. v0.6.0+ keeps the fields that are not sent.
+// To change one field on every server version, send the full record (see
+// `template update`, which reads the template first). Empty fields are
+// omitted, so a field cannot be cleared; the server ignores Charts.
 type UpdateTemplateRequest struct {
-	Name        string        `json:"name,omitempty" yaml:"name,omitempty"`
-	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
-	Charts      []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+	Name          string        `json:"name,omitempty" yaml:"name,omitempty"`
+	Description   string        `json:"description,omitempty" yaml:"description,omitempty"`
+	Category      string        `json:"category,omitempty" yaml:"category,omitempty"`
+	Version       string        `json:"version,omitempty" yaml:"version,omitempty"`
+	DefaultBranch string        `json:"default_branch,omitempty" yaml:"default_branch,omitempty"`
+	Charts        []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+}
+
+// PatchTemplateRequest is a partial PUT /api/v1/templates/:id body for
+// k8s-stack-manager v0.6.0+: the server changes only the fields that are
+// sent (non-nil), and an empty string clears a field. Older servers replace
+// every field; use UpdateTemplateRequest with the full record for them.
+type PatchTemplateRequest struct {
+	Name          *string `json:"name,omitempty" yaml:"name,omitempty"`
+	Description   *string `json:"description,omitempty" yaml:"description,omitempty"`
+	Category      *string `json:"category,omitempty" yaml:"category,omitempty"`
+	Version       *string `json:"version,omitempty" yaml:"version,omitempty"`
+	DefaultBranch *string `json:"default_branch,omitempty" yaml:"default_branch,omitempty"`
 }
 
 // CloneTemplateRequest is the request body for POST /api/v1/templates/:id/clone.
@@ -1190,12 +1245,23 @@ type CloneTemplateRequest struct {
 
 // TemplateVersion represents a version snapshot entry in the template history.
 type TemplateVersion struct {
-	ID            string    `json:"id" yaml:"id"`
-	TemplateID    string    `json:"template_id" yaml:"template_id"`
-	Version       string    `json:"version" yaml:"version"`
-	ChangeSummary string    `json:"change_summary" yaml:"change_summary"`
-	CreatedBy     string    `json:"created_by" yaml:"created_by"`
-	CreatedAt     time.Time `json:"created_at" yaml:"created_at"`
+	ID            string `json:"id" yaml:"id"`
+	TemplateID    string `json:"template_id" yaml:"template_id"`
+	Version       string `json:"version" yaml:"version"`
+	ChangeSummary string `json:"change_summary" yaml:"change_summary"`
+	CreatedBy     string `json:"created_by" yaml:"created_by"`
+	// CreatedByUsername is set by k8s-stack-manager v0.6.0+ (empty on older servers).
+	CreatedByUsername string    `json:"created_by_username,omitempty" yaml:"created_by_username,omitempty"`
+	CreatedAt         time.Time `json:"created_at" yaml:"created_at"`
+}
+
+// CreatedByName returns the username of the creator, or the user ID when
+// the server does not send the username.
+func (v TemplateVersion) CreatedByName() string {
+	if v.CreatedByUsername != "" {
+		return v.CreatedByUsername
+	}
+	return v.CreatedBy
 }
 
 // TemplateVersionDetail is the full version response including the parsed snapshot.
@@ -1206,8 +1272,9 @@ type TemplateVersionDetail struct {
 
 // TemplateSnapshot is the state of a template captured at publish time.
 type TemplateSnapshot struct {
-	Template TemplateSnapshotData        `json:"template" yaml:"template"`
-	Charts   []TemplateChartSnapshotData `json:"charts" yaml:"charts"`
+	SchemaVersion int                         `json:"schema_version,omitempty" yaml:"schema_version,omitempty"`
+	Template      TemplateSnapshotData        `json:"template" yaml:"template"`
+	Charts        []TemplateChartSnapshotData `json:"charts" yaml:"charts"`
 }
 
 // TemplateSnapshotData holds the template fields in a snapshot.
@@ -1228,6 +1295,12 @@ type TemplateChartSnapshotData struct {
 	LockedValues  string `json:"locked_values,omitempty" yaml:"locked_values,omitempty"`
 	IsRequired    bool   `json:"is_required" yaml:"is_required"`
 	SortOrder     int    `json:"sort_order" yaml:"sort_order"`
+	// Fields below exist from snapshot schema version 1.
+	ID              string `json:"id,omitempty" yaml:"id,omitempty"`
+	SourceRepoURL   string `json:"source_repo_url,omitempty" yaml:"source_repo_url,omitempty"`
+	BuildPipelineID string `json:"build_pipeline_id,omitempty" yaml:"build_pipeline_id,omitempty"`
+	ChartPath       string `json:"chart_path,omitempty" yaml:"chart_path,omitempty"`
+	ChartVersion    string `json:"chart_version,omitempty" yaml:"chart_version,omitempty"`
 }
 
 // TemplateVersionDiff is the response from the version diff endpoint.
@@ -1237,11 +1310,24 @@ type TemplateVersionDiff struct {
 	ChartDiffs []ChartDiffEntry    `json:"chart_diffs" yaml:"chart_diffs"`
 }
 
-// TemplateVersionSide is one side of a version diff.
+// TemplateVersionSide is one side of a version diff. Version is the version
+// string. The other metadata fields are set by k8s-stack-manager v0.6.0+.
+// For the working copy (query value "working") ID is "working" and
+// IsWorkingCopy is true.
 type TemplateVersionSide struct {
-	Version  string           `json:"version" yaml:"version"`
-	Snapshot TemplateSnapshot `json:"snapshot" yaml:"snapshot"`
+	ID                string           `json:"id,omitempty" yaml:"id,omitempty"`
+	Version           string           `json:"version" yaml:"version"`
+	ChangeSummary     string           `json:"change_summary,omitempty" yaml:"change_summary,omitempty"`
+	CreatedBy         string           `json:"created_by,omitempty" yaml:"created_by,omitempty"`
+	CreatedByUsername string           `json:"created_by_username,omitempty" yaml:"created_by_username,omitempty"`
+	CreatedAt         *time.Time       `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	IsWorkingCopy     bool             `json:"is_working_copy,omitempty" yaml:"is_working_copy,omitempty"`
+	Snapshot          TemplateSnapshot `json:"snapshot" yaml:"snapshot"`
 }
+
+// TemplateVersionWorkingCopy is the version ID that selects the working copy
+// (draft) of a template in the version diff endpoint (v0.6.0+).
+const TemplateVersionWorkingCopy = "working"
 
 // CleanupPolicy is the success-path response of
 // GET/POST/PUT /api/v1/admin/cleanup-policies. Mirrors the backend
@@ -1342,4 +1428,10 @@ type ChartDiffEntry struct {
 	RightRequired  bool   `json:"right_required" yaml:"right_required"`
 	LeftSortOrder  int    `json:"left_sort_order" yaml:"left_sort_order"`
 	RightSortOrder int    `json:"right_sort_order" yaml:"right_sort_order"`
+	// Set by k8s-stack-manager v0.6.0+ when the side has the field
+	// (snapshot schema version 1 or the working copy).
+	LeftChartVersion  string `json:"left_chart_version,omitempty" yaml:"left_chart_version,omitempty"`
+	RightChartVersion string `json:"right_chart_version,omitempty" yaml:"right_chart_version,omitempty"`
+	LeftChartPath     string `json:"left_chart_path,omitempty" yaml:"left_chart_path,omitempty"`
+	RightChartPath    string `json:"right_chart_path,omitempty" yaml:"right_chart_path,omitempty"`
 }

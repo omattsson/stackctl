@@ -789,6 +789,18 @@ func (c *Client) UpdateTemplate(id string, req *types.UpdateTemplateRequest) (*t
 	return &tmpl, nil
 }
 
+// PatchTemplate changes only the template fields that req sets
+// (k8s-stack-manager v0.6.0+). Older servers replace every field with the
+// request values, so use UpdateTemplate with the full record for them.
+func (c *Client) PatchTemplate(id string, req *types.PatchTemplateRequest) (*types.StackTemplate, error) {
+	var tmpl types.StackTemplate
+	err := c.Put(fmt.Sprintf(pathTemplate, id), req, &tmpl)
+	if err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
+}
+
 // CloneTemplate clones a stack template by ID.
 func (c *Client) CloneTemplate(id string, req *types.CloneTemplateRequest) (*types.StackTemplate, error) {
 	var tmpl types.StackTemplate
@@ -807,6 +819,24 @@ func (c *Client) PublishTemplate(id string) (*types.StackTemplate, error) {
 		return nil, err
 	}
 	return &tmpl, nil
+}
+
+// PublishTemplateRelease publishes the working copy of a template as a new
+// release (k8s-stack-manager v0.6.0+). req may be nil: the body is then empty
+// and the server uses the version of the working copy. The response tells
+// which version users now get and whether a new version was created. Older
+// servers ignore the body and return only the template.
+func (c *Client) PublishTemplateRelease(id string, req *types.PublishTemplateRequest) (*types.PublishTemplateResponse, error) {
+	var resp types.PublishTemplateResponse
+	var body interface{}
+	if req != nil {
+		body = req
+	}
+	err := c.Post(fmt.Sprintf(pathTemplate+"/publish", id), body, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // UnpublishTemplate unpublishes a stack template by ID.

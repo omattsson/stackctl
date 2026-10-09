@@ -26,14 +26,11 @@ func TestLiveTemplate_VersionsListGetDiff(t *testing.T) {
 	prefix := liveResourcePrefix()
 
 	// Create a throwaway template with one chart so the snapshot is
-	// non-empty. Note: stackctl's CreateTemplateRequest has no `version`
-	// field, so the template-level Version stays empty and the diff
-	// response's left.version / right.version come back empty too. We
-	// assert on the snapshot's template name (always populated) rather
-	// than .version, and call out the gap below.
+	// non-empty. k8s-stack-manager v0.6.0+ needs a version to publish.
 	tmpl, err := c.CreateTemplate(&types.CreateTemplateRequest{
 		Name:        prefix + "-versions",
 		Description: "live-test versions fixture (v1)",
+		Version:     "1.0.0",
 		Charts: []types.ChartConfig{
 			{ChartName: "noop-a", RepoURL: "", ChartVersion: "0.1.0"},
 		},
@@ -46,16 +43,13 @@ func TestLiveTemplate_VersionsListGetDiff(t *testing.T) {
 	_, err = c.PublishTemplate(tmpl.ID)
 	require.NoError(t, err, "publish template (v1)")
 
-	// Update description so the second snapshot differs from the first.
-	// Backend rejects PUT /api/v1/templates/:id with `name is required`
-	// when Name is empty (the stackctl type has json:"name,omitempty" but
-	// the backend treats it as required). Echo the existing name to keep
-	// it a description-only change. Worth a follow-up: tighten stackctl's
-	// UpdateTemplateRequest to drop the omitempty on Name, or relax the
-	// backend.
+	// Update description and version so the second snapshot differs from
+	// the first. Send the full record: servers before v0.6.0 replace every
+	// field of the template.
 	_, err = c.UpdateTemplate(tmpl.ID, &types.UpdateTemplateRequest{
 		Name:        tmpl.Name,
 		Description: "live-test versions fixture (v2)",
+		Version:     "1.1.0",
 	})
 	require.NoError(t, err, "update template")
 
@@ -92,10 +86,8 @@ func TestLiveTemplate_VersionsListGetDiff(t *testing.T) {
 	diff, err := c.DiffTemplateVersions(tmpl.ID, left.ID, right.ID)
 	require.NoError(t, err, "diff template versions")
 	require.NotNil(t, diff, "diff response must not be nil")
-	// diff.{left,right}.version mirrors the template-level Version which
-	// stackctl can't set today (CreateTemplateRequest has no version
-	// field — a follow-up gap). Assert on the snapshot.template.name
-	// instead, which always round-trips.
+	assert.Equal(t, "1.0.0", diff.Left.Version, "diff.left.version is the version string")
+	assert.Equal(t, "1.1.0", diff.Right.Version, "diff.right.version is the version string")
 	assert.NotEmpty(t, diff.Left.Snapshot.Template.Name, "diff.left.snapshot.template.name must decode")
 	assert.NotEmpty(t, diff.Right.Snapshot.Template.Name, "diff.right.snapshot.template.name must decode")
 	assert.NotNil(t, diff.ChartDiffs, "chart_diffs must be a populated slice, even if empty")

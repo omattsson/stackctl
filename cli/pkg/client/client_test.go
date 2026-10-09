@@ -4621,6 +4621,87 @@ func TestDiffTemplateVersions(t *testing.T) {
 
 // ---------- bulk template operations ----------
 
+func TestPublishTemplateRelease(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		req      *types.PublishTemplateRequest
+		wantBody string
+	}{
+		{name: "NoBody", req: nil, wantBody: ""},
+		{name: "VersionAndSummary", req: &types.PublishTemplateRequest{Version: "1.2.0", ChangeSummary: "bump"}, wantBody: `{"version":"1.2.0","change_summary":"bump"}`},
+		{name: "SummaryOnly", req: &types.PublishTemplateRequest{ChangeSummary: "bump"}, wantBody: `{"change_summary":"bump"}`},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, "/api/v1/templates/1/publish", r.URL.Path)
+				body, _ := io.ReadAll(r.Body)
+				if tt.wantBody == "" {
+					assert.Empty(t, strings.TrimSpace(string(body)))
+				} else {
+					assert.JSONEq(t, tt.wantBody, string(body))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"1","name":"web-app","version":"1.2.0","is_published":true,"published_version":"1.2.0","published_version_id":"v-9","snapshot_created":true,"has_unpublished_changes":false}`))
+			}))
+			defer server.Close()
+
+			c := New(server.URL)
+			resp, err := c.PublishTemplateRelease("1", tt.req)
+			require.NoError(t, err)
+			require.NotNil(t, resp.PublishedVersion)
+			assert.Equal(t, "1.2.0", *resp.PublishedVersion)
+			require.NotNil(t, resp.PublishedVersionID)
+			assert.Equal(t, "v-9", *resp.PublishedVersionID)
+			require.NotNil(t, resp.SnapshotCreated)
+			assert.True(t, *resp.SnapshotCreated)
+			require.NotNil(t, resp.HasUnpublishedChanges)
+			assert.False(t, *resp.HasUnpublishedChanges)
+			assert.Equal(t, "1.2.0", resp.Version)
+		})
+	}
+}
+
+func TestPatchTemplate_SendsOnlySetFields(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/templates/1", r.URL.Path)
+		body, _ := io.ReadAll(r.Body)
+		assert.JSONEq(t, `{"description":"","version":"1.2.0"}`, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","name":"web-app","version":"1.2.0"}`))
+	}))
+	defer server.Close()
+
+	empty, version := "", "1.2.0"
+	tmpl, err := New(server.URL).PatchTemplate("1", &types.PatchTemplateRequest{Description: &empty, Version: &version})
+	require.NoError(t, err)
+	assert.Equal(t, "1.2.0", tmpl.Version)
+}
+
+func TestPublishTemplateRelease_Conflict(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"Version 1.2.0 already exists"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.PublishTemplateRelease("1", &types.PublishTemplateRequest{Version: "1.2.0"})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusConflict, apiErr.StatusCode)
+	assert.Contains(t, apiErr.Message, "already exists")
+}
+
 func TestBulkPublishTemplates_Success(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

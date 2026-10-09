@@ -87,6 +87,18 @@ func resolveDefinitionID(c *client.Client, nameOrID string) (string, error) {
 	}
 }
 
+// templateNamePageSize is the page size that resolveTemplateID requests.
+const templateNamePageSize = 100
+
+// templateNameMaxPages caps the pages that resolveTemplateID reads.
+const templateNameMaxPages = 100
+
+// resolveTemplateID returns the ID of the template with the exact name
+// nameOrID, or nameOrID itself when it looks like an ID. It sends ?name= to
+// GET /api/v1/templates, but servers before k8s-stack-manager v0.6.0 ignore
+// that filter and other servers can match more than the exact name, so it
+// reads every page of the (filtered or full) list and matches the exact
+// name on the client.
 func resolveTemplateID(c *client.Client, nameOrID string) (string, error) {
 	nameOrID = strings.TrimSpace(nameOrID)
 	if nameOrID == "" {
@@ -97,25 +109,48 @@ func resolveTemplateID(c *client.Client, nameOrID string) (string, error) {
 		return nameOrID, nil
 	}
 
-	resp, err := c.ListTemplates(map[string]string{"name": nameOrID})
-	if err != nil {
-		return "", fmt.Errorf("resolving template name %q: %w", nameOrID, err)
+	var matches []types.StackTemplate
+	seen := make(map[string]bool)
+	for page := 1; page <= templateNameMaxPages; page++ {
+		resp, err := c.ListTemplates(map[string]string{
+			"name":     nameOrID,
+			"page":     strconv.Itoa(page),
+			"pageSize": strconv.Itoa(templateNamePageSize),
+		})
+		if err != nil {
+			return "", fmt.Errorf("resolving template name %q: %w", nameOrID, err)
+		}
+		newItems := 0
+		for _, tmpl := range resp.Data {
+			if seen[tmpl.ID] {
+				continue
+			}
+			seen[tmpl.ID] = true
+			newItems++
+			if tmpl.Name == nameOrID {
+				matches = append(matches, tmpl)
+			}
+		}
+		// Stop at the last page. A page without new items means the server
+		// ignores the page parameter.
+		if newItems == 0 || len(resp.Data) < templateNamePageSize ||
+			(resp.TotalPages > 0 && page >= resp.TotalPages) ||
+			(resp.Total > 0 && len(seen) >= resp.Total) {
+			break
+		}
 	}
 
-	switch len(resp.Data) {
+	switch len(matches) {
 	case 0:
 		return "", fmt.Errorf("no template found with name %q", nameOrID)
 	case 1:
-		if !strings.EqualFold(resp.Data[0].Name, nameOrID) {
-			return "", fmt.Errorf("no template found with name %q", nameOrID)
-		}
-		return resp.Data[0].ID, nil
+		return matches[0].ID, nil
 	default:
-		msg := fmt.Sprintf("multiple templates match name %q — use the ID instead:\n", nameOrID)
-		for _, tmpl := range resp.Data {
-			msg += fmt.Sprintf("  %s  (owner: %s)\n", tmpl.ID, tmpl.Owner)
+		ids := make([]string, len(matches))
+		for i, tmpl := range matches {
+			ids[i] = tmpl.ID
 		}
-		return "", fmt.Errorf("%s", msg)
+		return "", fmt.Errorf("multiple templates named %q: %s; use the ID instead", nameOrID, strings.Join(ids, ", "))
 	}
 }
 

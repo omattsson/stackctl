@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
@@ -391,9 +394,128 @@ func TestResolveTemplateID_NameMultipleMatches(t *testing.T) {
 	c := client.New(server.URL)
 	_, err := resolveTemplateID(c, "my-template")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "multiple templates match")
-	assert.Contains(t, err.Error(), "tmpl-1")
-	assert.Contains(t, err.Error(), "tmpl-2")
+	assert.Contains(t, err.Error(), `multiple templates named "my-template": tmpl-1, tmpl-2`)
+}
+
+// templateListServer serves GET /api/v1/templates from all. With filter set
+// it applies the exact name filter (v0.6.0+); without it it ignores ?name=
+// (v0.5.0). It pages with page/pageSize.
+func templateListServer(t *testing.T, all []types.StackTemplate, filter bool, requests *atomic.Int32) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/templates", r.URL.Path)
+		requests.Add(1)
+		q := r.URL.Query()
+		items := all
+		if filter {
+			items = nil
+			for _, tmpl := range all {
+				if tmpl.Name == q.Get("name") {
+					items = append(items, tmpl)
+				}
+			}
+		}
+		page, _ := strconv.Atoi(q.Get("page"))
+		size, _ := strconv.Atoi(q.Get("pageSize"))
+		if page < 1 {
+			page = 1
+		}
+		if size < 1 {
+			size = 25
+		}
+		start := (page - 1) * size
+		if start > len(items) {
+			start = len(items)
+		}
+		end := start + size
+		if end > len(items) {
+			end = len(items)
+		}
+		pages := (len(items) + size - 1) / size
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{
+			Data: items[start:end], Total: len(items), Page: page, PageSize: size, TotalPages: pages,
+		})
+	}))
+}
+
+// manyTemplates returns n templates named tmpl-<i>, plus extra.
+func manyTemplates(n int, extra ...types.StackTemplate) []types.StackTemplate {
+	out := make([]types.StackTemplate, 0, n+len(extra))
+	for i := 0; i < n; i++ {
+		out = append(out, types.StackTemplate{Base: types.Base{ID: fmt.Sprintf("id-%d", i)}, Name: fmt.Sprintf("tmpl-%d", i)})
+	}
+	return append(out, extra...)
+}
+
+func TestResolveTemplateID_ServerIgnoresNameFilter(t *testing.T) {
+	t.Parallel()
+	// 150 other templates first: the match is on page 2 of 100.
+	all := manyTemplates(150,
+		types.StackTemplate{Base: types.Base{ID: "near"}, Name: "My-Template"},
+		types.StackTemplate{Base: types.Base{ID: "want"}, Name: "my-template"},
+	)
+	var requests atomic.Int32
+	server := templateListServer(t, all, false, &requests)
+	defer server.Close()
+
+	id, err := resolveTemplateID(client.New(server.URL), "my-template")
+	require.NoError(t, err)
+	assert.Equal(t, "want", id, "only the exact name matches")
+	assert.Equal(t, int32(2), requests.Load())
+}
+
+func TestResolveTemplateID_ServerIgnoresFilter_Ambiguous(t *testing.T) {
+	t.Parallel()
+	all := manyTemplates(120,
+		types.StackTemplate{Base: types.Base{ID: "a"}, Name: "dup"},
+		types.StackTemplate{Base: types.Base{ID: "b"}, Name: "dup"},
+	)
+	var requests atomic.Int32
+	server := templateListServer(t, all, false, &requests)
+	defer server.Close()
+
+	_, err := resolveTemplateID(client.New(server.URL), "dup")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `multiple templates named "dup": a, b`)
+}
+
+func TestResolveTemplateID_ServerIgnoresFilter_NotFound(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	server := templateListServer(t, manyTemplates(30), false, &requests)
+	defer server.Close()
+
+	_, err := resolveTemplateID(client.New(server.URL), "missing")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `no template found with name "missing"`)
+	assert.Equal(t, int32(1), requests.Load())
+}
+
+func TestResolveTemplateID_ServerFiltersByName(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	server := templateListServer(t, manyTemplates(250, types.StackTemplate{Base: types.Base{ID: "want"}, Name: "my-template"}), true, &requests)
+	defer server.Close()
+
+	id, err := resolveTemplateID(client.New(server.URL), "my-template")
+	require.NoError(t, err)
+	assert.Equal(t, "want", id)
+	assert.Equal(t, int32(1), requests.Load(), "a filtering server needs one request")
+}
+
+func TestResolveTemplateID_ServerIgnoresPage(t *testing.T) {
+	t.Parallel()
+	// A server that ignores page returns the same page again: stop.
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		json.NewEncoder(w).Encode(types.ListResponse[types.StackTemplate]{Data: manyTemplates(100), Total: 500})
+	}))
+	defer server.Close()
+
+	_, err := resolveTemplateID(client.New(server.URL), "missing")
+	require.Error(t, err)
+	assert.Equal(t, int32(2), requests.Load())
 }
 
 func TestResolveTemplateID_NameMismatch(t *testing.T) {

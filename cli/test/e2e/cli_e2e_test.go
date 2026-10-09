@@ -798,6 +798,16 @@ func startE2ETemplateDefMockServer(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(resp)
 
+		// Get template (template update reads it before the PUT)
+		case r.URL.Path == "/api/v1/templates/1" && r.Method == http.MethodGet:
+			resp := map[string]interface{}{
+				"id": "1", "name": "web-template", "description": "Web app stack",
+				"is_published": true, "owner_id": "admin", "charts": []interface{}{},
+				"created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z", "version": "1.0.0",
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(resp)
+
 		// Update template
 		case r.URL.Path == "/api/v1/templates/1" && r.Method == http.MethodPut:
 			var req map[string]interface{}
