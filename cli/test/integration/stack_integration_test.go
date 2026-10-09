@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/omattsson/stackctl/cli/cmd"
@@ -231,8 +232,21 @@ func startStackMockServer(t *testing.T, state *stackMockState) *httptest.Server 
 					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "invalid body"})
 					return
 				}
+				minutes, ok := body["minutes"]
+				if !ok || minutes <= 0 {
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(types.ErrorResponse{Error: "minutes must be greater than 0"})
+					return
+				}
+				// Like the API: add minutes to the later of the expiry and now;
+				// ttl_minutes does not change.
 				state.mu.Lock()
-				inst.TTLMinutes += body["ttl_minutes"]
+				base := time.Now().UTC()
+				if inst.ExpiresAt != nil && inst.ExpiresAt.After(base) {
+					base = *inst.ExpiresAt
+				}
+				exp := base.Add(time.Duration(minutes) * time.Minute)
+				inst.ExpiresAt = &exp
 				state.mu.Unlock()
 
 				w.WriteHeader(http.StatusOK)
@@ -406,9 +420,12 @@ func TestStackWorkflow_CloneAndExtend(t *testing.T) {
 	assert.Equal(t, "draft", clone.Status)
 
 	// Extend the clone's TTL
+	before := time.Now().UTC()
 	extended, err := c.ExtendStack(clone.ID, 30)
 	require.NoError(t, err)
-	assert.Equal(t, 90, extended.TTLMinutes) // 60 (inherited) + 30
+	assert.Equal(t, 60, extended.TTLMinutes, "extend does not change the TTL")
+	require.NotNil(t, extended.ExpiresAt)
+	assert.False(t, extended.ExpiresAt.Before(before.Add(30*time.Minute)))
 
 	// Both should be listed
 	resp, err := c.ListStacks(nil)

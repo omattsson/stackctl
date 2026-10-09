@@ -182,7 +182,7 @@ stackctl stack delete my-app
 # Clone an existing instance
 stackctl stack clone my-app
 
-# Set the TTL to 120 minutes from now (asks before it moves the expiry earlier)
+# Add 120 minutes to the stack's expiry (never shortens it); prints the old and the new expiry
 stackctl stack extend my-app --minutes 120
 
 # Deployment history and rollback
@@ -190,6 +190,10 @@ stackctl stack history my-app
 stackctl stack history-values my-app <log-id>
 stackctl stack rollback my-app --target <log-id>
 ```
+
+`stack extend --minutes N` adds N minutes to the current expiry, or to now when the stack has expired. It never makes the expiry earlier and does not change the TTL of the stack. The server caps the new expiry at 30 days from now. `--minutes` needs k8s-stack-manager v0.6.0 or later. An older server ignores `--minutes` and resets the expiry to now + TTL. stackctl detects this: it prints the old and the new expiry, then fails (exit code 1) with "the server did not add N minutes ... upgrade k8s-stack-manager to v0.6.0 or later". `--reset-ttl M` (deprecated) keeps the old behaviour: the TTL becomes M minutes and the expiry now + M minutes, which can be earlier. `--yes` has no effect and is accepted for older scripts.
+
+stackctl writes any `Warning` header from the API (for example a deprecation notice) to stderr as `Warning: <text>`, for every command.
 
 ### Templates
 

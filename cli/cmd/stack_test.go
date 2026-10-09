@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -826,255 +825,332 @@ func TestStackCloneCmd_QuietOutput(t *testing.T) {
 
 // ---------- stack extend ----------
 
-// startExtendServer serves GET /stack-instances/42 with the given expiry
-// and POST /extend, which sets expires_at to now + ttl like the backend.
-// now is the server clock; the Date header carries it.
-func startExtendServer(t *testing.T, current *time.Time, now time.Time, extendCalls *int) *httptest.Server {
-	t.Helper()
-	return startExtendServerDate(t, current, now, extendCalls, true)
+// extendServer emulates the extend endpoint of the API. GET
+// /stack-instances/42 returns the current expiry. POST /extend with
+// {"minutes": N} adds N minutes to the later of the current expiry and now;
+// the deprecated {"ttl_minutes": N} sets the expiry to now + N and adds a
+// Warning header. legacy emulates an old server that ignores "minutes" and
+// resets the expiry to now + TTL.
+type extendServer struct {
+	current     *time.Time
+	now         time.Time
+	legacy      bool
+	noUpdatedAt bool // omit updated_at: the command falls back to the local clock
+	calls       int
+	body        map[string]int
 }
 
-func startExtendServerDate(t *testing.T, current *time.Time, now time.Time, extendCalls *int, sendDate bool) *httptest.Server {
+const extendWarning = `299 - "ttl_minutes on /extend is deprecated and resets the expiry to now + ttl_minutes; send {\"minutes\": N} to add N minutes"`
+
+func (es *extendServer) start(t *testing.T) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if sendDate {
-			w.Header().Set("Date", now.UTC().Format(http.TimeFormat))
-		} else {
-			w.Header()["Date"] = nil // suppress the automatic Date header
-		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/stack-instances/42":
-			json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "42"}, TTLMinutes: 240, ExpiresAt: current})
+			json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "42"}, TTLMinutes: 240, ExpiresAt: es.current})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/stack-instances/42/extend":
-			*extendCalls++
-			var req map[string]int
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
-			exp := now.Add(time.Duration(req["ttl_minutes"]) * time.Minute)
-			json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "42"}, TTLMinutes: req["ttl_minutes"], ExpiresAt: &exp})
+			es.calls++
+			es.body = map[string]int{}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&es.body))
+			var exp time.Time
+			ttl := 240
+			minutes, hasMinutes := es.body["minutes"]
+			switch {
+			case es.legacy:
+				exp = es.now.Add(time.Duration(ttl) * time.Minute)
+			case hasMinutes:
+				base := es.now
+				if es.current != nil && es.current.After(es.now) {
+					base = *es.current
+				}
+				exp = base.Add(time.Duration(minutes) * time.Minute)
+				if limit := es.now.Add(43200 * time.Minute); exp.After(limit) {
+					exp = limit
+				}
+			default:
+				w.Header().Set("Warning", extendWarning)
+				ttl = es.body["ttl_minutes"]
+				exp = es.now.Add(time.Duration(ttl) * time.Minute)
+			}
+			inst := types.StackInstance{Base: types.Base{ID: "42", UpdatedAt: es.now}, TTLMinutes: ttl, ExpiresAt: &exp}
+			if es.noUpdatedAt {
+				inst.UpdatedAt = time.Time{}
+			}
+			json.NewEncoder(w).Encode(inst)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
 	}))
+	t.Cleanup(srv.Close)
+	return srv
 }
 
-func setupExtend(t *testing.T, minutes string) time.Time {
+// setupExtend resets the extend flags after the test and returns a buffer
+// for stderr of the command.
+func setupExtend(t *testing.T) *bytes.Buffer {
 	t.Helper()
-	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	prevNow := nowFunc
-	nowFunc = func() time.Time { return now }
-	require.NoError(t, stackExtendCmd.Flags().Set("minutes", minutes))
+	var stderr bytes.Buffer
+	stackExtendCmd.SetErr(&stderr)
 	t.Cleanup(func() {
-		nowFunc = prevNow
 		resetFlag(t, stackExtendCmd.Flags(), "minutes", "0")
+		resetFlag(t, stackExtendCmd.Flags(), "reset-ttl", "0")
 		resetFlag(t, stackExtendCmd.Flags(), "yes", "false")
+		stackExtendCmd.SetErr(nil)
 		stackExtendCmd.SetIn(nil)
 	})
-	return now
+	return &stderr
 }
 
-func TestStackExtendCmd_Success(t *testing.T) {
-	now := setupExtend(t, "60")
-	current := now.Add(30 * time.Minute)
-	calls := 0
-	server := startExtendServer(t, &current, now, &calls)
-	defer server.Close()
+var extendNow = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 
-	buf := setupStackTestCmd(t, server.URL)
+func TestStackExtendCmd_AddsMinutes(t *testing.T) {
+	stderr := setupExtend(t)
+	current := extendNow.Add(4 * time.Hour)
+	es := &extendServer{current: &current, now: extendNow}
+	srv := es.start(t)
+
+	buf := setupStackTestCmd(t, srv.URL)
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "60"))
 	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
 
-	assert.Equal(t, 1, calls)
-	want := "Set the TTL of stack 42 to 60 minutes\n" +
-		"Old expiry: 2026-10-01T12:30:00Z\n" +
-		"New expiry: 2026-10-01T13:00:00Z\n"
+	assert.Equal(t, 1, es.calls)
+	assert.Equal(t, map[string]int{"minutes": 60}, es.body, "the request must send minutes, not ttl_minutes")
+	want := "Extended stack 42 by 60 minutes\n" +
+		"Old expiry: 2026-10-01T16:00:00Z\n" +
+		"New expiry: 2026-10-01T17:00:00Z\n"
 	assert.Equal(t, want, buf.String())
+	assert.Empty(t, stderr.String())
 }
 
 func TestStackExtendCmd_NoCurrentExpiry(t *testing.T) {
-	now := setupExtend(t, "60")
-	calls := 0
-	server := startExtendServer(t, nil, now, &calls)
-	defer server.Close()
+	_ = setupExtend(t)
+	es := &extendServer{now: extendNow}
+	srv := es.start(t)
 
-	buf := setupStackTestCmd(t, server.URL)
+	buf := setupStackTestCmd(t, srv.URL)
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "60"))
 	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
-	assert.Equal(t, 1, calls)
+	assert.Equal(t, 1, es.calls)
 	assert.Contains(t, buf.String(), "Old expiry: -")
 	assert.Contains(t, buf.String(), "New expiry: 2026-10-01T13:00:00Z")
 }
 
-func TestStackExtendCmd_ShorterExpiry_NonInteractiveNeedsYes(t *testing.T) {
-	now := setupExtend(t, "60")
-	current := now.Add(4 * time.Hour)
-	calls := 0
-	server := startExtendServer(t, &current, now, &calls)
-	defer server.Close()
+// TestStackExtendCmd_YesAccepted: --yes has no effect but older scripts
+// still pass it. The command must not prompt (stdin is closed).
+func TestStackExtendCmd_YesAccepted(t *testing.T) {
+	_ = setupExtend(t)
+	current := extendNow.Add(4 * time.Hour)
+	es := &extendServer{current: &current, now: extendNow}
+	srv := es.start(t)
 
-	_ = setupStackTestCmd(t, server.URL)
-	stackExtendCmd.SetIn(strings.NewReader("")) // stdin closed: no answer
-	stackExtendCmd.SetErr(io.Discard)
-	t.Cleanup(func() { stackExtendCmd.SetErr(nil) })
-
-	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "use --yes")
-	assert.Zero(t, calls, "the expiry must not be shortened without confirmation")
-}
-
-func TestStackExtendCmd_ShorterExpiry_Declined(t *testing.T) {
-	now := setupExtend(t, "60")
-	current := now.Add(4 * time.Hour)
-	calls := 0
-	server := startExtendServer(t, &current, now, &calls)
-	defer server.Close()
-
-	buf := setupStackTestCmd(t, server.URL)
-	var prompt bytes.Buffer
-	stackExtendCmd.SetIn(strings.NewReader("n\n"))
-	stackExtendCmd.SetErr(&prompt)
-	t.Cleanup(func() { stackExtendCmd.SetErr(nil) })
-
-	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
-	assert.Zero(t, calls)
-	assert.Contains(t, buf.String(), "Aborted.")
-	assert.Contains(t, prompt.String(), "expires at 2026-10-01T16:00:00Z")
-	assert.Contains(t, prompt.String(), "can move the expiry earlier or keep it about the same (new expiry about 2026-10-01T13:00:00Z)")
-}
-
-func TestStackExtendCmd_ShorterExpiry_Yes(t *testing.T) {
-	now := setupExtend(t, "60")
-	require.NoError(t, stackExtendCmd.Flags().Set("yes", "true"))
-	current := now.Add(4 * time.Hour)
-	calls := 0
-	server := startExtendServer(t, &current, now, &calls)
-	defer server.Close()
-
-	buf := setupStackTestCmd(t, server.URL)
-	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
-	assert.Equal(t, 1, calls)
-	assert.Contains(t, buf.String(), "Old expiry: 2026-10-01T16:00:00Z")
-	assert.Contains(t, buf.String(), "New expiry: 2026-10-01T13:00:00Z")
-}
-
-// TestStackExtendCmd_SkewedLocalClock: the local clock is 3 hours ahead of
-// the server. The check uses the server time (Date header), so a TTL of 60
-// minutes is still seen as shorter than the 4 hours left.
-func TestStackExtendCmd_SkewedLocalClock(t *testing.T) {
-	serverNow := setupExtend(t, "60")
-	nowFunc = func() time.Time { return serverNow.Add(3 * time.Hour) }
-	current := serverNow.Add(4 * time.Hour)
-	calls := 0
-	server := startExtendServer(t, &current, serverNow, &calls)
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	var prompt bytes.Buffer
-	stackExtendCmd.SetIn(strings.NewReader("n\n"))
-	stackExtendCmd.SetErr(&prompt)
-	t.Cleanup(func() { stackExtendCmd.SetErr(nil) })
-
-	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
-	assert.Zero(t, calls)
-	assert.Contains(t, prompt.String(), "can move the expiry earlier or keep it about the same (new expiry about 2026-10-01T13:00:00Z)")
-}
-
-// TestStackExtendCmd_SkewedLocalClockNoPrompt: the local clock is 3 hours
-// behind. A TTL of 5 hours is longer than the 4 hours left on the server,
-// so no prompt, although the local clock suggests 7 hours left.
-func TestStackExtendCmd_SkewedLocalClockNoPrompt(t *testing.T) {
-	serverNow := setupExtend(t, "300")
-	nowFunc = func() time.Time { return serverNow.Add(-3 * time.Hour) }
-	current := serverNow.Add(4 * time.Hour)
-	calls := 0
-	server := startExtendServer(t, &current, serverNow, &calls)
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
-	stackExtendCmd.SetIn(strings.NewReader("")) // a prompt would fail
-	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
-	assert.Equal(t, 1, calls)
-}
-
-// TestStackExtendCmd_NoDateHeaderUsesLocalClock: without a Date header the
-// local clock is the reference.
-func TestStackExtendCmd_NoDateHeaderUsesLocalClock(t *testing.T) {
-	now := setupExtend(t, "60")
-	current := now.Add(4 * time.Hour)
-	calls := 0
-	server := startExtendServerDate(t, &current, now, &calls, false)
-	defer server.Close()
-
-	_ = setupStackTestCmd(t, server.URL)
+	buf := setupStackTestCmd(t, srv.URL)
 	stackExtendCmd.SetIn(strings.NewReader(""))
-	stackExtendCmd.SetErr(io.Discard)
-	t.Cleanup(func() { stackExtendCmd.SetErr(nil) })
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "30"))
+	require.NoError(t, stackExtendCmd.Flags().Set("yes", "true"))
+	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
+	assert.Equal(t, 1, es.calls)
+	assert.Contains(t, buf.String(), "New expiry: 2026-10-01T16:30:00Z")
+}
 
+func TestStackExtendCmd_YesFlagParses(t *testing.T) {
+	_ = setupExtend(t)
+	require.NoError(t, stackExtendCmd.ParseFlags([]string{"--minutes", "5", "-y"}))
+	f := stackExtendCmd.Flags().Lookup("yes")
+	require.NotNil(t, f)
+	assert.True(t, f.Hidden, "--yes has no effect and is hidden from help")
+	assert.Equal(t, "y", f.Shorthand)
+	assert.Contains(t, stackExtendCmd.Flags().Lookup("minutes").Usage, "never shortens it")
+}
+
+// TestStackExtendCmd_ResetTTLPrintsWarning: --reset-ttl sends the
+// deprecated body; the Warning header of the server goes to stderr.
+func TestStackExtendCmd_ResetTTLPrintsWarning(t *testing.T) {
+	stderr := setupExtend(t)
+	current := extendNow.Add(4 * time.Hour)
+	es := &extendServer{current: &current, now: extendNow}
+	srv := es.start(t)
+
+	buf := setupStackTestCmd(t, srv.URL)
+	require.NoError(t, stackExtendCmd.Flags().Set("reset-ttl", "30"))
+	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
+
+	assert.Equal(t, map[string]int{"ttl_minutes": 30}, es.body)
+	want := "Reset the TTL of stack 42 to 30 minutes\n" +
+		"Old expiry: 2026-10-01T16:00:00Z\n" +
+		"New expiry: 2026-10-01T12:30:00Z\n"
+	assert.Equal(t, want, buf.String())
+	assert.Equal(t, "Warning: ttl_minutes on /extend is deprecated and resets the expiry to now + ttl_minutes; send {\"minutes\": N} to add N minutes\n", stderr.String())
+}
+
+// TestStackExtendCmd_OldServerShortens: an old server ignores "minutes"
+// and resets the expiry to now + TTL (earlier here). The command shows the
+// result and fails.
+func TestStackExtendCmd_OldServerShortens(t *testing.T) {
+	_ = setupExtend(t)
+	current := extendNow.Add(6 * time.Hour)
+	es := &extendServer{current: &current, now: extendNow, legacy: true}
+	srv := es.start(t)
+
+	buf := setupStackTestCmd(t, srv.URL)
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "60"))
 	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "use --yes")
-	assert.Zero(t, calls)
+	assert.Equal(t, "the server did not add 60 minutes (new expiry 2026-10-01T16:00:00Z, expected about 2026-10-01T19:00:00Z). "+
+		"The server does not support --minutes; upgrade k8s-stack-manager to v0.6.0 or later", err.Error())
+	assert.Contains(t, buf.String(), "Old expiry: 2026-10-01T18:00:00Z")
+	assert.Contains(t, buf.String(), "New expiry: 2026-10-01T16:00:00Z")
 }
 
-// TestStackExtendCmd_AboutTheSamePrompts: 59.5 minutes left and
-// --minutes 60 keeps the expiry about the same; the command asks first.
-func TestStackExtendCmd_AboutTheSamePrompts(t *testing.T) {
-	now := setupExtend(t, "60")
-	current := now.Add(59*time.Minute + 30*time.Second)
-	calls := 0
-	server := startExtendServer(t, &current, now, &calls)
-	defer server.Close()
+// TestStackExtendCmd_OldServerPartialAdd: expiry in 1 hour, TTL 4 hours,
+// --minutes 600. The old server moves the expiry later (now + 4h), but not
+// by 600 minutes; the command fails.
+func TestStackExtendCmd_OldServerPartialAdd(t *testing.T) {
+	_ = setupExtend(t)
+	current := extendNow.Add(time.Hour)
+	es := &extendServer{current: &current, now: extendNow, legacy: true}
+	srv := es.start(t)
 
-	_ = setupStackTestCmd(t, server.URL)
-	var prompt bytes.Buffer
-	stackExtendCmd.SetIn(strings.NewReader("n\n"))
-	stackExtendCmd.SetErr(&prompt)
-	t.Cleanup(func() { stackExtendCmd.SetErr(nil) })
+	_ = setupStackTestCmd(t, srv.URL)
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "600"))
+	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the server did not add 600 minutes (new expiry 2026-10-01T16:00:00Z, expected about 2026-10-01T23:00:00Z)")
+	assert.Contains(t, err.Error(), "v0.6.0 or later")
+}
 
+// TestStackExtendCmd_OldServerNoUpdatedAt: without updated_at the local
+// clock is the server time; the old server is still detected.
+func TestStackExtendCmd_OldServerNoUpdatedAt(t *testing.T) {
+	_ = setupExtend(t)
+	prevNow := nowFunc
+	nowFunc = func() time.Time { return extendNow }
+	t.Cleanup(func() { nowFunc = prevNow })
+	current := extendNow.Add(time.Hour)
+	es := &extendServer{current: &current, now: extendNow, legacy: true, noUpdatedAt: true}
+	srv := es.start(t)
+
+	_ = setupStackTestCmd(t, srv.URL)
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "600"))
+	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected about 2026-10-01T23:00:00Z")
+}
+
+// TestStackExtendCmd_CapNotFlagged: the server caps the expiry at now + 30
+// days; less than N minutes added is then correct.
+func TestStackExtendCmd_CapNotFlagged(t *testing.T) {
+	_ = setupExtend(t)
+	current := extendNow.Add(30*24*time.Hour - time.Hour)
+	es := &extendServer{current: &current, now: extendNow}
+	srv := es.start(t)
+
+	buf := setupStackTestCmd(t, srv.URL)
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "600"))
 	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
-	assert.Zero(t, calls)
-	assert.Contains(t, prompt.String(), "can move the expiry earlier or keep it about the same")
+	assert.Contains(t, buf.String(), "New expiry: 2026-10-31T12:00:00Z")
 }
 
-func TestExtendCouldShorten(t *testing.T) {
-	server := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	at := func(d time.Duration) *time.Time { v := server.Add(d); return &v }
+func TestCheckMinutesAdded(t *testing.T) {
+	now := extendNow
+	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
 	tests := []struct {
-		name    string
-		expiry  *time.Time
-		minutes int
-		want    bool
+		name      string
+		minutes   int
+		oldExpiry *time.Time
+		newExpiry *time.Time
+		wantErr   bool
 	}{
-		{"no expiry", nil, 1, false},
-		{"already expired", at(-time.Hour), 1, false},
-		{"much longer", at(time.Hour), 120, false},
-		{"exactly remaining plus margin", at(time.Hour), 62, false},
-		{"inside the margin", at(time.Hour), 61, true},
-		{"equal to remaining", at(time.Hour), 60, true},
-		{"shorter", at(4 * time.Hour), 60, true},
+		{"added to old expiry", 60, at(4 * time.Hour), at(5 * time.Hour), false},
+		{"added to now when expired", 60, at(-time.Hour), at(time.Hour), false},
+		{"no old expiry", 60, nil, at(time.Hour), false},
+		{"inside tolerance", 60, at(4 * time.Hour), at(5*time.Hour - time.Minute), false},
+		{"outside tolerance", 60, at(4 * time.Hour), at(5*time.Hour - 3*time.Minute), true},
+		{"at cap", 600, at(30*24*time.Hour - time.Hour), at(30 * 24 * time.Hour), false},
+		{"shortened", 60, at(6 * time.Hour), at(4 * time.Hour), true},
+		{"no new expiry", 60, at(time.Hour), nil, true},
 	}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, extendCouldShorten(tt.expiry, server, tt.minutes))
+			inst := &types.StackInstance{Base: types.Base{UpdatedAt: now}, ExpiresAt: tt.newExpiry}
+			err := checkMinutesAdded(tt.minutes, tt.oldExpiry, inst)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestStackExtendCmd_BadRequest(t *testing.T) {
+	_ = setupExtend(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "42"}})
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Instance has no expiry; nothing to extend"})
+	}))
+	t.Cleanup(srv.Close)
+
+	buf := setupStackTestCmd(t, srv.URL)
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "60"))
+	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Instance has no expiry; nothing to extend")
+	assert.Empty(t, buf.String())
+}
+
+func TestStackExtendCmd_FlagValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		flags   map[string]string
+		wantErr string
+	}{
+		{"no flag", nil, "--minutes is required"},
+		{"zero minutes", map[string]string{"minutes": "0"}, "--minutes must be a positive integer"},
+		{"zero reset-ttl", map[string]string{"reset-ttl": "0"}, "--reset-ttl must be a positive integer"},
+		{"both flags", map[string]string{"minutes": "10", "reset-ttl": "10"}, "cannot be used together"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_ = setupExtend(t)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("API must not be called: %s %s", r.Method, r.URL.Path)
+			}))
+			t.Cleanup(srv.Close)
+			_ = setupStackTestCmd(t, srv.URL)
+			for k, v := range tt.flags {
+				require.NoError(t, stackExtendCmd.Flags().Set(k, v))
+			}
+			err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
 
 func TestStackExtendCmd_JSONOutput(t *testing.T) {
-	now := setupExtend(t, "120")
-	calls := 0
-	server := startExtendServer(t, nil, now, &calls)
-	defer server.Close()
+	_ = setupExtend(t)
+	current := extendNow.Add(time.Hour)
+	es := &extendServer{current: &current, now: extendNow}
+	srv := es.start(t)
 
-	buf := setupStackTestCmd(t, server.URL)
+	buf := setupStackTestCmd(t, srv.URL)
 	printer.Format = output.FormatJSON
+	require.NoError(t, stackExtendCmd.Flags().Set("minutes", "120"))
 	require.NoError(t, stackExtendCmd.RunE(stackExtendCmd, []string{"42"}))
 
 	var result types.StackInstance
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	assert.Equal(t, 120, result.TTLMinutes)
+	assert.Equal(t, 240, result.TTLMinutes, "extend does not change the TTL")
 	require.NotNil(t, result.ExpiresAt)
-	assert.Equal(t, now.Add(2*time.Hour), result.ExpiresAt.UTC())
+	assert.Equal(t, extendNow.Add(3*time.Hour), result.ExpiresAt.UTC())
 }
 
 func TestStackExtendCmd_MissingMinutes(t *testing.T) {
@@ -1086,7 +1162,7 @@ func TestStackExtendCmd_MissingMinutes(t *testing.T) {
 	_ = setupStackTestCmd(t, server.URL)
 
 	stackExtendCmd.Flags().Set("minutes", "0")
-	t.Cleanup(func() { stackExtendCmd.Flags().Set("minutes", "0") })
+	t.Cleanup(func() { resetFlag(t, stackExtendCmd.Flags(), "minutes", "0") })
 
 	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
 	require.Error(t, err)
@@ -1222,18 +1298,14 @@ func TestStackStopCmd_QuietOutput(t *testing.T) {
 }
 
 func TestStackExtendCmd_QuietOutput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "42"}})
-	}))
-	defer server.Close()
+	es := &extendServer{now: extendNow}
+	server := es.start(t)
 
 	buf := setupStackTestCmd(t, server.URL)
 	printer.Quiet = true
 
 	stackExtendCmd.Flags().Set("minutes", "30")
-	t.Cleanup(func() { stackExtendCmd.Flags().Set("minutes", "0") })
+	t.Cleanup(func() { resetFlag(t, stackExtendCmd.Flags(), "minutes", "0") })
 
 	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
 	require.NoError(t, err)
@@ -1448,7 +1520,7 @@ func TestStackExtendCmd_NegativeMinutes(t *testing.T) {
 	_ = setupStackTestCmd(t, server.URL)
 
 	stackExtendCmd.Flags().Set("minutes", "-10")
-	t.Cleanup(func() { stackExtendCmd.Flags().Set("minutes", "0") })
+	t.Cleanup(func() { resetFlag(t, stackExtendCmd.Flags(), "minutes", "0") })
 
 	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
 	require.Error(t, err)
@@ -1466,7 +1538,7 @@ func TestStackExtendCmd_ServerError(t *testing.T) {
 	_ = setupStackTestCmd(t, server.URL)
 
 	stackExtendCmd.Flags().Set("minutes", "60")
-	t.Cleanup(func() { stackExtendCmd.Flags().Set("minutes", "0") })
+	t.Cleanup(func() { resetFlag(t, stackExtendCmd.Flags(), "minutes", "0") })
 
 	err := stackExtendCmd.RunE(stackExtendCmd, []string{"42"})
 	require.Error(t, err)

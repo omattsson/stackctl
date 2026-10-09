@@ -487,32 +487,6 @@ Examples:
 // nowFunc returns the current time. Tests replace it for stable output.
 var nowFunc = time.Now
 
-// extendSafetyMargin is added to the remaining time of a stack before
-// stack extend decides that N minutes cannot shorten the expiry. It covers
-// clock skew and the time between the check and the API call.
-const extendSafetyMargin = 2 * time.Minute
-
-// expiryReference returns the time to compare expires_at against: the
-// server time when known, else the local clock.
-func expiryReference(serverNow time.Time) time.Time {
-	if !serverNow.IsZero() {
-		return serverNow
-	}
-	return nowFunc()
-}
-
-// extendCouldShorten reports whether setting the TTL to minutes from now
-// could make the stack expire earlier than oldExpiry. The remaining time is
-// oldExpiry minus the server time (or the local clock); the TTL is safe only
-// when it is at least the remaining time plus extendSafetyMargin.
-func extendCouldShorten(oldExpiry *time.Time, serverNow time.Time, minutes int) bool {
-	if oldExpiry == nil {
-		return false
-	}
-	remaining := oldExpiry.Sub(expiryReference(serverNow))
-	return time.Duration(minutes)*time.Minute < remaining+extendSafetyMargin
-}
-
 // bestEffortTimeout is the timeout of optional extra calls (see
 // bestEffortClient). A variable so tests can shorten it.
 var bestEffortTimeout = 5 * time.Second
@@ -709,80 +683,140 @@ Examples:
 
 var stackExtendCmd = &cobra.Command{
 	Use:   "extend <name|id>",
-	Short: "Set the TTL of a stack instance to N minutes from now",
-	Long: `Set the TTL of a stack instance to N minutes from now.
+	Short: "Add N minutes to the expiry of a stack instance",
+	Long: `Add N minutes to the stack's expiry (never shortens it).
 
-The new expiry is now + N minutes, and the TTL of the stack becomes N
-minutes. The new expiry can be earlier than the current expiry. The command
-compares N with the remaining time of the stack (from the server time, plus
-a 2-minute margin). When N could shorten the expiry, it asks for
-confirmation; use --yes to skip the prompt (required in a non-interactive
-shell). The output shows the old and the new expiry.
+--minutes N adds N minutes to the current expiry of the stack, or to now
+when the stack has already expired. The server never makes the expiry
+earlier, does not change the TTL of the stack, and caps the new expiry at
+30 days from now. The output shows the old and the new expiry.
+
+--reset-ttl M is deprecated. It uses the old behaviour of the API: the TTL
+of the stack becomes M minutes and the expiry becomes now + M minutes. This
+can make the expiry earlier. The server answers with a deprecation warning,
+which the command writes to stderr.
+
+--yes is accepted for compatibility with older scripts and has no effect.
 
 Examples:
   stackctl stack extend my-stack --minutes 60
-  stackctl stack extend my-stack --minutes 240 --yes
   stackctl stack extend my-stack --minutes 120 -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		minutes, _ := cmd.Flags().GetInt("minutes")
-		if minutes <= 0 {
+		resetTTL, _ := cmd.Flags().GetInt("reset-ttl")
+		useMinutes := cmd.Flags().Changed("minutes")
+		useReset := cmd.Flags().Changed("reset-ttl")
+		switch {
+		case useMinutes && useReset:
+			return fmt.Errorf("--minutes and --reset-ttl cannot be used together")
+		case !useMinutes && !useReset:
+			return fmt.Errorf("--minutes is required")
+		case useMinutes && minutes <= 0:
 			return fmt.Errorf("--minutes must be a positive integer")
+		case useReset && resetTTL <= 0:
+			return fmt.Errorf("--reset-ttl must be a positive integer")
 		}
 
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
+		c.WarnWriter = cmd.ErrOrStderr()
 
 		id, err := resolveStackID(c, args[0])
 		if err != nil {
 			return err
 		}
 
-		current, serverNow, err := c.GetStackWithServerTime(id)
+		current, err := c.GetStack(id)
 		if err != nil {
 			return err
 		}
-
 		oldExpiry := current.ExpiresAt
-		if extendCouldShorten(oldExpiry, serverNow, minutes) {
-			newExpiry := expiryReference(serverNow).Add(time.Duration(minutes) * time.Minute)
-			confirmed, err := confirmAction(cmd, fmt.Sprintf(
-				"Stack %s expires at %s. A TTL of %d minutes can move the expiry earlier or keep it about the same (new expiry about %s). Continue? (y/n): ",
-				id, oldExpiry.Format(time.RFC3339), minutes, newExpiry.Format(time.RFC3339)))
-			if err != nil {
-				return err
-			}
-			if !confirmed {
-				printer.PrintMessage("Aborted.")
-				return nil
-			}
-		}
 
-		updated, err := c.ExtendStack(id, minutes)
+		var updated *types.StackInstance
+		if useReset {
+			updated, err = c.ResetStackTTL(id, resetTTL)
+		} else {
+			updated, err = c.ExtendStack(id, minutes)
+		}
 		if err != nil {
 			return err
 		}
 
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, id)
-			return nil
+		// A server without support for "minutes" (before v0.6.0) ignores
+		// the field and resets the expiry to now + TTL. Detect that after
+		// the output, so the result is still shown, and exit non-zero.
+		var notAdded error
+		if !useReset {
+			notAdded = checkMinutesAdded(minutes, oldExpiry, updated)
 		}
 
-		switch printer.Format {
-		case output.FormatJSON:
-			return printer.PrintJSON(updated)
-		case output.FormatYAML:
-			return printer.PrintYAML(updated)
-		default:
-			printer.PrintMessage("Set the TTL of stack %s to %d minutes", id, minutes)
-			printer.PrintMessage("Old expiry: %s", formatTime(oldExpiry))
-			printer.PrintMessage("New expiry: %s", formatTime(updated.ExpiresAt))
-			return nil
+		if err := printExtendResult(id, updated, oldExpiry, useReset, minutes, resetTTL); err != nil {
+			return err
 		}
+		return notAdded
 	},
+}
+
+// printExtendResult prints the result of stack extend in the output format.
+func printExtendResult(id string, updated *types.StackInstance, oldExpiry *time.Time, useReset bool, minutes, resetTTL int) error {
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, id)
+		return nil
+	}
+
+	switch printer.Format {
+	case output.FormatJSON:
+		return printer.PrintJSON(updated)
+	case output.FormatYAML:
+		return printer.PrintYAML(updated)
+	default:
+		if useReset {
+			printer.PrintMessage("Reset the TTL of stack %s to %d minutes", id, resetTTL)
+		} else {
+			printer.PrintMessage("Extended stack %s by %d minutes", id, minutes)
+		}
+		printer.PrintMessage("Old expiry: %s", formatTime(oldExpiry))
+		printer.PrintMessage("New expiry: %s", formatTime(updated.ExpiresAt))
+		return nil
+	}
+}
+
+// extendTolerance covers the time between the GET of the old expiry and
+// the extend call, and rounding on the server.
+const extendTolerance = 2 * time.Minute
+
+// maxExtendMinutes is the cap of the server: the new expiry is at most
+// now + 30 days.
+const maxExtendMinutes = 43200
+
+// checkMinutesAdded returns an error when the server did not add minutes
+// to the expiry: the new expiry is earlier than max(old expiry, server
+// time) + minutes (minus extendTolerance) and is not at the 30-day cap. The
+// server time is updated_at of the response (the server sets it on extend),
+// else the local clock.
+func checkMinutesAdded(minutes int, oldExpiry *time.Time, updated *types.StackInstance) error {
+	serverNow := updated.UpdatedAt
+	if serverNow.IsZero() {
+		serverNow = nowFunc()
+	}
+	base := serverNow
+	if oldExpiry != nil && oldExpiry.After(base) {
+		base = *oldExpiry
+	}
+	expected := base.Add(time.Duration(minutes) * time.Minute)
+	capAt := serverNow.Add(maxExtendMinutes * time.Minute)
+
+	newExpiry := updated.ExpiresAt
+	if newExpiry != nil && (!newExpiry.Before(expected.Add(-extendTolerance)) || !newExpiry.Before(capAt.Add(-extendTolerance))) {
+		return nil
+	}
+	return fmt.Errorf("the server did not add %d minutes (new expiry %s, expected about %s). "+
+		"The server does not support --minutes; upgrade k8s-stack-manager to v0.6.0 or later",
+		minutes, formatTime(newExpiry), formatTime(&expected))
 }
 
 var stackValuesCmd = &cobra.Command{
@@ -1318,9 +1352,11 @@ func init() {
 	stackDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	// stack extend flags
-	stackExtendCmd.Flags().Int("minutes", 0, "Set the TTL to N minutes from now (required)")
-	_ = stackExtendCmd.MarkFlagRequired("minutes")
-	stackExtendCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation when the new expiry is earlier")
+	stackExtendCmd.Flags().Int("minutes", 0, "Add N minutes to the stack's expiry (never shortens it)")
+	stackExtendCmd.Flags().Int("reset-ttl", 0, "Deprecated: set the TTL to M minutes and the expiry to now + M (can shorten the expiry)")
+	// --yes had a confirmation to skip in older versions; it has no effect now.
+	stackExtendCmd.Flags().BoolP("yes", "y", false, "No effect; kept for compatibility with older scripts")
+	_ = stackExtendCmd.Flags().MarkHidden("yes")
 
 	// stack values flags
 	stackValuesCmd.Flags().String("chart", "", "Chart name or ID (default: all charts)")

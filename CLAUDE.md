@@ -86,6 +86,8 @@ cli/
 - 429 → "Rate limited. Try again later. (server: ...)"
 - 500 → "Server error. Check backend logs. (server: ...)"
 
+**Warning headers**: `send()` writes each `Warning` response header (for example a `299` deprecation notice) to `Client.WarnWriter` (stderr when nil) as `Warning: <warn-text>`, for every command and also on error responses. The quoted warn-text is unescaped and sanitized like server error messages; one header can hold several comma-separated warnings (warn-dates are skipped). The same text is written once per client (retries do not repeat it; the dedupe set holds at most 64 texts), and writes are serialized under `warnMu`. `sanitizeServerMessage` replaces control characters (`unicode.IsControl`: C0, DEL, C1) with a space and drops bidi controls (U+200E, U+200F, U+202A–U+202E, U+2066–U+2069).
+
 **Config-free commands**: `version` and `completion` skip config file loading and work even if the config is missing or corrupted.
 
 **Insecure mode**: When `--insecure` is active, a warning is printed to stderr.
@@ -134,6 +136,7 @@ Backend: [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager)
 All API calls go to `/api/v1/*`. Key route groups:
 - `/api/v1/auth` — login, register, current user
 - `/api/v1/stack-instances` — CRUD + deploy/stop/clean/status/logs/clone/extend/values/compare
+  - `POST /:id/extend` with `{"minutes": N}` adds N minutes to the expiry (never earlier, TTL unchanged, capped at now + 30 days; N <= 0 or no TTL and no expiry → 400). `stack extend --minutes` uses this body and needs k8s-stack-manager v0.6.0 or later. After the call it checks that the new expiry is at least max(old expiry, server time) + N − 2 min (server time = `updated_at` of the response, else the local clock) or at the 30-day cap; if not (an older server ignored `minutes`), it prints the result and fails with "upgrade k8s-stack-manager to v0.6.0 or later". The deprecated `{"ttl_minutes": N}` resets the expiry to now + N and sets the TTL; the server adds a `Warning` header. Only `stack extend --reset-ttl` (deprecated) sends it. `--yes` on `stack extend` is hidden and has no effect (script compatibility).
 - `/api/v1/stack-instances/bulk` — bulk operations
 - `/api/v1/stack-definitions` — CRUD + export/import
 - `/api/v1/templates` — list/get/instantiate/quick-deploy
