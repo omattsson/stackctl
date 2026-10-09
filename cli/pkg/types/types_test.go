@@ -116,12 +116,15 @@ func TestWSMessage_RawPayload(t *testing.T) {
 
 func TestQuotaOverride_JSONRoundTrip(t *testing.T) {
 	t.Parallel()
+	podLimit := 20
 	orig := QuotaOverride{
-		InstanceID: "42",
-		CPURequest: "100m",
-		CPULimit:   "500m",
-		MemRequest: "128Mi",
-		MemLimit:   "512Mi",
+		StackInstanceID: "42",
+		CPURequest:      "100m",
+		CPULimit:        "500m",
+		MemRequest:      "128Mi",
+		MemLimit:        "512Mi",
+		StorageLimit:    "10Gi",
+		PodLimit:        &podLimit,
 	}
 
 	data, err := json.Marshal(orig)
@@ -130,9 +133,43 @@ func TestQuotaOverride_JSONRoundTrip(t *testing.T) {
 	var decoded QuotaOverride
 	require.NoError(t, json.Unmarshal(data, &decoded))
 
-	assert.Equal(t, orig.InstanceID, decoded.InstanceID)
+	assert.Equal(t, orig.StackInstanceID, decoded.StackInstanceID)
 	assert.Equal(t, orig.CPURequest, decoded.CPURequest)
 	assert.Equal(t, orig.MemLimit, decoded.MemLimit)
+	assert.Equal(t, orig.StorageLimit, decoded.StorageLimit)
+	require.NotNil(t, decoded.PodLimit)
+	assert.Equal(t, 20, *decoded.PodLimit)
+	assert.Contains(t, string(data), `"stack_instance_id":"42"`)
+}
+
+// TestOverrides_DecodeAPIShape decodes override responses in the shape the
+// backend sends (models.ValueOverride / models.ChartBranchOverride /
+// models.InstanceQuotaOverride) and checks that no field is lost.
+func TestOverrides_DecodeAPIShape(t *testing.T) {
+	t.Parallel()
+	const valueJSON = `{"id":"0b5c1e7a-2f4d-4c3b-9a8e-7d6f5e4c3b2a","stack_instance_id":"6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d","chart_config_id":"3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b","values":"replicas: 2\n","updated_at":"2026-10-01T12:00:00Z"}`
+	var vo ValueOverride
+	require.NoError(t, json.Unmarshal([]byte(valueJSON), &vo))
+	assert.Equal(t, "0b5c1e7a-2f4d-4c3b-9a8e-7d6f5e4c3b2a", vo.ID)
+	assert.Equal(t, "6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d", vo.StackInstanceID)
+	assert.Equal(t, "3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b", vo.ChartConfigID)
+	assert.Equal(t, "replicas: 2\n", vo.Values)
+	assert.False(t, vo.UpdatedAt.IsZero())
+
+	const branchJSON = `{"id":"1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f","stack_instance_id":"6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d","chart_config_id":"3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b","branch":"feature/x","updated_at":"2026-10-01T12:00:00Z"}`
+	var bo BranchOverride
+	require.NoError(t, json.Unmarshal([]byte(branchJSON), &bo))
+	assert.Equal(t, "6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d", bo.StackInstanceID)
+	assert.Equal(t, "3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b", bo.ChartConfigID)
+	assert.Equal(t, "feature/x", bo.Branch)
+
+	const quotaJSON = `{"created_at":"2026-10-01T12:00:00Z","updated_at":"2026-10-01T12:00:00Z","id":"2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a","stack_instance_id":"6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d","cpu_request":"100m","cpu_limit":"1","memory_request":"128Mi","memory_limit":"1Gi","storage_limit":"5Gi","pod_limit":10}`
+	var qo QuotaOverride
+	require.NoError(t, json.Unmarshal([]byte(quotaJSON), &qo))
+	assert.Equal(t, "6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d", qo.StackInstanceID)
+	assert.Equal(t, "5Gi", qo.StorageLimit)
+	require.NotNil(t, qo.PodLimit)
+	assert.Equal(t, 10, *qo.PodLimit)
 }
 
 func TestStackDefinition_JSONRoundTrip(t *testing.T) {

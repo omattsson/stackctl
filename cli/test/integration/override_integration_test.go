@@ -21,7 +21,7 @@ type overrideMockState struct {
 	valueOverrides  map[string]*types.ValueOverride  // key: "instanceID:chartID"
 	branchOverrides map[string]*types.BranchOverride // key: "instanceID:chartID"
 	quotaOverrides  map[string]*types.QuotaOverride  // key: instanceID
-	mergedValues    map[string]*types.MergedValues   // key: instanceID
+	chartValues     map[string]string                // key: "instanceID:chartID", YAML
 }
 
 func newOverrideMockState() *overrideMockState {
@@ -29,14 +29,9 @@ func newOverrideMockState() *overrideMockState {
 		valueOverrides:  make(map[string]*types.ValueOverride),
 		branchOverrides: make(map[string]*types.BranchOverride),
 		quotaOverrides:  make(map[string]*types.QuotaOverride),
-		mergedValues: map[string]*types.MergedValues{
-			"42": {
-				InstanceID: "42",
-				Charts: map[string]map[string]interface{}{
-					"api":      {"replicas": float64(2), "port": float64(8080)},
-					"frontend": {"replicas": float64(1)},
-				},
-			},
+		chartValues: map[string]string{
+			"42:1": "replicas: 2\nport: 8080\n",
+			"42:2": "replicas: 1\n",
 		},
 	}
 }
@@ -118,10 +113,10 @@ func startOverrideMockServer(t *testing.T, state *overrideMockState) *httptest.S
 				}
 				state.mu.Lock()
 				vo := &types.ValueOverride{
-					Base:       types.Base{ID: chartID, Version: "1"},
-					InstanceID: instanceID,
-					ChartID:    chartID,
-					Values:     req.Values,
+					ID:              chartID,
+					StackInstanceID: instanceID,
+					ChartConfigID:   chartID,
+					Values:          req.Values,
 				}
 				state.valueOverrides[key] = vo
 				state.mu.Unlock()
@@ -193,10 +188,10 @@ func startOverrideMockServer(t *testing.T, state *overrideMockState) *httptest.S
 				}
 				state.mu.Lock()
 				bo := &types.BranchOverride{
-					Base:       types.Base{ID: chartID, Version: "1"},
-					InstanceID: instanceID,
-					ChartID:    chartID,
-					Branch:     req.Branch,
+					ID:              chartID,
+					StackInstanceID: instanceID,
+					ChartConfigID:   chartID,
+					Branch:          req.Branch,
 				}
 				state.branchOverrides[key] = bo
 				state.mu.Unlock()
@@ -248,11 +243,13 @@ func startOverrideMockServer(t *testing.T, state *overrideMockState) *httptest.S
 				}
 				state.mu.Lock()
 				q := &types.QuotaOverride{
-					InstanceID: instanceID,
-					CPURequest: req.CPURequest,
-					CPULimit:   req.CPULimit,
-					MemRequest: req.MemRequest,
-					MemLimit:   req.MemLimit,
+					StackInstanceID: instanceID,
+					CPURequest:      req.CPURequest,
+					CPULimit:        req.CPULimit,
+					MemRequest:      req.MemRequest,
+					MemLimit:        req.MemLimit,
+					StorageLimit:    req.StorageLimit,
+					PodLimit:        req.PodLimit,
 				}
 				state.quotaOverrides[instanceID] = q
 				state.mu.Unlock()
@@ -277,18 +274,19 @@ func startOverrideMockServer(t *testing.T, state *overrideMockState) *httptest.S
 			}
 		}
 
-		// --- Merged Values ---
-		if suffix == "values" && chartID == "" && r.Method == http.MethodGet {
+		// --- Merged values of one chart (YAML) ---
+		if suffix == "values" && chartID != "" && r.Method == http.MethodGet {
 			state.mu.Lock()
-			v, exists := state.mergedValues[instanceID]
+			v, exists := state.chartValues[instanceID+":"+chartID]
 			state.mu.Unlock()
 			if !exists {
 				w.WriteHeader(http.StatusNotFound)
-				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "instance not found"})
+				json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Chart not found in this stack definition"})
 				return
 			}
+			w.Header().Set("Content-Type", "application/x-yaml")
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(v)
+			_, _ = w.Write([]byte(v))
 			return
 		}
 
@@ -320,14 +318,14 @@ func TestValueOverrideWorkflow_CRUDLifecycle(t *testing.T) {
 		Values: "replicas: 5\n",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "1", vo.ChartID)
-	assert.Equal(t, "42", vo.InstanceID)
+	assert.Equal(t, "1", vo.ChartConfigID)
+	assert.Equal(t, "42", vo.StackInstanceID)
 	assert.Contains(t, vo.Values, "replicas")
 
 	// 3. Get — should find it
 	got, err := c.GetValueOverride("42", "1")
 	require.NoError(t, err)
-	assert.Equal(t, "1", got.ChartID)
+	assert.Equal(t, "1", got.ChartConfigID)
 	assert.Contains(t, got.Values, "replicas")
 
 	// 4. List — should be non-empty
@@ -391,18 +389,14 @@ func TestBranchOverrideWorkflow_CRUDLifecycle(t *testing.T) {
 	bo, err := c.SetBranchOverride("42", "1", &types.SetBranchOverrideRequest{Branch: "feature/my-branch"})
 	require.NoError(t, err)
 	assert.Equal(t, "feature/my-branch", bo.Branch)
-	assert.Equal(t, "42", bo.InstanceID)
-	assert.Equal(t, "1", bo.ChartID)
+	assert.Equal(t, "42", bo.StackInstanceID)
+	assert.Equal(t, "1", bo.ChartConfigID)
 
-	// 3. Get — should find it
-	got, err := c.GetBranchOverride("42", "1")
-	require.NoError(t, err)
-	assert.Equal(t, "feature/my-branch", got.Branch)
-
-	// 4. List — non-empty
+	// 3. List — should find it (the API has no GET for one branch override)
 	overrides, err = c.ListBranchOverrides("42")
 	require.NoError(t, err)
-	assert.Len(t, overrides, 1)
+	require.Len(t, overrides, 1)
+	assert.Equal(t, "feature/my-branch", overrides[0].Branch)
 
 	// 5. Update branch
 	updated, err := c.SetBranchOverride("42", "1", &types.SetBranchOverrideRequest{Branch: "main"})
@@ -410,16 +404,17 @@ func TestBranchOverrideWorkflow_CRUDLifecycle(t *testing.T) {
 	assert.Equal(t, "main", updated.Branch)
 
 	// 6. Verify update persists
-	got, err = c.GetBranchOverride("42", "1")
+	overrides, err = c.ListBranchOverrides("42")
 	require.NoError(t, err)
-	assert.Equal(t, "main", got.Branch)
+	require.Len(t, overrides, 1)
+	assert.Equal(t, "main", overrides[0].Branch)
 
 	// 7. Delete
 	err = c.DeleteBranchOverride("42", "1")
 	require.NoError(t, err)
 
-	// 8. Verify gone
-	_, err = c.GetBranchOverride("42", "1")
+	// 8. Delete again — 404
+	err = c.DeleteBranchOverride("42", "1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "branch override not found")
 
@@ -455,7 +450,7 @@ func TestQuotaOverrideWorkflow_CRUDLifecycle(t *testing.T) {
 		MemLimit:   "512Mi",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "42", q.InstanceID)
+	assert.Equal(t, "42", q.StackInstanceID)
 	assert.Equal(t, "100m", q.CPURequest)
 	assert.Equal(t, "512Mi", q.MemLimit)
 
@@ -504,17 +499,15 @@ func TestMergedValuesWorkflow(t *testing.T) {
 
 	c := client.New(server.URL)
 
-	// 1. Get merged values for existing instance
-	values, err := c.GetMergedValues("42", "")
+	// 1. Get the merged values of one chart (YAML text)
+	values, err := c.GetChartValues("42", "1")
 	require.NoError(t, err)
-	assert.Equal(t, "42", values.InstanceID)
-	assert.Contains(t, values.Charts, "api")
-	assert.Contains(t, values.Charts, "frontend")
+	assert.Equal(t, "replicas: 2\nport: 8080\n", string(values))
 
-	// 2. Get merged values for non-existent instance
-	_, err = c.GetMergedValues("999", "")
+	// 2. A chart outside the definition is a 404
+	_, err = c.GetChartValues("42", "99")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "instance not found")
+	assert.Contains(t, err.Error(), "Chart not found in this stack definition")
 }
 
 // ---------- Error handling across overrides ----------
@@ -539,11 +532,6 @@ func TestOverrideWorkflow_ErrorHandling(t *testing.T) {
 	err = c.DeleteValueOverride("42", "99")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "override not found")
-
-	// Get non-existent branch override
-	_, err = c.GetBranchOverride("42", "99")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "branch override not found")
 
 	// Delete non-existent branch override
 	err = c.DeleteBranchOverride("42", "99")

@@ -139,7 +139,11 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	status, err := c.GetStackStatus(instance.ID)
 	require.NoError(t, err, "get stack status")
 	assert.NotEmpty(t, status.Status, "status field must be present")
-	t.Logf("Status: %s, pods: %d", status.Status, len(status.Pods))
+	pods := 0
+	for _, ch := range status.Charts {
+		pods += len(ch.Pods)
+	}
+	t.Logf("Status: %s, charts: %d, pods: %d", status.Status, len(status.Charts), pods)
 
 	// Step 6–7: Set overrides and redeploy (only if template has charts).
 	// Note: templates.Data[0] from ListTemplates doesn't carry charts unless

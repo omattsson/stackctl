@@ -163,6 +163,12 @@ func newClient() (*client.Client, error) {
 		if warning != "" && !flagQuiet {
 			fmt.Fprintln(os.Stderr, warning)
 		}
+		// Renew a username/password session automatically (see client/auth.go).
+		if token != "" {
+			if store := tokenStore(); store != nil {
+				c.Tokens = store
+			}
+		}
 	}
 
 	return c, nil
@@ -251,7 +257,11 @@ func confirmAction(cmd *cobra.Command, message string) (bool, error) {
 	reader := bufio.NewReader(cmd.InOrStdin())
 	answer, err := reader.ReadString('\n')
 	if err != nil && (err != io.EOF || answer == "") {
-		return false, fmt.Errorf("reading confirmation: %w", err)
+		if err == io.EOF {
+			// stdin closed without an answer: a non-interactive shell.
+			return false, fmt.Errorf("no answer to the confirmation prompt (non-interactive shell?): use --yes to confirm")
+		}
+		return false, fmt.Errorf("reading confirmation: %w (use --yes to skip the prompt)", err)
 	}
 	if strings.TrimSpace(strings.ToLower(answer)) != "y" {
 		return false, nil

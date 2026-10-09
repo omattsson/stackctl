@@ -3,10 +3,12 @@ package cmd
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
+	"github.com/omattsson/stackctl/cli/pkg/types"
 )
 
 var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -115,4 +117,105 @@ func resolveTemplateID(c *client.Client, nameOrID string) (string, error) {
 		}
 		return "", fmt.Errorf("%s", msg)
 	}
+}
+
+// stackCharts returns the chart configs of the definition of a stack
+// instance, in deploy order (then by name).
+func stackCharts(c *client.Client, instanceID string) ([]types.ChartConfig, error) {
+	inst, err := c.GetStack(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	def, err := c.GetDefinition(inst.StackDefinitionID)
+	if err != nil {
+		return nil, fmt.Errorf("reading definition %s of stack %s: %w", inst.StackDefinitionID, instanceID, err)
+	}
+	charts := append([]types.ChartConfig(nil), def.Charts...)
+	sort.SliceStable(charts, func(i, j int) bool {
+		if charts[i].DeployOrder != charts[j].DeployOrder {
+			return charts[i].DeployOrder < charts[j].DeployOrder
+		}
+		return charts[i].ChartName < charts[j].ChartName
+	})
+	return charts, nil
+}
+
+// matchChart finds a chart by ID or by chart name (case-insensitive) in
+// charts. scope names the owner of the charts for the error message.
+func matchChart(charts []types.ChartConfig, nameOrID, scope string) (*types.ChartConfig, error) {
+	for i := range charts {
+		if charts[i].ID == nameOrID {
+			return &charts[i], nil
+		}
+	}
+	var matches []*types.ChartConfig
+	for i := range charts {
+		if strings.EqualFold(charts[i].ChartName, nameOrID) {
+			matches = append(matches, &charts[i])
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		names := make([]string, len(charts))
+		for i, ch := range charts {
+			names[i] = ch.ChartName
+		}
+		available := "none"
+		if len(names) > 0 {
+			available = strings.Join(names, ", ")
+		}
+		return nil, fmt.Errorf("chart %q is not part of %s (charts: %s)", nameOrID, scope, available)
+	default:
+		msg := fmt.Sprintf("multiple charts in %s match name %q — use the ID instead:\n", scope, nameOrID)
+		for _, ch := range matches {
+			msg += fmt.Sprintf("  %s  %s\n", ch.ID, ch.ChartName)
+		}
+		return nil, fmt.Errorf("%s", msg)
+	}
+}
+
+// resolveChartID resolves a chart name or ID within the definition of a
+// stack instance: it matches a chart ID first, then a chart name. An
+// unknown name is refused. An unknown UUID is passed through, so the API
+// can answer for it (an override of a chart that was removed from the
+// definition can still be deleted).
+func resolveChartID(c *client.Client, instanceID, nameOrID string) (string, error) {
+	nameOrID = strings.TrimSpace(nameOrID)
+	if nameOrID == "" {
+		return "", fmt.Errorf("chart name or ID must not be empty")
+	}
+	charts, err := stackCharts(c, instanceID)
+	if err != nil {
+		return "", fmt.Errorf("resolving chart %q: %w", nameOrID, err)
+	}
+	return pickChartID(charts, nameOrID, "the definition of stack "+instanceID)
+}
+
+// resolveDefinitionChartID resolves a chart name or ID within a stack
+// definition, like resolveChartID.
+func resolveDefinitionChartID(c *client.Client, defID, nameOrID string) (string, error) {
+	nameOrID = strings.TrimSpace(nameOrID)
+	if nameOrID == "" {
+		return "", fmt.Errorf("chart name or ID must not be empty")
+	}
+	def, err := c.GetDefinition(defID)
+	if err != nil {
+		return "", fmt.Errorf("resolving chart %q: %w", nameOrID, err)
+	}
+	return pickChartID(def.Charts, nameOrID, "definition "+defID)
+}
+
+// pickChartID returns the ID of the chart that matches nameOrID (ID first,
+// then name). A UUID that matches no chart is returned unchanged.
+func pickChartID(charts []types.ChartConfig, nameOrID, scope string) (string, error) {
+	ch, err := matchChart(charts, nameOrID, scope)
+	if err == nil {
+		return ch.ID, nil
+	}
+	if uuidRegex.MatchString(nameOrID) {
+		return nameOrID, nil
+	}
+	return "", err
 }

@@ -175,9 +175,10 @@ func contextEnv(env []string) []string {
 	if apiKey := resolveAPIKey(); apiKey != "" {
 		env = setEnv(env, "STACKCTL_API_KEY", apiKey)
 	} else if !hasEnv(env, "STACKCTL_TOKEN") {
-		// An expired or unreadable token is left out; the plugin then gets a
-		// 401 and the user runs `stackctl login`, as for a built-in command.
-		if token, _, err := loadToken(); err == nil && token != "" {
+		// A session token that expires soon is renewed first. An expired or
+		// unreadable token is left out; the plugin then gets a 401 and the
+		// user runs `stackctl login`, as for a built-in command.
+		if token := freshSessionToken(); token != "" {
 			env = setEnv(env, "STACKCTL_TOKEN", token)
 		}
 	}

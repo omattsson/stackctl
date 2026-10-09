@@ -14,7 +14,7 @@ cli/
     config.go                 # config set/get/list/use-context/current-context/delete-context
     version.go                # Version info (build-time ldflags)
     login.go                  # login, logout, whoami
-    token.go                  # Token storage helpers (save/load/delete JWT)
+    token.go                  # Token helpers (save/load/delete session, fresh token for plugins)
     stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend/values/compare
     template.go               # template list/get/instantiate/quick-deploy
     definition.go             # definition list/get/create/update/delete/export/import
@@ -26,10 +26,13 @@ cli/
   pkg/
     client/
       client.go              # HTTP client wrapper (auth headers, base URL, error handling)
+      auth.go                # Session renewal (refresh token, 401 retry), login/refresh/logout calls
     types/
       types.go               # Client-side structs matching API responses
     config/
       config.go              # Viper-based config (~/.stackmanager/config.yaml)
+      token.go               # Token file store (tokens/<context>.json) + cross-process lock
+      lock_*.go              # flock (unix) / LockFileEx (windows) / no-op (other)
     output/
       output.go              # Table, JSON, YAML formatters
   test/
@@ -73,6 +76,8 @@ cli/
 
 **Dual auth**: JWT token (stored in `~/.stackmanager/tokens/<context>.json`) or API key (from config). API key takes precedence when both are configured.
 
+**Session renewal** (`pkg/client/auth.go`): a username/password login stores the `refresh_token` cookie value in the token file. When `Client.Tokens` is set and no API key is used, `do()` renews the access token before a request if it expires within `RenewMargin` (60 s), and after a 401 from a non-auth endpoint it renews once and retries once. Renewal holds `config.TokenStore.Lock()` (flock on `tokens/<context>.lock`) and re-reads the file first; if another process already renewed, it uses that token without an API call (the backend revokes the session family when a rotated refresh token is reused). Refresh 401/403 → delete the token file and return the 401 login hint; network/5xx → keep the file. A refresh response without `Set-Cookie` (backend grace path) keeps the stored refresh token. SSO logins and old token files have no refresh token and are not renewed. Auth endpoints (`/auth/login`, `/auth/refresh`, `/auth/logout*`, `/auth/oidc/*`) never trigger renewal. Plugins get a renewed `STACKCTL_TOKEN` (`freshSessionToken()`); `stackctl logout` posts the bearer and the refresh cookie to `/auth/logout`, warns on failure, and always deletes the file.
+
 **Error mapping**: HTTP status codes map to user-friendly messages (with server error message appended when available):
 - 401 → "Not authenticated. Run 'stackctl login' first. (server: ...)"
 - 403 → "Permission denied. (server: ...)"
@@ -103,7 +108,7 @@ contexts:
     api-url: https://stackmanager.example.com
 ```
 
-**Token storage**: `~/.stackmanager/tokens/<context>.json` — file permissions must be `0600`.
+**Token storage**: `~/.stackmanager/tokens/<context>.json` — file permissions must be `0600`. Format: `{"expires_at": RFC 3339, "token": "<JWT>", "username": "...", "refresh_token": "...", "api_url": "..."}` (`refresh_token` and `api_url` are optional; files without them still load, and a missing `api_url` means the URL of the context). The refresh token is only sent (renewal, logout, revoke at login) when the client API URL equals `api_url`. `expires_at` is on the local clock: receive time + JWT lifetime (`exp - iat`, `client.LocalExpiry`), so clock skew to the server does not cause a refresh storm; without `iat` it is `exp`. Writes go to a temp file and are renamed into place (rename and read retry 5 × 50 ms for Windows). If saving a renewed token fails twice, the client deletes the file (it holds the used refresh token), keeps the rotated session in memory for the rest of the process and warns on stderr. A refresh 401/403 deletes the file only if it still holds the refresh token that was sent. `LocalExpiry` trusts at most 1 year of lifetime. Login (`replaceSession`) runs under one lock: load the old session, save the new one, then revoke the old one (5 s best-effort logout); if the save fails, the new session is revoked and the old one is kept. `tokens/<context>.lock` is the renewal lock file.
 
 ## Testing Conventions
 

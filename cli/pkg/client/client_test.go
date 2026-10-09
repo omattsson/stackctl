@@ -769,24 +769,92 @@ func TestGetStackStatus_Success(t *testing.T) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/v1/stack-instances/42/status", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.InstanceStatus{
-			Status: "running",
-			Pods: []types.PodStatus{
-				{Name: "pod-1", Status: "Running", Ready: true, Restarts: 0, Age: "1h"},
-				{Name: "pod-2", Status: "Running", Ready: true, Restarts: 2, Age: "30m"},
-			},
-		})
+		// Recorded shape of k8s.NamespaceStatus: pods are nested per chart.
+		_, _ = w.Write([]byte(recordedStatusJSON))
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
 	status, err := c.GetStackStatus("42")
 	require.NoError(t, err)
-	assert.Equal(t, "running", status.Status)
-	assert.Len(t, status.Pods, 2)
-	assert.Equal(t, "pod-1", status.Pods[0].Name)
-	assert.True(t, status.Pods[0].Ready)
-	assert.Equal(t, 2, status.Pods[1].Restarts)
+	assert.Equal(t, "healthy", status.Status)
+	assert.Equal(t, "stack-my-stack-dev1", status.Namespace)
+	require.Len(t, status.Charts, 2)
+	assert.Equal(t, "my-api", status.Charts[0].ChartName)
+	require.Len(t, status.Charts[0].Pods, 1)
+	pod := status.Charts[0].Pods[0]
+	assert.Equal(t, "my-api-7d9f8b6c5-abcde", pod.Name)
+	assert.Equal(t, "Running", pod.Phase)
+	assert.True(t, pod.Ready)
+	assert.Equal(t, int32(2), pod.RestartCount)
+	require.NotNil(t, pod.StartTime)
+	assert.Equal(t, "registry.example.com/my-api:1.2.3", pod.Image)
+	require.Len(t, pod.ContainerStates, 1)
+	assert.Equal(t, "running", pod.ContainerStates[0].State)
+	assert.Empty(t, status.Charts[1].Pods)
+	assert.Equal(t, "stopped", status.Charts[1].Status)
+	require.Len(t, status.Ingresses, 1)
+	assert.Equal(t, "https://my-stack.example.com/", status.Ingresses[0].URL)
+}
+
+// recordedStatusJSON is a GET /stack-instances/:id/status response in the
+// shape of the backend k8s.NamespaceStatus.
+const recordedStatusJSON = `{
+  "last_checked": "2026-10-01T12:00:00Z",
+  "namespace": "stack-my-stack-dev1",
+  "status": "healthy",
+  "charts": [
+    {
+      "release_name": "my-api",
+      "chart_name": "my-api",
+      "status": "healthy",
+      "deployments": [{"name": "my-api", "ready_replicas": 1, "desired_replicas": 1, "updated_replicas": 1, "available": true}],
+      "pods": [
+        {
+          "start_time": "2026-10-01T10:00:00Z",
+          "container_states": [{"name": "api", "state": "running", "image": "registry.example.com/my-api:1.2.3", "restart_count": 2, "ready": true}],
+          "conditions": [{"type": "Ready", "status": "True"}],
+          "name": "my-api-7d9f8b6c5-abcde",
+          "phase": "Running",
+          "image": "registry.example.com/my-api:1.2.3",
+          "node_name": "node-1",
+          "restart_count": 2,
+          "ready": true
+        }
+      ],
+      "services": [{"name": "my-api", "type": "ClusterIP", "cluster_ip": "10.0.0.10", "ports": ["80/TCP"]}]
+    },
+    {
+      "release_name": "my-db",
+      "chart_name": "my-db",
+      "status": "stopped",
+      "deployments": [],
+      "pods": [],
+      "services": []
+    }
+  ],
+  "ingresses": [{"name": "my-api", "host": "my-stack.example.com", "path": "/", "url": "https://my-stack.example.com/", "tls": true}]
+}`
+
+// TestGetStackStatus_PassThrough checks that decoding and re-encoding the
+// recorded status keeps every field (stackctl -o json passes it through).
+func TestGetStackStatus_PassThrough(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(recordedStatusJSON))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	status, err := c.GetStackStatus("42")
+	require.NoError(t, err)
+
+	encoded, err := json.Marshal(status)
+	require.NoError(t, err)
+	var got, want interface{}
+	require.NoError(t, json.Unmarshal(encoded, &got))
+	require.NoError(t, json.Unmarshal([]byte(recordedStatusJSON), &want))
+	assert.Equal(t, want, got)
 }
 
 func TestGetStackLogs_Success(t *testing.T) {
@@ -1275,8 +1343,8 @@ func TestListValueOverrides_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/overrides", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode([]types.ValueOverride{
-			{Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Values: `{"replicas":3}`},
-			{Base: types.Base{ID: "2"}, InstanceID: "42", ChartID: "2", Values: `{"debug":true}`},
+			{ID: "1", StackInstanceID: "42", ChartConfigID: "1", Values: `{"replicas":3}`},
+			{ID: "2", StackInstanceID: "42", ChartConfigID: "2", Values: `{"debug":true}`},
 		})
 	}))
 	defer server.Close()
@@ -1285,8 +1353,8 @@ func TestListValueOverrides_Success(t *testing.T) {
 	overrides, err := c.ListValueOverrides("42")
 	require.NoError(t, err)
 	assert.Len(t, overrides, 2)
-	assert.Equal(t, "1", overrides[0].ChartID)
-	assert.Equal(t, "2", overrides[1].ChartID)
+	assert.Equal(t, "1", overrides[0].ChartConfigID)
+	assert.Equal(t, "2", overrides[1].ChartConfigID)
 }
 
 func TestListValueOverrides_Error(t *testing.T) {
@@ -1310,7 +1378,7 @@ func TestGetValueOverride_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/overrides/1", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ValueOverride{
-			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Values: `{"replicas":3}`,
+			ID: "1", StackInstanceID: "42", ChartConfigID: "1", Values: `{"replicas":3}`,
 		})
 	}))
 	defer server.Close()
@@ -1318,8 +1386,8 @@ func TestGetValueOverride_Success(t *testing.T) {
 	c := New(server.URL)
 	override, err := c.GetValueOverride("42", "1")
 	require.NoError(t, err)
-	assert.Equal(t, "1", override.ChartID)
-	assert.Equal(t, "42", override.InstanceID)
+	assert.Equal(t, "1", override.ChartConfigID)
+	assert.Equal(t, "42", override.StackInstanceID)
 	assert.Contains(t, override.Values, "replicas")
 }
 
@@ -1349,7 +1417,7 @@ func TestSetValueOverride_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.ValueOverride{
-			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Values: `replicas: 5`,
+			ID: "1", StackInstanceID: "42", ChartConfigID: "1", Values: `replicas: 5`,
 		})
 	}))
 	defer server.Close()
@@ -1359,7 +1427,7 @@ func TestSetValueOverride_Success(t *testing.T) {
 		Values: "replicas: 5\n",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "1", override.ChartID)
+	assert.Equal(t, "1", override.ChartConfigID)
 }
 
 func TestSetValueOverride_Error(t *testing.T) {
@@ -1418,7 +1486,7 @@ func TestListBranchOverrides_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/branches", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode([]types.BranchOverride{
-			{Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Branch: "feature/xyz"},
+			{ID: "1", StackInstanceID: "42", ChartConfigID: "1", Branch: "feature/xyz"},
 		})
 	}))
 	defer server.Close()
@@ -1444,39 +1512,6 @@ func TestListBranchOverrides_Error(t *testing.T) {
 	assert.Nil(t, overrides)
 }
 
-func TestGetBranchOverride_Success(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/stack-instances/42/branches/1", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.BranchOverride{
-			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Branch: "main",
-		})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	override, err := c.GetBranchOverride("42", "1")
-	require.NoError(t, err)
-	assert.Equal(t, "main", override.Branch)
-	assert.Equal(t, "42", override.InstanceID)
-}
-
-func TestGetBranchOverride_NotFound(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "branch override not found"})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	override, err := c.GetBranchOverride("42", "99")
-	require.Error(t, err)
-	assert.Nil(t, override)
-}
-
 func TestSetBranchOverride_Success(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1489,7 +1524,7 @@ func TestSetBranchOverride_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.BranchOverride{
-			Base: types.Base{ID: "1"}, InstanceID: "42", ChartID: "1", Branch: "feature/new",
+			ID: "1", StackInstanceID: "42", ChartConfigID: "1", Branch: "feature/new",
 		})
 	}))
 	defer server.Close()
@@ -1554,7 +1589,7 @@ func TestGetQuotaOverride_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/stack-instances/42/quota-overrides", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.QuotaOverride{
-			InstanceID: "42", CPURequest: "100m", CPULimit: "500m",
+			StackInstanceID: "42", CPURequest: "100m", CPULimit: "500m",
 			MemRequest: "128Mi", MemLimit: "512Mi",
 		})
 	}))
@@ -1563,7 +1598,7 @@ func TestGetQuotaOverride_Success(t *testing.T) {
 	c := New(server.URL)
 	quota, err := c.GetQuotaOverride("42")
 	require.NoError(t, err)
-	assert.Equal(t, "42", quota.InstanceID)
+	assert.Equal(t, "42", quota.StackInstanceID)
 	assert.Equal(t, "100m", quota.CPURequest)
 	assert.Equal(t, "500m", quota.CPULimit)
 	assert.Equal(t, "128Mi", quota.MemRequest)
@@ -1597,7 +1632,7 @@ func TestSetQuotaOverride_Success(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.QuotaOverride{
-			InstanceID: "42", CPURequest: "200m", MemLimit: "1Gi",
+			StackInstanceID: "42", CPURequest: "200m", MemLimit: "1Gi",
 		})
 	}))
 	defer server.Close()
@@ -1656,60 +1691,77 @@ func TestDeleteQuotaOverride_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
 }
 
-// ---------- MergedValues and CompareInstances client methods ----------
+// ---------- Values export and CompareInstances client methods ----------
 
-func TestGetMergedValues_Success(t *testing.T) {
+func TestGetChartValues_Success(t *testing.T) {
 	t.Parallel()
+	const recorded = "replicaCount: 2\nimage:\n  tag: develop\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/stack-instances/42/values/3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b", r.URL.Path)
+		w.Header().Set("Content-Type", "application/x-yaml")
+		w.Header().Set("Content-Disposition", `attachment; filename="my-stack-my-api-values.yaml"`)
+		_, _ = w.Write([]byte(recorded))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	data, err := c.GetChartValues("42", "3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b")
+	require.NoError(t, err)
+	assert.Equal(t, recorded, string(data))
+}
+
+func TestGetChartValues_ChartNotInDefinition(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"Chart not found in this stack definition"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	data, err := c.GetChartValues("42", "99")
+	require.Error(t, err)
+	assert.Nil(t, data)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+	assert.Equal(t, "Chart not found in this stack definition", apiErr.Message)
+}
+
+func TestExportValues_ReturnsZipUnchanged(t *testing.T) {
+	t.Parallel()
+	zipBytes := []byte("PK\x03\x04 recorded zip payload \x00\x01")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/v1/stack-instances/42/values", r.URL.Path)
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.MergedValues{
-			InstanceID: "42",
-			Charts: map[string]map[string]interface{}{
-				"api": {"replicas": float64(3)},
-			},
-		})
+		assert.Empty(t, r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="my-stack-values.zip"; filename*=UTF-8''my-stack-values.zip`)
+		_, _ = w.Write(zipBytes)
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	values, err := c.GetMergedValues("42", "")
+	data, filename, err := c.ExportValues("42")
 	require.NoError(t, err)
-	assert.Equal(t, "42", values.InstanceID)
-	assert.Contains(t, values.Charts, "api")
+	assert.Equal(t, zipBytes, data)
+	assert.Equal(t, "my-stack-values.zip", filename)
 }
 
-func TestGetMergedValues_WithChartFilter(t *testing.T) {
-	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "frontend", r.URL.Query().Get("chart"))
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.MergedValues{
-			InstanceID: "42",
-			Charts:     map[string]map[string]interface{}{"frontend": {"port": float64(8080)}},
-		})
-	}))
-	defer server.Close()
-
-	c := New(server.URL)
-	values, err := c.GetMergedValues("42", "frontend")
-	require.NoError(t, err)
-	assert.Contains(t, values.Charts, "frontend")
-}
-
-func TestGetMergedValues_Error(t *testing.T) {
+func TestExportValues_Error(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "instance not found"})
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Stack instance not found"})
 	}))
 	defer server.Close()
 
 	c := New(server.URL)
-	values, err := c.GetMergedValues("999", "")
+	data, _, err := c.ExportValues("999")
 	require.Error(t, err)
-	assert.Nil(t, values)
+	assert.Nil(t, data)
 }
 
 func TestCompareInstances_Success(t *testing.T) {
@@ -1720,11 +1772,16 @@ func TestCompareInstances_Success(t *testing.T) {
 		assert.Equal(t, "42", r.URL.Query().Get("left"))
 		assert.Equal(t, "43", r.URL.Query().Get("right"))
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.CompareResult{
-			Left:  &types.StackInstance{Base: types.Base{ID: "42"}, Name: "stack-a"},
-			Right: &types.StackInstance{Base: types.Base{ID: "43"}, Name: "stack-b"},
-			Diffs: map[string]interface{}{"name": true},
-		})
+		// Recorded shape of handlers.CompareInstancesResponse.
+		_, _ = w.Write([]byte(`{
+  "left": {"id": "42", "name": "stack-a", "definition_name": "example-dev", "branch": "main", "owner": "dev1"},
+  "right": {"id": "43", "name": "stack-b", "definition_name": "example-dev", "branch": "feature/x", "owner": "dev2"},
+  "charts": [
+    {"chart_name": "my-api", "left_values": "replicaCount: 1\n", "right_values": "replicaCount: 2\n", "has_differences": true},
+    {"chart_name": "my-db", "left_values": "a: 1\n", "right_values": "a: 1\n", "has_differences": false},
+    {"chart_name": "my-extra", "left_values": null, "right_values": "b: 2\n", "has_differences": true}
+  ]
+}`))
 	}))
 	defer server.Close()
 
@@ -1732,8 +1789,13 @@ func TestCompareInstances_Success(t *testing.T) {
 	result, err := c.CompareInstances("42", "43")
 	require.NoError(t, err)
 	assert.Equal(t, "42", result.Left.ID)
-	assert.Equal(t, "43", result.Right.ID)
-	assert.Contains(t, result.Diffs, "name")
+	assert.Equal(t, "dev2", result.Right.Owner)
+	require.Len(t, result.Charts, 3)
+	assert.True(t, result.Charts[0].HasDifferences)
+	require.NotNil(t, result.Charts[0].RightValues)
+	assert.Equal(t, "replicaCount: 2\n", *result.Charts[0].RightValues)
+	assert.False(t, result.Charts[1].HasDifferences)
+	assert.Nil(t, result.Charts[2].LeftValues)
 }
 
 func TestCompareInstances_Error(t *testing.T) {
@@ -1912,8 +1974,8 @@ func TestListGitBranches_Success(t *testing.T) {
 		assert.Equal(t, "https://github.com/org/repo", r.URL.Query().Get("repo"))
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode([]types.GitBranch{
-			{Name: "main", IsHead: true},
-			{Name: "develop", IsHead: false},
+			{Name: "main", IsDefault: true},
+			{Name: "develop", IsDefault: false},
 		})
 	}))
 	defer server.Close()
@@ -1923,7 +1985,7 @@ func TestListGitBranches_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, branches, 2)
 	assert.Equal(t, "main", branches[0].Name)
-	assert.True(t, branches[0].IsHead)
+	assert.True(t, branches[0].IsDefault)
 }
 
 func TestListGitBranches_Error(t *testing.T) {
@@ -1958,7 +2020,7 @@ func TestValidateGitBranch_Valid(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/git/validate", r.URL.Path)
+		assert.Equal(t, "/api/v1/git/validate-branch", r.URL.Path)
 		assert.Equal(t, "https://github.com/org/repo", r.URL.Query().Get("repo"))
 		assert.Equal(t, "main", r.URL.Query().Get("branch"))
 		w.WriteHeader(http.StatusOK)
@@ -1980,11 +2042,7 @@ func TestValidateGitBranch_Invalid(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.GitValidateResponse{
-			Valid:   false,
-			Branch:  "nonexistent",
-			Message: "branch does not exist",
-		})
+		_, _ = w.Write([]byte(`{"valid":false,"branch":"nonexistent"}`))
 	}))
 	defer server.Close()
 
@@ -1992,7 +2050,7 @@ func TestValidateGitBranch_Invalid(t *testing.T) {
 	resp, err := c.ValidateGitBranch("https://github.com/org/repo", "nonexistent")
 	require.NoError(t, err)
 	assert.False(t, resp.Valid)
-	assert.Equal(t, "branch does not exist", resp.Message)
+	assert.Equal(t, "nonexistent", resp.Branch)
 }
 
 func TestValidateGitBranch_Error(t *testing.T) {
@@ -2018,7 +2076,7 @@ func TestListClusters_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/clusters", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode([]types.Cluster{
-			{Base: types.Base{ID: "1"}, Name: "dev-cluster", Status: "online"},
+			{ID: "1", Name: "dev-cluster", Status: "online"},
 		})
 	}))
 	defer server.Close()
@@ -2065,11 +2123,10 @@ func TestGetCluster_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/clusters/1", r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.Cluster{
-			Base:      types.Base{ID: "1"},
+			ID:        "1",
 			Name:      "dev-cluster",
 			Status:    "online",
 			IsDefault: true,
-			NodeCount: 3,
 		})
 	}))
 	defer server.Close()
@@ -4696,7 +4753,7 @@ func TestCreateCluster_Success(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "prod", body.Name)
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.Cluster{Base: types.Base{ID: "5"}, Name: "prod", Status: "online"})
+		json.NewEncoder(w).Encode(types.Cluster{ID: "5", Name: "prod", Status: "online"})
 	}))
 	defer server.Close()
 
@@ -4732,7 +4789,7 @@ func TestUpdateCluster_Success(t *testing.T) {
 		require.NotNil(t, body.Name)
 		assert.Equal(t, "updated", *body.Name)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.Cluster{Base: types.Base{ID: "3"}, Name: "updated", Status: "online"})
+		json.NewEncoder(w).Encode(types.Cluster{ID: "3", Name: "updated", Status: "online"})
 	}))
 	defer server.Close()
 
@@ -4770,7 +4827,7 @@ func TestCreateCluster_RegistryCredentialsRoundTrip(t *testing.T) {
 		assert.Equal(t, "s3cret-pw", body["registry_password"])
 		assert.Equal(t, "registry-pull-secret", body["image_pull_secret_name"])
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(types.Cluster{Base: types.Base{ID: "7"}, Name: "acr-cluster", Status: "online"})
+		json.NewEncoder(w).Encode(types.Cluster{ID: "7", Name: "acr-cluster", Status: "online"})
 	}))
 	defer server.Close()
 
@@ -4798,7 +4855,7 @@ func TestUpdateCluster_RegistryCredentialsRoundTrip(t *testing.T) {
 		_, hasName := body["name"]
 		assert.False(t, hasName)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(types.Cluster{Base: types.Base{ID: "3"}, Name: "acr-cluster", Status: "online"})
+		json.NewEncoder(w).Encode(types.Cluster{ID: "3", Name: "acr-cluster", Status: "online"})
 	}))
 	defer server.Close()
 
@@ -4869,4 +4926,36 @@ func TestSetDefaultCluster_Error(t *testing.T) {
 	c := New(server.URL)
 	err := c.SetDefaultCluster("99")
 	require.Error(t, err)
+}
+
+func TestGetStackWithServerTime(t *testing.T) {
+	t.Parallel()
+	serverNow := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/stack-instances/42", r.URL.Path)
+		w.Header().Set("Date", serverNow.Format(http.TimeFormat))
+		_, _ = w.Write([]byte(`{"id":"42","expires_at":"2026-10-01T16:00:00Z","ttl_minutes":240}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	inst, got, err := c.GetStackWithServerTime("42")
+	require.NoError(t, err)
+	assert.Equal(t, "42", inst.ID)
+	require.NotNil(t, inst.ExpiresAt)
+	assert.True(t, serverNow.Equal(got))
+}
+
+func TestGetStackWithServerTime_NoDateHeader(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Date"] = nil
+		_, _ = w.Write([]byte(`{"id":"42"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	_, got, err := c.GetStackWithServerTime("42")
+	require.NoError(t, err)
+	assert.True(t, got.IsZero())
 }

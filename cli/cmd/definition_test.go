@@ -1029,7 +1029,7 @@ func sampleChartConfig() types.ChartConfig {
 func TestDefinitionUpdateChartCmd_ChartVersion(t *testing.T) {
 	chart := sampleChartConfig()
 	reqCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		require.Contains(t, r.URL.Path, "/api/v1/stack-definitions/5/charts/1")
 		reqCount++
 		w.Header().Set("Content-Type", "application/json")
@@ -1079,7 +1079,7 @@ func TestDefinitionUpdateChartCmd_ChartVersion(t *testing.T) {
 
 func TestDefinitionUpdateChartCmd_ValuesFromFile(t *testing.T) {
 	chart := sampleChartConfig()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(chart)
@@ -1117,7 +1117,7 @@ func TestDefinitionUpdateChartCmd_ValuesFromFile(t *testing.T) {
 
 func TestDefinitionUpdateChartCmd_DeployOrder(t *testing.T) {
 	chart := sampleChartConfig()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(chart)
@@ -1150,7 +1150,7 @@ func TestDefinitionUpdateChartCmd_DeployOrder(t *testing.T) {
 
 func TestDefinitionUpdateChartCmd_RepositoryURL(t *testing.T) {
 	chart := sampleChartConfig()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(chart)
@@ -1185,7 +1185,7 @@ func TestDefinitionUpdateChartCmd_RepositoryURL(t *testing.T) {
 }
 
 func TestDefinitionUpdateChartCmd_RepositoryURL_Invalid(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("API should not be called when --repository-url is invalid")
 	}))
 	defer server.Close()
@@ -1210,7 +1210,7 @@ func TestDefinitionUpdateChartCmd_RepositoryURL_Invalid(t *testing.T) {
 }
 
 func TestDefinitionUpdateChartCmd_NoFlags(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("API should not be called when no flags provided")
 	}))
 	defer server.Close()
@@ -1233,7 +1233,7 @@ func TestDefinitionUpdateChartCmd_NoFlags(t *testing.T) {
 
 func TestDefinitionUpdateChartCmd_JSONOutput(t *testing.T) {
 	chart := sampleChartConfig()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(chart)
@@ -1267,7 +1267,7 @@ func TestDefinitionUpdateChartCmd_JSONOutput(t *testing.T) {
 
 func TestDefinitionUpdateChartCmd_QuietOutput(t *testing.T) {
 	chart := sampleChartConfig()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(chart)
@@ -1296,7 +1296,7 @@ func TestDefinitionUpdateChartCmd_QuietOutput(t *testing.T) {
 }
 
 func TestDefinitionUpdateChartCmd_PathTraversal(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("API should not be called for path traversal")
 	}))
 	defer server.Close()
@@ -1316,7 +1316,7 @@ func TestDefinitionUpdateChartCmd_PathTraversal(t *testing.T) {
 func TestDefinitionUpdateChartCmd_BuildPipelineID(t *testing.T) {
 	chart := sampleChartConfig()
 	var put types.UpdateChartConfigRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(chart)
@@ -1335,4 +1335,129 @@ func TestDefinitionUpdateChartCmd_BuildPipelineID(t *testing.T) {
 	assert.Equal(t, "42", put.BuildPipelineID)
 	assert.Equal(t, chart.ChartVersion, put.ChartVersion)
 	assert.Equal(t, chart.SourceRepoURL, put.SourceRepoURL)
+}
+
+// ---------- definition name resolution and chart IDs ----------
+
+// startDefinitionNameServer serves a definition that is found by name
+// (GET /stack-definitions?name=) and by ID, with two charts.
+func startDefinitionNameServer(t *testing.T, onRequest func(r *http.Request)) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
+		if onRequest != nil {
+			onRequest(r)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/stack-definitions" && r.Method == http.MethodGet:
+			assert.Equal(t, "example-dev", r.URL.Query().Get("name"))
+			_, _ = w.Write([]byte(`{"data":[{"id":"` + valuesTestDefID + `","name":"example-dev"}],"total":1,"page":1,"pageSize":25}`))
+		case r.URL.Path == "/api/v1/stack-definitions/"+valuesTestDefID && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"id":"` + valuesTestDefID + `","name":"example-dev","owner_id":"0f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f","default_branch":"master","charts":[` +
+				`{"id":"` + valuesTestChartDB + `","chart_name":"my-db","repository_url":"oci://registry.example.com/helm","chart_version":"1.0.0","deploy_order":0},` +
+				`{"id":"` + valuesTestChartA + `","chart_name":"my-api","repository_url":"oci://registry.example.com/helm","chart_version":"2.1.0","deploy_order":1}]}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+func TestDefinitionGetCmd_ByNameShowsChartIDs(t *testing.T) {
+	server := startDefinitionNameServer(t, nil)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	require.NoError(t, definitionGetCmd.RunE(definitionGetCmd, []string{"example-dev"}))
+
+	out := buf.String()
+	assert.Regexp(t, `ID:\s+`+valuesTestDefID, out)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	require.GreaterOrEqual(t, len(lines), 3)
+	tail := lines[len(lines)-3:]
+	assert.Equal(t, []string{"CHART", "ID", "CHART", "REPOSITORY", "VERSION", "ORDER"}, strings.Fields(tail[0]))
+	assert.Equal(t, []string{valuesTestChartDB, "my-db", "oci://registry.example.com/helm", "1.0.0", "0"}, strings.Fields(tail[1]))
+	assert.Equal(t, []string{valuesTestChartA, "my-api", "oci://registry.example.com/helm", "2.1.0", "1"}, strings.Fields(tail[2]))
+}
+
+func TestDefinitionGetCmd_UnknownName(t *testing.T) {
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[],"total":0}`))
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	err := definitionGetCmd.RunE(definitionGetCmd, []string{"no-such-def"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `no definition found with name "no-such-def"`)
+}
+
+func TestDefinitionDeleteCmd_ByName(t *testing.T) {
+	deleted := ""
+	server := httptest.NewServer(withChartLookup(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodDelete {
+			deleted = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"` + valuesTestDefID + `","name":"example-dev"}],"total":1}`))
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	definitionDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { definitionDeleteCmd.Flags().Set("yes", "false") })
+
+	require.NoError(t, definitionDeleteCmd.RunE(definitionDeleteCmd, []string{"example-dev"}))
+	assert.Equal(t, "/api/v1/stack-definitions/"+valuesTestDefID, deleted)
+}
+
+func TestDefinitionUpdateChartCmd_ByNames(t *testing.T) {
+	var putPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/stack-definitions":
+			_, _ = w.Write([]byte(`{"data":[{"id":"` + valuesTestDefID + `","name":"example-dev"}],"total":1}`))
+		case r.URL.Path == "/api/v1/stack-definitions/"+valuesTestDefID:
+			_, _ = w.Write([]byte(`{"id":"` + valuesTestDefID + `","name":"example-dev","charts":[{"id":"` + valuesTestChartA + `","chart_name":"my-api"}]}`))
+		case r.URL.Path == "/api/v1/stack-definitions/"+valuesTestDefID+"/charts/"+valuesTestChartA:
+			if r.Method == http.MethodPut {
+				putPath = r.URL.Path
+			}
+			_, _ = w.Write([]byte(`{"id":"` + valuesTestChartA + `","chart_name":"my-api","chart_version":"3.0.0"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	definitionUpdateChartCmd.Flags().Set("chart-version", "3.0.0")
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+	})
+
+	require.NoError(t, definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"example-dev", "my-api"}))
+	assert.Equal(t, "/api/v1/stack-definitions/"+valuesTestDefID+"/charts/"+valuesTestChartA, putPath)
+}
+
+func TestDefinitionUpdateChartCmd_UnknownChartName(t *testing.T) {
+	server := startDefinitionNameServer(t, func(r *http.Request) {
+		assert.NotEqual(t, http.MethodPut, r.Method, "no update for an unknown chart")
+	})
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	definitionUpdateChartCmd.Flags().Set("chart-version", "3.0.0")
+	t.Cleanup(func() {
+		definitionUpdateChartCmd.Flags().Set("chart-version", "")
+	})
+
+	err := definitionUpdateChartCmd.RunE(definitionUpdateChartCmd, []string{"example-dev", "nope"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `chart "nope" is not part of definition `+valuesTestDefID+` (charts: my-db, my-api)`)
 }

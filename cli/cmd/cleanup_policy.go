@@ -94,9 +94,9 @@ Arguments that look like an integer or a UUID are treated as IDs; rename a
 policy if you need name-based access to it.
 
 Examples:
-  stackctl cleanup-policy get 1
+  stackctl cleanup-policy get 4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a
   stackctl cleanup-policy get nightly-stop
-  stackctl cleanup-policy get 1 -o json`,
+  stackctl cleanup-policy get 4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -195,7 +195,7 @@ round-trip to resolve the ID before sending the PUT. Pass the numeric ID
 directly in scripts to skip the extra request.
 
 Examples:
-  stackctl cleanup-policy update 1 --from-file policy.json
+  stackctl cleanup-policy update 4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a --from-file policy.json
   stackctl cleanup-policy update nightly-stop --from-file policy.yaml`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
@@ -244,7 +244,7 @@ When the argument is a name (not an ID), this command issues a list+filter
 round-trip to resolve the ID before sending the DELETE.
 
 Examples:
-  stackctl cleanup-policy delete 1
+  stackctl cleanup-policy delete 4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a
   stackctl cleanup-policy delete nightly-stop --yes`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
@@ -275,9 +275,9 @@ When the argument is a name (not an ID), this command issues a list+filter
 round-trip to resolve the ID before sending the run request.
 
 Examples:
-  stackctl cleanup-policy run 1 --dry-run
+  stackctl cleanup-policy run 4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a --dry-run
   stackctl cleanup-policy run nightly-stop
-  stackctl cleanup-policy run 1 -o json`,
+  stackctl cleanup-policy run 4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a -o json`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {

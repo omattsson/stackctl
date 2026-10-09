@@ -138,11 +138,17 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 		return nil, err
 	}
 
+	// Renew a login session first: the upgrade request has no 401 renewal.
+	token, err := c.EnsureFreshToken()
+	if err != nil {
+		return nil, err
+	}
+
 	header := http.Header{}
 	if c.APIKey != "" {
 		header.Set("X-API-Key", c.APIKey)
-	} else if c.Token != "" {
-		header.Set("Authorization", "Bearer "+c.Token)
+	} else if token != "" {
+		header.Set("Authorization", "Bearer "+token)
 	}
 
 	dialer := websocket.DefaultDialer
@@ -164,8 +170,8 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 	// The retry is gated on c.Token because an API-key-only caller has no
 	// token to fall back to. When BOTH APIKey and Token are set, this
 	// transparently switches to the JWT path (documented precedence).
-	if resp != nil && resp.StatusCode == http.StatusUnauthorized && c.Token != "" {
-		fallbackURL := appendQueryToken(wsURL, c.Token)
+	if resp != nil && resp.StatusCode == http.StatusUnauthorized && token != "" {
+		fallbackURL := appendQueryToken(wsURL, token)
 		conn2, _, err2 := dialer.DialContext(ctx, fallbackURL, nil)
 		if err2 != nil {
 			return nil, fmt.Errorf("connecting to WebSocket (header auth failed with 401, query-param fallback also failed): %w", err2)

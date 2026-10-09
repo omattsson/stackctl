@@ -69,7 +69,8 @@ Examples:
 var gitBranchesCmd = &cobra.Command{
 	Use:   "branches",
 	Short: "List branches for a git repository",
-	Long: `List branches for a git repository.
+	Long: `List branches for a git repository. DEFAULT marks the default branch
+of the repository.
 
 Examples:
   stackctl git branches --repo https://github.com/org/repo
@@ -94,14 +95,14 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(branches)
 		default:
-			headers := []string{"NAME", "HEAD"}
+			headers := []string{"NAME", "DEFAULT"}
 			rows := make([][]string, len(branches))
 			for i, b := range branches {
-				head := ""
-				if b.IsHead {
-					head = "*"
+				def := ""
+				if b.IsDefault {
+					def = "*"
 				}
-				rows[i] = []string{b.Name, head}
+				rows[i] = []string{b.Name, def}
 			}
 			return printer.PrintTable(headers, rows)
 		}
@@ -137,13 +138,9 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(resp)
 		default:
-			valid := "true"
-			if !resp.Valid {
-				valid = "false"
-			}
-			headers := []string{"BRANCH", "VALID", "MESSAGE"}
+			headers := []string{"BRANCH", "VALID"}
 			rows := [][]string{
-				{resp.Branch, valid, resp.Message},
+				{resp.Branch, strconv.FormatBool(resp.Valid)},
 			}
 			return printer.PrintTable(headers, rows)
 		}

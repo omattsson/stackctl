@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/omattsson/stackctl/cli/pkg/config"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 )
 
@@ -40,6 +43,17 @@ type Client struct {
 	DebugWriter  io.Writer
 	RetryBackoff []time.Duration
 	Sleeper      func(time.Duration) // injectable for tests; defaults to time.Sleep
+
+	// Tokens enables automatic renewal of a username/password login
+	// session. When it is set and APIKey is empty, the client renews the
+	// access token before it expires and after a 401 (see auth.go).
+	Tokens TokenStore
+	// WarnWriter receives renewal warnings; nil means os.Stderr.
+	WarnWriter io.Writer
+
+	tokenMu sync.Mutex          // guards Token and unsaved
+	renewMu sync.Mutex          // serializes renewals inside one process
+	unsaved *config.StoredToken // renewed session that could not be saved
 }
 
 // New creates a new API client.
@@ -129,19 +143,27 @@ func (e *APIError) withServerMsg(guidance string) string {
 	return guidance
 }
 
-// do executes an HTTP request with auth headers and error handling.
-func (c *Client) do(method, path string, body interface{}) (*http.Response, error) {
-	// Build URL by combining base and path. We avoid url.JoinPath because it
-	// escapes query strings. Instead, parse and resolve properly.
+// resolveURL combines the base URL and path. We avoid url.JoinPath because
+// it escapes query strings. Instead, parse and resolve properly.
+func (c *Client) resolveURL(path string) (string, error) {
 	base, err := url.Parse(c.BaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parsing base URL: %w", err)
+		return "", fmt.Errorf("parsing base URL: %w", err)
 	}
 	ref, err := url.Parse(path)
 	if err != nil {
-		return nil, fmt.Errorf("parsing path: %w", err)
+		return "", fmt.Errorf("parsing path: %w", err)
 	}
-	u := base.ResolveReference(ref).String()
+	return base.ResolveReference(ref).String(), nil
+}
+
+// send executes one HTTP request with auth headers and error handling. It
+// does not renew the session; do (auth.go) wraps it with renewal.
+func (c *Client) send(method, path string, body interface{}) (*http.Response, error) {
+	u, err := c.resolveURL(path)
+	if err != nil {
+		return nil, err
+	}
 
 	var reqBody io.Reader
 	if body != nil {
@@ -165,8 +187,8 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 	// API key takes precedence over JWT token
 	if c.APIKey != "" {
 		req.Header.Set("X-API-Key", c.APIKey)
-	} else if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
+	} else if token := c.currentToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	if c.Debug && c.DebugWriter != nil {
@@ -192,39 +214,45 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 	}
 
 	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		apiErr := &APIError{StatusCode: resp.StatusCode}
-		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			apiErr.retryAfter = parseRetryAfter(ra)
-		}
-		// Most endpoints return {"error": "..."}, but a few (notably
-		// POST /api/v1/clusters/:id/test on 502) return
-		// {"status": "...", "message": "..."} instead. Decode both
-		// shapes so the backend-provided message surfaces in the
-		// user-facing APIError.
-		var errResp struct {
-			Error   string `json:"error"`
-			Message string `json:"message"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
-			apiErr.Message = http.StatusText(resp.StatusCode)
-			return nil, apiErr
-		}
-		switch {
-		case errResp.Error != "":
-			apiErr.Message = errResp.Error
-		case errResp.Message != "":
-			apiErr.Message = errResp.Message
-		default:
-			// Decoded successfully but both fields empty — fall back to the
-			// status text so the user-facing rendering still has *some*
-			// context rather than just "Server error.".
-			apiErr.Message = http.StatusText(resp.StatusCode)
-		}
-		return nil, apiErr
+		return nil, decodeAPIError(resp)
 	}
 
 	return resp, nil
+}
+
+// decodeAPIError reads an error response, closes its body and returns the
+// matching *APIError.
+func decodeAPIError(resp *http.Response) *APIError {
+	defer resp.Body.Close()
+	apiErr := &APIError{StatusCode: resp.StatusCode}
+	if ra := resp.Header.Get("Retry-After"); ra != "" {
+		apiErr.retryAfter = parseRetryAfter(ra)
+	}
+	// Most endpoints return {"error": "..."}, but a few (notably
+	// POST /api/v1/clusters/:id/test on 502) return
+	// {"status": "...", "message": "..."} instead. Decode both
+	// shapes so the backend-provided message surfaces in the
+	// user-facing APIError.
+	var errResp struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		apiErr.Message = http.StatusText(resp.StatusCode)
+		return apiErr
+	}
+	switch {
+	case errResp.Error != "":
+		apiErr.Message = errResp.Error
+	case errResp.Message != "":
+		apiErr.Message = errResp.Message
+	default:
+		// Decoded successfully but both fields empty — fall back to the
+		// status text so the user-facing rendering still has *some*
+		// context rather than just "Server error.".
+		apiErr.Message = http.StatusText(resp.StatusCode)
+	}
+	return apiErr
 }
 
 var retryableStatuses = map[int]bool{
@@ -462,6 +490,27 @@ func (c *Client) GetStack(id string) (*types.StackInstance, error) {
 	return &instance, nil
 }
 
+// GetStackWithServerTime returns a stack instance and the server time from
+// the Date response header (zero when the header is absent or invalid).
+// Callers use the server time to compare against expires_at without
+// depending on the local clock.
+func (c *Client) GetStackWithServerTime(id string) (*types.StackInstance, time.Time, error) {
+	resp, err := c.doWithRetry(http.MethodGet, fmt.Sprintf("/api/v1/stack-instances/%s", id), nil)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer resp.Body.Close()
+	var instance types.StackInstance
+	if err := json.NewDecoder(resp.Body).Decode(&instance); err != nil {
+		return nil, time.Time{}, fmt.Errorf("decoding response: %w", err)
+	}
+	serverTime, perr := http.ParseTime(resp.Header.Get("Date"))
+	if perr != nil {
+		serverTime = time.Time{}
+	}
+	return &instance, serverTime, nil
+}
+
 // CreateStack creates a new stack instance.
 func (c *Client) CreateStack(req *types.CreateStackRequest) (*types.StackInstance, error) {
 	var created types.StackInstance
@@ -570,7 +619,9 @@ func (c *Client) CloneStack(id string) (*types.StackInstance, error) {
 	return &instance, nil
 }
 
-// ExtendStack extends the TTL of a stack instance by the given number of minutes.
+// ExtendStack sets the TTL of a stack instance to the given number of
+// minutes. The backend sets expires_at to now + minutes and overwrites
+// ttl_minutes, so the new expiry can be earlier than the current one.
 func (c *Client) ExtendStack(id string, minutes int) (*types.StackInstance, error) {
 	var instance types.StackInstance
 	body := map[string]int{"ttl_minutes": minutes}
@@ -845,7 +896,10 @@ func (c *Client) ListValueOverrides(instanceID string) ([]types.ValueOverride, e
 	return overrides, nil
 }
 
-// GetValueOverride returns a single value override for a chart.
+// GetValueOverride returns the value override of one chart
+// (GET /api/v1/stack-instances/:id/overrides/:chartId). The backend returns
+// 404 "Chart not found in this stack definition" for an unknown chart and
+// 404 "Value override not found" when the chart has no override.
 func (c *Client) GetValueOverride(instanceID, chartID string) (*types.ValueOverride, error) {
 	var override types.ValueOverride
 	err := c.Get(fmt.Sprintf(pathOverride, instanceID, chartID), &override)
@@ -855,7 +909,9 @@ func (c *Client) GetValueOverride(instanceID, chartID string) (*types.ValueOverr
 	return &override, nil
 }
 
-// SetValueOverride sets value overrides for a chart.
+// SetValueOverride replaces the value override of a chart (req.Values is a
+// YAML document). Empty values make the backend remove the override and
+// return 204 No Content; the returned override is then zero-valued.
 func (c *Client) SetValueOverride(instanceID, chartID string, req *types.SetValueOverrideRequest) (*types.ValueOverride, error) {
 	var override types.ValueOverride
 	err := c.Put(fmt.Sprintf(pathOverride, instanceID, chartID), req, &override)
@@ -865,7 +921,9 @@ func (c *Client) SetValueOverride(instanceID, chartID string, req *types.SetValu
 	return &override, nil
 }
 
-// DeleteValueOverride deletes a value override for a chart.
+// DeleteValueOverride deletes the value override of one chart
+// (DELETE /api/v1/stack-instances/:id/overrides/:chartId, 204). 404 messages
+// are the same as for GetValueOverride.
 func (c *Client) DeleteValueOverride(instanceID, chartID string) error {
 	return c.Delete(fmt.Sprintf(pathOverride, instanceID, chartID))
 }
@@ -878,16 +936,6 @@ func (c *Client) ListBranchOverrides(instanceID string) ([]types.BranchOverride,
 		return nil, err
 	}
 	return overrides, nil
-}
-
-// GetBranchOverride returns a single branch override for a chart.
-func (c *Client) GetBranchOverride(instanceID, chartID string) (*types.BranchOverride, error) {
-	var override types.BranchOverride
-	err := c.Get(fmt.Sprintf(pathBranchOverride, instanceID, chartID), &override)
-	if err != nil {
-		return nil, err
-	}
-	return &override, nil
 }
 
 // SetBranchOverride sets a branch override for a chart.
@@ -930,18 +978,49 @@ func (c *Client) DeleteQuotaOverride(instanceID string) error {
 	return c.Delete(fmt.Sprintf(pathQuotaOverride, instanceID))
 }
 
-// GetMergedValues returns the merged Helm values for a stack instance.
-func (c *Client) GetMergedValues(instanceID string, chartName string) (*types.MergedValues, error) {
-	var values types.MergedValues
-	params := map[string]string{}
-	if chartName != "" {
-		params["chart"] = chartName
-	}
-	err := c.GetWithQuery(fmt.Sprintf("/api/v1/stack-instances/%s/values", instanceID), params, &values)
+// maxValuesDownloadSize caps the body of the values export endpoints.
+const maxValuesDownloadSize = 20 * 1024 * 1024 // 20MB
+
+// getBytes performs a GET request and returns the raw response body (for
+// non-JSON endpoints such as YAML and ZIP exports), capped at limit bytes.
+func (c *Client) getBytes(path string, limit int64) ([]byte, http.Header, error) {
+	resp, err := c.doWithRetry(http.MethodGet, path, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &values, nil
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading response: %w", err)
+	}
+	if int64(len(data)) > limit {
+		return nil, nil, fmt.Errorf("response exceeds maximum size of %d bytes", limit)
+	}
+	return data, resp.Header, nil
+}
+
+// GetChartValues returns the merged values.yaml of one chart of a stack
+// instance (GET /api/v1/stack-instances/:id/values/:chartId, YAML text).
+// chartID must be a chart config ID of the instance's definition; the
+// backend returns 404 "Chart not found in this stack definition" otherwise.
+func (c *Client) GetChartValues(instanceID, chartID string) ([]byte, error) {
+	data, _, err := c.getBytes(fmt.Sprintf("/api/v1/stack-instances/%s/values/%s", instanceID, chartID), maxValuesDownloadSize)
+	return data, err
+}
+
+// ExportValues returns the ZIP archive of the merged values of all charts
+// of a stack instance (GET /api/v1/stack-instances/:id/values) unchanged,
+// and the file name from the Content-Disposition header ("" if absent).
+func (c *Client) ExportValues(instanceID string) ([]byte, string, error) {
+	data, header, err := c.getBytes(fmt.Sprintf("/api/v1/stack-instances/%s/values", instanceID), maxValuesDownloadSize)
+	if err != nil {
+		return nil, "", err
+	}
+	filename := ""
+	if _, params, perr := mime.ParseMediaType(header.Get("Content-Disposition")); perr == nil {
+		filename = params["filename"]
+	}
+	return data, filename, nil
 }
 
 // CompareInstances compares two stack instances.
@@ -1041,7 +1120,7 @@ func (c *Client) ListGitBranches(repo string) ([]types.GitBranch, error) {
 // ValidateGitBranch validates whether a branch exists in a git repository.
 func (c *Client) ValidateGitBranch(repo, branch string) (*types.GitValidateResponse, error) {
 	var resp types.GitValidateResponse
-	err := c.GetWithQuery("/api/v1/git/validate", map[string]string{"repo": repo, "branch": branch}, &resp)
+	err := c.GetWithQuery("/api/v1/git/validate-branch", map[string]string{"repo": repo, "branch": branch}, &resp)
 	if err != nil {
 		return nil, err
 	}
