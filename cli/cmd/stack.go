@@ -78,6 +78,10 @@ var stackListCmd = &cobra.Command{
 
 The --definition flag accepts either a definition name or ID.
 
+The server returns one page (default 25 items, --page-size up to 100).
+When it has more items, the command writes "Showing X of TOTAL" to stderr.
+-q without --page prints the IDs of all pages.
+
 Examples:
   stackctl stack list
   stackctl stack list --mine
@@ -127,10 +131,15 @@ Examples:
 			}
 		}
 
+		if quietAllPages(cmd) {
+			return printAllIDs(params, c.ListStacks, func(item types.StackInstance) string { return item.ID })
+		}
+
 		resp, err := c.ListStacks(params)
 		if err != nil {
 			return err
 		}
+		defer printListFooter(cmd, len(resp.Data), resp.Total)
 
 		if printer.Quiet {
 			ids := make([]string, len(resp.Data))

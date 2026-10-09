@@ -197,6 +197,8 @@ stackctl stack rollback my-app --target-log <log-id>
 
 `stack extend --minutes N` adds N minutes to the current expiry, or to now when the stack has expired. It never makes the expiry earlier and does not change the TTL of the stack. The server caps the new expiry at 30 days from now. `--minutes` needs k8s-stack-manager v0.6.0 or later. An older server ignores `--minutes` and resets the expiry to now + TTL. stackctl detects this: it prints the old and the new expiry, then fails (exit code 1) with "the server did not add N minutes ... upgrade k8s-stack-manager to v0.6.0 or later". `--reset-ttl M` (deprecated) keeps the old behaviour: the TTL becomes M minutes and the expiry now + M minutes, which can be earlier. `--yes` has no effect and is accepted for older scripts.
 
+List commands (`stack list`, `definition list`, `template list`) show one page: 25 items by default, `--page-size` up to 100. When the server has more items, the command writes `Showing X of TOTAL. Use --page/--page-size to see more.` to stderr, so `-q` and `-o json` output stays clean. `-q` without `--page` prints the IDs of all pages, so `stackctl stack list --mine -q | xargs ...` gets every ID. k8s-stack-manager v0.7.0 also pages `--mine` and name queries; older servers return every match on one page. When a name matches more than one stack or definition, the error lists the first page and the number of matches.
+
 stackctl writes any `Warning` header from the API (for example a deprecation notice) to stderr as `Warning: <text>`, for every command.
 
 ### Templates
@@ -345,7 +347,7 @@ stackctl bulk stop --ids my-app,other-app
 stackctl bulk clean --ids my-app,other-app
 
 # Piping workflows with quiet mode
-stackctl stack list --status stopped --mine -q | xargs stackctl bulk deploy
+stackctl stack list --status stopped --mine -q | xargs -n 50 stackctl bulk deploy
 ```
 
 ### Orphaned Namespaces
@@ -365,7 +367,7 @@ stackctl orphaned delete stack-old-namespace
 
 ```bash
 # Deploy all stopped stacks owned by me
-stackctl stack list --status stopped --mine -q | xargs stackctl bulk deploy
+stackctl stack list --status stopped --mine -q | xargs -n 50 stackctl bulk deploy
 
 # Export all definitions to individual files
 for id in $(stackctl definition list -q); do
@@ -380,7 +382,7 @@ done
 echo "Stack my-app is running"
 
 # Delete all stacks on a specific cluster
-stackctl stack list --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -q | xargs stackctl bulk delete --yes
+stackctl stack list --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -q | xargs -n 50 stackctl bulk delete --yes
 ```
 
 ### Clusters
