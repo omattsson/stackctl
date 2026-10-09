@@ -32,6 +32,10 @@ var definitionListCmd = &cobra.Command{
 	Short: "List stack definitions",
 	Long: `List stack definitions with optional filtering.
 
+The server returns one page (default 25 items, --page-size up to 100).
+When it has more items, the command writes "Showing X of TOTAL" to stderr.
+-q without --page prints the IDs of all pages.
+
 Examples:
   stackctl definition list
   stackctl definition list --mine
@@ -62,10 +66,15 @@ Examples:
 			}
 		}
 
+		if quietAllPages(cmd) {
+			return printAllIDs(params, c.ListDefinitions, func(item types.StackDefinition) string { return item.ID })
+		}
+
 		resp, err := c.ListDefinitions(params)
 		if err != nil {
 			return err
 		}
+		defer printListFooter(cmd, len(resp.Data), resp.Total)
 
 		if printer.Quiet {
 			ids := make([]string, len(resp.Data))

@@ -29,6 +29,10 @@ var templateListCmd = &cobra.Command{
 	Short: "List stack templates",
 	Long: `List stack templates with optional filtering.
 
+The server returns one page (default 25 items, --page-size up to 100).
+When it has more items, the command writes "Showing X of TOTAL" to stderr.
+-q without --page prints the IDs of all pages.
+
 Examples:
   stackctl template list
   stackctl template list --published
@@ -59,10 +63,15 @@ Examples:
 			}
 		}
 
+		if quietAllPages(cmd) {
+			return printAllIDs(params, c.ListTemplates, func(item types.StackTemplate) string { return item.ID })
+		}
+
 		resp, err := c.ListTemplates(params)
 		if err != nil {
 			return err
 		}
+		defer printListFooter(cmd, len(resp.Data), resp.Total)
 
 		if printer.Quiet {
 			ids := make([]string, len(resp.Data))

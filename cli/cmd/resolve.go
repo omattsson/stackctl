@@ -47,7 +47,7 @@ func resolveStackID(c *client.Client, nameOrID string) (string, error) {
 		}
 		return resp.Data[0].ID, nil
 	default:
-		msg := fmt.Sprintf("multiple stacks match name %q — use the ID instead:\n", nameOrID)
+		msg := fmt.Sprintf("multiple stacks match name %q%s — use the ID instead:\n", nameOrID, matchCount(resp.Total, len(resp.Data)))
 		for _, s := range resp.Data {
 			msg += fmt.Sprintf("  %s  (owner: %s, status: %s)\n", s.ID, displayName(s.OwnerUsername, s.Owner), s.Status)
 		}
@@ -79,12 +79,21 @@ func resolveDefinitionID(c *client.Client, nameOrID string) (string, error) {
 		}
 		return resp.Data[0].ID, nil
 	default:
-		msg := fmt.Sprintf("multiple definitions match name %q — use the ID instead:\n", nameOrID)
+		msg := fmt.Sprintf("multiple definitions match name %q%s — use the ID instead:\n", nameOrID, matchCount(resp.Total, len(resp.Data)))
 		for _, d := range resp.Data {
 			msg += fmt.Sprintf("  %s  (owner: %s)\n", d.ID, displayName(d.OwnerUsername, d.Owner))
 		}
 		return "", fmt.Errorf("%s", msg)
 	}
+}
+
+// matchCount returns " (N matches, first M shown)" when the server has more
+// matches (total) than the page holds (shown), else "".
+func matchCount(total, shown int) string {
+	if total > shown {
+		return fmt.Sprintf(" (%d matches, first %d shown)", total, shown)
+	}
+	return ""
 }
 
 // templateNamePageSize is the page size that resolveTemplateID requests.
