@@ -16,7 +16,7 @@ cli/
     login.go                  # login, logout, whoami
     token.go                  # Token helpers (save/load/delete session, fresh token for plugins)
     stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend/values/compare
-    template.go               # template list/get/instantiate/quick-deploy
+    template.go               # template list/get/create/update/publish/versions/instantiate/quick-deploy
     definition.go             # definition list/get/create/update/delete/export/import
     override.go               # override list/set/delete, branch overrides, quota overrides
     bulk.go                   # bulk deploy/stop/clean/delete (--ids flag or positional args)
@@ -86,6 +86,8 @@ cli/
 - 429 → "Rate limited. Try again later. (server: ...)"
 - 500 → "Server error. Check backend logs. (server: ...)"
 
+**Warning headers**: `send()` writes each `Warning` response header (for example a `299` deprecation notice) to `Client.WarnWriter` (stderr when nil) as `Warning: <warn-text>`, for every command and also on error responses. The quoted warn-text is unescaped and sanitized like server error messages; one header can hold several comma-separated warnings (warn-dates are skipped). The same text is written once per client (retries do not repeat it; the dedupe set holds at most 64 texts), and writes are serialized under `warnMu`. `sanitizeServerMessage` replaces control characters (`unicode.IsControl`: C0, DEL, C1) with a space and drops bidi controls (U+200E, U+200F, U+202A–U+202E, U+2066–U+2069).
+
 **Config-free commands**: `version` and `completion` skip config file loading and work even if the config is missing or corrupted.
 
 **Insecure mode**: When `--insecure` is active, a warning is printed to stderr.
@@ -134,9 +136,18 @@ Backend: [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager)
 All API calls go to `/api/v1/*`. Key route groups:
 - `/api/v1/auth` — login, register, current user
 - `/api/v1/stack-instances` — CRUD + deploy/stop/clean/status/logs/clone/extend/values/compare
+  - `POST /:id/extend` with `{"minutes": N}` adds N minutes to the expiry (never earlier, TTL unchanged, capped at now + 30 days; N <= 0 or no TTL and no expiry → 400). `stack extend --minutes` uses this body and needs k8s-stack-manager v0.6.0 or later. After the call it checks that the new expiry is at least max(old expiry, server time) + N − 2 min (server time = `updated_at` of the response, else the local clock) or at the 30-day cap; if not (an older server ignored `minutes`), it prints the result and fails with "upgrade k8s-stack-manager to v0.6.0 or later". The deprecated `{"ttl_minutes": N}` resets the expiry to now + N and sets the TTL; the server adds a `Warning` header. Only `stack extend --reset-ttl` (deprecated) sends it. `--yes` on `stack extend` is hidden and has no effect (script compatibility).
 - `/api/v1/stack-instances/bulk` — bulk operations
 - `/api/v1/stack-definitions` — CRUD + export/import
-- `/api/v1/templates` — list/get/instantiate/quick-deploy
+- `/api/v1/templates` — list/get/instantiate/quick-deploy/publish/versions
+  - Draft and release (k8s-stack-manager v0.6.0+): `PUT /:id` and the template chart routes change only the working copy. Users, quick deploy, instantiate and definition upgrades get the latest release. After `template update-chart`, run `template publish <name|id> --version <new>` so users get the change.
+  - `POST /:id/publish` takes an optional body `{"version", "change_summary"}`; `template publish` sends it only when `--version` or `--change-summary` is set. Without a version the server uses the working-copy version. 409 "Version x already exists" and 400 "Version is required to publish" map to messages with the next command. 200 with `snapshot_created: false` prints "No changes since version X; no new version created". With `--version` or `--change-summary`, the command first does GET `/:id`; when `has_unpublished_changes` is absent (older server, which ignores the body) it fails with the v0.6.0 upgrade hint before the publish.
+  - `PUT /:id`: v0.6.0+ changes only the fields sent (`PatchTemplateRequest`, pointer fields; `""` clears); older servers replace name/description/category/version/default_branch. `template update` does GET first: with `has_unpublished_changes` present it sends only the changed fields, else the full record (`UpdateTemplateRequest`). `--version` sets the working-copy version; `--description ""` clears.
+  - Name resolution (`resolveTemplateID`, used by `template publish` and bulk template commands): sends `?name=` (v0.5.0 ignores it), pages through the result with `pageSize=100`, and matches the exact name on the client. 0 → not found; more than 1 → "multiple templates named X: <ids>".
+  - `GET /:id` adds `published_version`, `published_version_id`, `published_charts`, `has_unpublished_changes` (absent on older servers; `StackTemplate.HasUnpublishedChanges == nil` means an older server). `template get` marks each chart against the release; `--released` lists the released charts.
+  - Instantiate and quick deploy of a template without a release: 409 "Template has no published version" (older quick deploy: 400 "Template is not published") map to "publish it first: stackctl template publish X --version ...". A best-effort GET picks a plain `stackctl template publish X` when the template has a release (or the server is older).
+  - `template get` labels the version "Working copy version" when `has_unpublished_changes` is present (managers); chart notes compare values after trimming trailing whitespace (like the server's `NormalizeValues`). An unpublished template with a release shows "(unpublished; quick deploy and use are blocked until published)".
+  - Version list/detail add `created_by_username` (fallback `created_by`). The diff accepts `working` for either side; sides carry id, change_summary, created_by(_username), created_at, is_working_copy.
 - `/api/v1/git` — branch listing, validation
 - `/api/v1/clusters` — list/get/health
 - `/api/v1/stack-instances/:id/overrides` — value overrides

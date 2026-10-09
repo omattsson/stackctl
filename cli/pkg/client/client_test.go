@@ -1,12 +1,14 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -915,7 +917,7 @@ func TestExtendStack_Success(t *testing.T) {
 
 		var body map[string]int
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, 60, body["ttl_minutes"])
+		assert.Equal(t, map[string]int{"minutes": 60}, body)
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(types.StackInstance{
@@ -4619,6 +4621,87 @@ func TestDiffTemplateVersions(t *testing.T) {
 
 // ---------- bulk template operations ----------
 
+func TestPublishTemplateRelease(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		req      *types.PublishTemplateRequest
+		wantBody string
+	}{
+		{name: "NoBody", req: nil, wantBody: ""},
+		{name: "VersionAndSummary", req: &types.PublishTemplateRequest{Version: "1.2.0", ChangeSummary: "bump"}, wantBody: `{"version":"1.2.0","change_summary":"bump"}`},
+		{name: "SummaryOnly", req: &types.PublishTemplateRequest{ChangeSummary: "bump"}, wantBody: `{"change_summary":"bump"}`},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, "/api/v1/templates/1/publish", r.URL.Path)
+				body, _ := io.ReadAll(r.Body)
+				if tt.wantBody == "" {
+					assert.Empty(t, strings.TrimSpace(string(body)))
+				} else {
+					assert.JSONEq(t, tt.wantBody, string(body))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"1","name":"web-app","version":"1.2.0","is_published":true,"published_version":"1.2.0","published_version_id":"v-9","snapshot_created":true,"has_unpublished_changes":false}`))
+			}))
+			defer server.Close()
+
+			c := New(server.URL)
+			resp, err := c.PublishTemplateRelease("1", tt.req)
+			require.NoError(t, err)
+			require.NotNil(t, resp.PublishedVersion)
+			assert.Equal(t, "1.2.0", *resp.PublishedVersion)
+			require.NotNil(t, resp.PublishedVersionID)
+			assert.Equal(t, "v-9", *resp.PublishedVersionID)
+			require.NotNil(t, resp.SnapshotCreated)
+			assert.True(t, *resp.SnapshotCreated)
+			require.NotNil(t, resp.HasUnpublishedChanges)
+			assert.False(t, *resp.HasUnpublishedChanges)
+			assert.Equal(t, "1.2.0", resp.Version)
+		})
+	}
+}
+
+func TestPatchTemplate_SendsOnlySetFields(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/templates/1", r.URL.Path)
+		body, _ := io.ReadAll(r.Body)
+		assert.JSONEq(t, `{"description":"","version":"1.2.0"}`, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","name":"web-app","version":"1.2.0"}`))
+	}))
+	defer server.Close()
+
+	empty, version := "", "1.2.0"
+	tmpl, err := New(server.URL).PatchTemplate("1", &types.PatchTemplateRequest{Description: &empty, Version: &version})
+	require.NoError(t, err)
+	assert.Equal(t, "1.2.0", tmpl.Version)
+}
+
+func TestPublishTemplateRelease_Conflict(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"Version 1.2.0 already exists"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	resp, err := c.PublishTemplateRelease("1", &types.PublishTemplateRequest{Version: "1.2.0"})
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusConflict, apiErr.StatusCode)
+	assert.Contains(t, apiErr.Message, "already exists")
+}
+
 func TestBulkPublishTemplates_Success(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -4928,34 +5011,150 @@ func TestSetDefaultCluster_Error(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestGetStackWithServerTime(t *testing.T) {
+func TestResetStackTTL_SendsLegacyBodyAndWarns(t *testing.T) {
 	t.Parallel()
-	serverNow := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/stack-instances/42", r.URL.Path)
-		w.Header().Set("Date", serverNow.Format(http.TimeFormat))
-		_, _ = w.Write([]byte(`{"id":"42","expires_at":"2026-10-01T16:00:00Z","ttl_minutes":240}`))
+		assert.Equal(t, "/api/v1/stack-instances/42/extend", r.URL.Path)
+		var body map[string]int
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, map[string]int{"ttl_minutes": 30}, body)
+		w.Header().Set("Warning", `299 - "ttl_minutes on /extend is deprecated; send {\"minutes\": N}"`)
+		_, _ = w.Write([]byte(`{"id":"42","ttl_minutes":30}`))
 	}))
 	defer server.Close()
 
+	var warn bytes.Buffer
 	c := New(server.URL)
-	inst, got, err := c.GetStackWithServerTime("42")
+	c.WarnWriter = &warn
+	inst, err := c.ResetStackTTL("42", 30)
 	require.NoError(t, err)
-	assert.Equal(t, "42", inst.ID)
-	require.NotNil(t, inst.ExpiresAt)
-	assert.True(t, serverNow.Equal(got))
+	assert.Equal(t, 30, inst.TTLMinutes)
+	assert.Equal(t, "Warning: ttl_minutes on /extend is deprecated; send {\"minutes\": N}\n", warn.String())
 }
 
-func TestGetStackWithServerTime_NoDateHeader(t *testing.T) {
+// TestWarningHeader_AnyRequest: the client writes Warning headers of any
+// response (also errors) once per client.
+func TestWarningHeader_AnyRequest(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header()["Date"] = nil
-		_, _ = w.Write([]byte(`{"id":"42"}`))
+		w.Header().Add("Warning", `299 - "first notice"`)
+		w.Header().Add("Warning", `299 api "second notice" "Thu, 01 Oct 2026 12:00:00 GMT"`)
+		if r.URL.Path == "/fail" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"bad"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
+	var warn bytes.Buffer
 	c := New(server.URL)
-	_, got, err := c.GetStackWithServerTime("42")
-	require.NoError(t, err)
-	assert.True(t, got.IsZero())
+	c.WarnWriter = &warn
+	require.NoError(t, c.Get("/ok", &map[string]any{}))
+	require.NoError(t, c.Get("/ok", &map[string]any{}))
+	require.Error(t, c.Get("/fail", &map[string]any{}))
+	assert.Equal(t, "Warning: first notice\nWarning: second notice\n", warn.String())
+}
+
+func TestWarningHeader_NoneWritesNothing(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	var warn bytes.Buffer
+	c := New(server.URL)
+	c.WarnWriter = &warn
+	require.NoError(t, c.Get("/ok", &map[string]any{}))
+	assert.Empty(t, warn.String())
+}
+
+func TestWarningTexts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{"quoted", `299 - "use minutes"`, []string{"use minutes"}},
+		{"escaped quotes", `299 - "send {\"minutes\": N}"`, []string{`send {"minutes": N}`}},
+		{"with date", `299 api "text" "Thu, 01 Oct 2026 12:00:00 GMT"`, []string{"text"}},
+		{"two warnings on one line", `299 - "a", 299 - "b"`, []string{"a", "b"}},
+		{"two warnings with dates", `299 - "a, still a" "Thu, 01 Oct 2026 12:00:00 GMT", 110 proxy "b"`, []string{"a, still a", "b"}},
+		{"no quotes", "plain warning", []string{"plain warning"}},
+		{"no closing quote", `299 - "open text`, []string{"open text"}},
+		{"control characters", "299 - \"a\x1b[31mb\"", []string{"a [31mb"}},
+		{"empty", "", nil},
+		{"empty text", `299 - ""`, nil},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, warningTexts(tt.value))
+		})
+	}
+}
+
+func TestWarningHeader_DedupeCap(t *testing.T) {
+	t.Parallel()
+	var warn bytes.Buffer
+	c := New("http://unused")
+	c.WarnWriter = &warn
+	for i := 0; i < maxWarned+10; i++ {
+		c.warnOnce(fmt.Sprintf("w%d", i))
+	}
+	assert.Len(t, c.warned, maxWarned, "the dedupe map stops growing at the cap")
+	c.warnOnce("w0")  // remembered: not written again
+	c.warnOnce("w70") // over the cap: written again
+	lines := strings.Split(strings.TrimSpace(warn.String()), "\n")
+	assert.Len(t, lines, maxWarned+11)
+	assert.Equal(t, "Warning: w70", lines[len(lines)-1])
+}
+
+func TestWarningHeader_ConcurrentLinesDoNotMix(t *testing.T) {
+	t.Parallel()
+	var warn bytes.Buffer
+	c := New("http://unused")
+	c.WarnWriter = &warn
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			c.warnHeaders(http.Header{"Warning": []string{fmt.Sprintf(`299 - "notice %d"`, i)}})
+		}(i)
+	}
+	wg.Wait()
+	lines := strings.Split(strings.TrimSpace(warn.String()), "\n")
+	assert.Len(t, lines, 20)
+	for _, l := range lines {
+		assert.Regexp(t, `^Warning: notice \d+$`, l)
+	}
+}
+
+func TestSanitizeServerMessage_ControlAndBidi(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"C0", "a\x07b", "a b"},
+		{"DEL", "a\x7fb", "a b"},
+		{"C1", "a\u0085b\u009bc", "a b c"},
+		{"bidi override", "file\u202Etxt.exe", "filetxt.exe"},
+		{"bidi isolates", "\u2066a\u2067b\u2068c\u2069", "abc"},
+		{"LRM RLM", "a\u200Eb\u200F", "ab"},
+		{"plain unicode kept", "Åre – ok", "Åre – ok"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, sanitizeServerMessage(tt.in))
+		})
+	}
 }

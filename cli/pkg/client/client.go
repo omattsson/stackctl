@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/omattsson/stackctl/cli/pkg/config"
 	"github.com/omattsson/stackctl/cli/pkg/types"
@@ -52,6 +53,8 @@ type Client struct {
 	WarnWriter io.Writer
 
 	tokenMu sync.Mutex          // guards Token and unsaved
+	warnMu  sync.Mutex          // guards warned
+	warned  map[string]bool     // Warning header texts already written
 	renewMu sync.Mutex          // serializes renewals inside one process
 	unsaved *config.StoredToken // renewed session that could not be saved
 }
@@ -120,9 +123,12 @@ func sanitizeServerMessage(msg string) string {
 	var b strings.Builder
 	b.Grow(len(msg))
 	for _, r := range msg {
-		if r < 0x20 || r == 0x7f {
+		switch {
+		case isBidiControl(r):
+			// Dropped: bidi controls can reorder the text on the terminal.
+		case unicode.IsControl(r): // C0, DEL and C1
 			b.WriteByte(' ')
-		} else {
+		default:
 			b.WriteRune(r)
 		}
 	}
@@ -133,6 +139,14 @@ func sanitizeServerMessage(msg string) string {
 		clean = string(runes[:maxServerMessageLen]) + "..."
 	}
 	return clean
+}
+
+// isBidiControl reports whether r is a bidirectional formatting character
+// (LRM, RLM, LRE..RLO, LRI..PDI).
+func isBidiControl(r rune) bool {
+	return r == '\u200E' || r == '\u200F' ||
+		(r >= '\u202A' && r <= '\u202E') ||
+		(r >= '\u2066' && r <= '\u2069')
 }
 
 // withServerMsg appends the server message (if non-empty) to a user-facing guidance string.
@@ -213,11 +227,99 @@ func (c *Client) send(method, path string, body interface{}) (*http.Response, er
 		fmt.Fprintf(c.DebugWriter, "← %d %s (%s)\n", resp.StatusCode, http.StatusText(resp.StatusCode), time.Since(start).Truncate(time.Millisecond))
 	}
 
+	c.warnHeaders(resp.Header)
+
 	if resp.StatusCode >= 400 {
 		return nil, decodeAPIError(resp)
 	}
 
 	return resp, nil
+}
+
+// maxWarned is the number of Warning texts warnHeaders remembers. After
+// that, new texts are still written but no longer deduplicated.
+const maxWarned = 64
+
+// warnHeaders writes each warning of the Warning response headers (RFC 9111,
+// for example a deprecation notice) to WarnWriter as "Warning: <text>". The
+// same text is written once per client, so retries do not repeat it. The
+// write happens under warnMu, so lines of concurrent requests do not mix.
+func (c *Client) warnHeaders(h http.Header) {
+	for _, v := range h.Values("Warning") {
+		for _, text := range warningTexts(v) {
+			c.warnOnce(text)
+		}
+	}
+}
+
+func (c *Client) warnOnce(text string) {
+	c.warnMu.Lock()
+	defer c.warnMu.Unlock()
+	if c.warned[text] {
+		return
+	}
+	if c.warned == nil {
+		c.warned = make(map[string]bool)
+	}
+	if len(c.warned) < maxWarned {
+		c.warned[text] = true
+	}
+	c.warnf("Warning: %s\n", text)
+}
+
+// warningTexts returns the warn-texts of a Warning header value. The value
+// is a comma-separated list of warn-code SP warn-agent SP quoted-string
+// [SP warn-date]; a quoted string right after another one is a warn-date
+// and is skipped. Quotes and escapes are removed and each text is sanitized
+// like a server error message. A value without a quoted string is returned
+// as one text.
+func warningTexts(value string) []string {
+	var texts []string
+	afterQuoted := false // the previous token was a quoted string
+	sawQuoted := false
+	for i := 0; i < len(value); {
+		switch value[i] {
+		case '"':
+			var b []byte
+			escaped := false
+			j := i + 1
+			for ; j < len(value); j++ {
+				ch := value[j]
+				if escaped {
+					b = append(b, ch)
+					escaped = false
+				} else if ch == '\\' {
+					escaped = true
+				} else if ch == '"' {
+					break
+				} else {
+					b = append(b, ch)
+				}
+			}
+			if !afterQuoted {
+				if t := sanitizeServerMessage(string(b)); t != "" {
+					texts = append(texts, t)
+				}
+			}
+			sawQuoted = true
+			afterQuoted = true
+			i = j + 1
+		case ' ', '\t':
+			i++
+		case ',':
+			afterQuoted = false
+			i++
+		default:
+			afterQuoted = false
+			i++
+		}
+	}
+	if !sawQuoted {
+		if t := sanitizeServerMessage(value); t != "" {
+			texts = append(texts, t)
+		}
+	}
+	return texts
 }
 
 // decodeAPIError reads an error response, closes its body and returns the
@@ -490,27 +592,6 @@ func (c *Client) GetStack(id string) (*types.StackInstance, error) {
 	return &instance, nil
 }
 
-// GetStackWithServerTime returns a stack instance and the server time from
-// the Date response header (zero when the header is absent or invalid).
-// Callers use the server time to compare against expires_at without
-// depending on the local clock.
-func (c *Client) GetStackWithServerTime(id string) (*types.StackInstance, time.Time, error) {
-	resp, err := c.doWithRetry(http.MethodGet, fmt.Sprintf("/api/v1/stack-instances/%s", id), nil)
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-	defer resp.Body.Close()
-	var instance types.StackInstance
-	if err := json.NewDecoder(resp.Body).Decode(&instance); err != nil {
-		return nil, time.Time{}, fmt.Errorf("decoding response: %w", err)
-	}
-	serverTime, perr := http.ParseTime(resp.Header.Get("Date"))
-	if perr != nil {
-		serverTime = time.Time{}
-	}
-	return &instance, serverTime, nil
-}
-
 // CreateStack creates a new stack instance.
 func (c *Client) CreateStack(req *types.CreateStackRequest) (*types.StackInstance, error) {
 	var created types.StackInstance
@@ -619,12 +700,23 @@ func (c *Client) CloneStack(id string) (*types.StackInstance, error) {
 	return &instance, nil
 }
 
-// ExtendStack sets the TTL of a stack instance to the given number of
-// minutes. The backend sets expires_at to now + minutes and overwrites
-// ttl_minutes, so the new expiry can be earlier than the current one.
+// ExtendStack adds minutes to the expiry of a stack instance. The backend
+// adds the minutes to the current expires_at (or to now when the stack has
+// expired), never makes the expiry earlier and never changes ttl_minutes.
 func (c *Client) ExtendStack(id string, minutes int) (*types.StackInstance, error) {
+	return c.postExtend(id, map[string]int{"minutes": minutes})
+}
+
+// ResetStackTTL sets the TTL of a stack instance to ttlMinutes and the
+// expiry to now + ttlMinutes with the deprecated ttl_minutes body of the
+// extend endpoint. The new expiry can be earlier than the current one. The
+// server answers with a Warning header (see warnHeaders).
+func (c *Client) ResetStackTTL(id string, ttlMinutes int) (*types.StackInstance, error) {
+	return c.postExtend(id, map[string]int{"ttl_minutes": ttlMinutes})
+}
+
+func (c *Client) postExtend(id string, body map[string]int) (*types.StackInstance, error) {
 	var instance types.StackInstance
-	body := map[string]int{"ttl_minutes": minutes}
 	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/extend", id), body, &instance)
 	if err != nil {
 		return nil, err
@@ -697,6 +789,18 @@ func (c *Client) UpdateTemplate(id string, req *types.UpdateTemplateRequest) (*t
 	return &tmpl, nil
 }
 
+// PatchTemplate changes only the template fields that req sets
+// (k8s-stack-manager v0.6.0+). Older servers replace every field with the
+// request values, so use UpdateTemplate with the full record for them.
+func (c *Client) PatchTemplate(id string, req *types.PatchTemplateRequest) (*types.StackTemplate, error) {
+	var tmpl types.StackTemplate
+	err := c.Put(fmt.Sprintf(pathTemplate, id), req, &tmpl)
+	if err != nil {
+		return nil, err
+	}
+	return &tmpl, nil
+}
+
 // CloneTemplate clones a stack template by ID.
 func (c *Client) CloneTemplate(id string, req *types.CloneTemplateRequest) (*types.StackTemplate, error) {
 	var tmpl types.StackTemplate
@@ -715,6 +819,24 @@ func (c *Client) PublishTemplate(id string) (*types.StackTemplate, error) {
 		return nil, err
 	}
 	return &tmpl, nil
+}
+
+// PublishTemplateRelease publishes the working copy of a template as a new
+// release (k8s-stack-manager v0.6.0+). req may be nil: the body is then empty
+// and the server uses the version of the working copy. The response tells
+// which version users now get and whether a new version was created. Older
+// servers ignore the body and return only the template.
+func (c *Client) PublishTemplateRelease(id string, req *types.PublishTemplateRequest) (*types.PublishTemplateResponse, error) {
+	var resp types.PublishTemplateResponse
+	var body interface{}
+	if req != nil {
+		body = req
+	}
+	err := c.Post(fmt.Sprintf(pathTemplate+"/publish", id), body, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // UnpublishTemplate unpublishes a stack template by ID.

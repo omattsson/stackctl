@@ -14,9 +14,17 @@
 #    ships in the base image. (`test: ["NONE"]` would disable the check
 #    but then `docker compose up --wait` errors with "no healthcheck
 #    configured" instead of treating "running" as ready.)
+#
+# 3. The default rate limits (RATE_LIMIT=100 req/min, LOGIN_RATE_LIMIT=10
+#    per IP) are for production. The live suite sends all requests from
+#    one IP in a few seconds and hit "rate limit exceeded". Raise both for
+#    CI only.
 services:
   backend:
     volumes: !reset []
+    environment:
+      - RATE_LIMIT=10000
+      - LOGIN_RATE_LIMIT=1000
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health/live"]
       interval: 5s

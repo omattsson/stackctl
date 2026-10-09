@@ -30,6 +30,8 @@ func TestLiveBulk_TemplateRoundTrip(t *testing.T) {
 		tmpl, err := c.CreateTemplate(&types.CreateTemplateRequest{
 			Name:        fmt.Sprintf("%s-bulk-%d", prefix, i),
 			Description: "live-test bulk fixture",
+			// k8s-stack-manager v0.6.0+ needs a version to publish.
+			Version: "1.0.0",
 		})
 		require.NoError(t, err, "create template %d", i)
 		ids = append(ids, tmpl.ID)

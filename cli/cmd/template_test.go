@@ -834,11 +834,17 @@ func TestTemplateUpdateCmd_WithNameFlag(t *testing.T) {
 	updated := sampleTemplate()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/templates/10", r.URL.Path)
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(updated)
+			return
+		}
 		require.Equal(t, http.MethodPut, r.Method)
 
 		var body types.UpdateTemplateRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "new-name", body.Name)
+		assert.Equal(t, "Full web app stack", body.Description, "unchanged fields keep their value")
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -849,9 +855,9 @@ func TestTemplateUpdateCmd_WithNameFlag(t *testing.T) {
 	buf := setupStackTestCmd(t, server.URL)
 	templateUpdateCmd.Flags().Set("name", "new-name")
 	t.Cleanup(func() {
-		templateUpdateCmd.Flags().Set("name", "")
-		templateUpdateCmd.Flags().Set("description", "")
-		templateUpdateCmd.Flags().Set("from-file", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "name", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "description", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	})
 
 	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
@@ -874,9 +880,9 @@ func TestTemplateUpdateCmd_JSONOutput(t *testing.T) {
 	printer.Format = output.FormatJSON
 	templateUpdateCmd.Flags().Set("name", "new-name")
 	t.Cleanup(func() {
-		templateUpdateCmd.Flags().Set("name", "")
-		templateUpdateCmd.Flags().Set("description", "")
-		templateUpdateCmd.Flags().Set("from-file", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "name", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "description", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	})
 
 	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
@@ -900,9 +906,9 @@ func TestTemplateUpdateCmd_QuietOutput(t *testing.T) {
 	printer.Quiet = true
 	templateUpdateCmd.Flags().Set("name", "new-name")
 	t.Cleanup(func() {
-		templateUpdateCmd.Flags().Set("name", "")
-		templateUpdateCmd.Flags().Set("description", "")
-		templateUpdateCmd.Flags().Set("from-file", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "name", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "description", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	})
 
 	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
@@ -917,13 +923,13 @@ func TestTemplateUpdateCmd_MissingFlags(t *testing.T) {
 	defer server.Close()
 
 	_ = setupStackTestCmd(t, server.URL)
-	templateUpdateCmd.Flags().Set("name", "")
-	templateUpdateCmd.Flags().Set("description", "")
-	templateUpdateCmd.Flags().Set("from-file", "")
+	resetFlag(t, templateUpdateCmd.Flags(), "name", "")
+	resetFlag(t, templateUpdateCmd.Flags(), "description", "")
+	resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	t.Cleanup(func() {
-		templateUpdateCmd.Flags().Set("name", "")
-		templateUpdateCmd.Flags().Set("description", "")
-		templateUpdateCmd.Flags().Set("from-file", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "name", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "description", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	})
 
 	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
@@ -942,9 +948,9 @@ func TestTemplateUpdateCmd_NotFound(t *testing.T) {
 	_ = setupStackTestCmd(t, server.URL)
 	templateUpdateCmd.Flags().Set("name", "new-name")
 	t.Cleanup(func() {
-		templateUpdateCmd.Flags().Set("name", "")
-		templateUpdateCmd.Flags().Set("description", "")
-		templateUpdateCmd.Flags().Set("from-file", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "name", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "description", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	})
 
 	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"999"})
@@ -1072,7 +1078,7 @@ func TestTemplateUpdateCmd_FromFilePathTraversal(t *testing.T) {
 	_ = setupStackTestCmd(t, "http://127.0.0.1:1")
 	templateUpdateCmd.Flags().Set("from-file", "../../etc/passwd")
 	t.Cleanup(func() {
-		templateUpdateCmd.Flags().Set("from-file", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	})
 
 	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"1"})
@@ -1086,11 +1092,18 @@ func TestTemplateUpdateCmd_FromFile(t *testing.T) {
 	updated := sampleTemplate()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/templates/10", r.URL.Path)
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(updated)
+			return
+		}
 		require.Equal(t, http.MethodPut, r.Method)
 
 		var body types.UpdateTemplateRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "from-file-name", body.Name)
+		assert.Equal(t, "Full web app stack", body.Description, "fields not in the file keep their value")
+		assert.Equal(t, "1", body.Version)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1107,9 +1120,9 @@ func TestTemplateUpdateCmd_FromFile(t *testing.T) {
 	buf := setupStackTestCmd(t, server.URL)
 	templateUpdateCmd.Flags().Set("from-file", tmpFile.Name())
 	t.Cleanup(func() {
-		templateUpdateCmd.Flags().Set("name", "")
-		templateUpdateCmd.Flags().Set("description", "")
-		templateUpdateCmd.Flags().Set("from-file", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "name", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "description", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	})
 
 	err = templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})
@@ -1132,9 +1145,9 @@ func TestTemplateUpdateCmd_YAMLOutput(t *testing.T) {
 	printer.Format = output.FormatYAML
 	templateUpdateCmd.Flags().Set("name", "updated-name")
 	t.Cleanup(func() {
-		templateUpdateCmd.Flags().Set("name", "")
-		templateUpdateCmd.Flags().Set("description", "")
-		templateUpdateCmd.Flags().Set("from-file", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "name", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "description", "")
+		resetFlag(t, templateUpdateCmd.Flags(), "from-file", "")
 	})
 
 	err := templateUpdateCmd.RunE(templateUpdateCmd, []string{"10"})

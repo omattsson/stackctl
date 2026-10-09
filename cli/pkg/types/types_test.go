@@ -216,3 +216,94 @@ func TestStackDefinition_JSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "image:\n  tag: v1", ch.LockedValues)
 	assert.True(t, ch.Required)
 }
+
+func TestStackTemplate_DecodeReleaseFields(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name            string
+		body            string
+		wantReleaseInfo bool
+		wantReleased    string
+		wantCharts      int
+	}{
+		{
+			name: "older server without release fields",
+			body: `{"id":"1","name":"web","version":"1.0.0","is_published":true,"charts":[{"id":"c1","chart_name":"app"}]}`,
+		},
+		{
+			name:            "no release yet",
+			body:            `{"id":"1","name":"web","version":"","is_published":false,"published_version":null,"published_version_id":null,"published_charts":null,"has_unpublished_changes":true}`,
+			wantReleaseInfo: true,
+		},
+		{
+			name:            "released",
+			body:            `{"id":"1","name":"web","version":"1.1.0","published_version":"1.0.0","published_version_id":"v1","published_charts":[{"id":"c1","chart_name":"app","chart_version":"0.1.0"}],"has_unpublished_changes":true}`,
+			wantReleaseInfo: true,
+			wantReleased:    "1.0.0",
+			wantCharts:      1,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var tmpl StackTemplate
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &tmpl))
+			assert.Equal(t, tt.wantReleaseInfo, tmpl.HasUnpublishedChanges != nil)
+			if tt.wantReleased == "" {
+				assert.Nil(t, tmpl.PublishedVersion)
+			} else {
+				require.NotNil(t, tmpl.PublishedVersion)
+				assert.Equal(t, tt.wantReleased, *tmpl.PublishedVersion)
+			}
+			assert.Len(t, tmpl.PublishedCharts, tt.wantCharts)
+		})
+	}
+}
+
+func TestTemplateVersion_CreatedByName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "username", body: `{"id":"v1","created_by":"u-1","created_by_username":"alice"}`, want: "alice"},
+		{name: "older server", body: `{"id":"v1","created_by":"u-1"}`, want: "u-1"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var v TemplateVersion
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &v))
+			assert.Equal(t, tt.want, v.CreatedByName())
+		})
+	}
+}
+
+func TestTemplateVersionDiff_DecodeOldAndNewSides(t *testing.T) {
+	t.Parallel()
+	var oldDiff TemplateVersionDiff
+	require.NoError(t, json.Unmarshal([]byte(`{"left":{"version":"1.0.0","snapshot":{"template":{"name":"w"},"charts":[]}},"right":{"version":"1.1.0","snapshot":{"template":{"name":"w"},"charts":[]}},"chart_diffs":[]}`), &oldDiff))
+	assert.Equal(t, "1.0.0", oldDiff.Left.Version)
+	assert.Nil(t, oldDiff.Left.CreatedAt)
+	assert.False(t, oldDiff.Right.IsWorkingCopy)
+
+	var newDiff TemplateVersionDiff
+	require.NoError(t, json.Unmarshal([]byte(`{"left":{"id":"v1","version":"1.0.0","created_by":"u-1","created_by_username":"alice","created_at":"2026-01-02T03:04:05Z","is_working_copy":false,"snapshot":{"schema_version":1,"template":{"name":"w"},"charts":[{"chart_name":"app","repo_url":"r","chart_version":"0.1.0","id":"c1"}]}},"right":{"id":"working","version":"1.1.0","created_at":"2026-01-03T00:00:00Z","is_working_copy":true,"snapshot":{"schema_version":1,"template":{"name":"w"},"charts":[]}},"chart_diffs":[{"chart_name":"app","change_type":"modified","has_differences":true,"left_chart_version":"0.1.0","right_chart_version":"0.2.0"}]}`), &newDiff))
+	assert.Equal(t, "alice", newDiff.Left.CreatedByUsername)
+	require.NotNil(t, newDiff.Left.CreatedAt)
+	assert.Equal(t, 1, newDiff.Left.Snapshot.SchemaVersion)
+	assert.Equal(t, "0.1.0", newDiff.Left.Snapshot.Charts[0].ChartVersion)
+	assert.True(t, newDiff.Right.IsWorkingCopy)
+	assert.Equal(t, TemplateVersionWorkingCopy, newDiff.Right.ID)
+	assert.Equal(t, "0.2.0", newDiff.ChartDiffs[0].RightChartVersion)
+}
+
+func TestUpdateTemplateRequest_JSON(t *testing.T) {
+	t.Parallel()
+	data, err := json.Marshal(UpdateTemplateRequest{Name: "web", Version: "1.1.0", DefaultBranch: "main"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"web","version":"1.1.0","default_branch":"main"}`, string(data))
+}

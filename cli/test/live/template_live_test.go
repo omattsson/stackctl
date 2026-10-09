@@ -42,6 +42,8 @@ func TestLiveTemplate_CreateWithInlineCharts(t *testing.T) {
 	created, err := c.CreateTemplate(&types.CreateTemplateRequest{
 		Name:        name,
 		Description: "live-test fixture — safe to delete",
+		// k8s-stack-manager v0.6.0+ needs a version to publish.
+		Version: "1.0.0",
 		Charts: []types.ChartConfig{
 			{
 				ChartName:       "noop-a",
@@ -111,6 +113,7 @@ func TestLiveTemplate_PublishLifecycle(t *testing.T) {
 	tmpl, err := c.CreateTemplate(&types.CreateTemplateRequest{
 		Name:        prefix + "-publish",
 		Description: "live-test publish fixture",
+		Version:     "1.0.0",
 	})
 	require.NoError(t, err)
 	deleteTemplateIfExists(t, c, tmpl.ID)
