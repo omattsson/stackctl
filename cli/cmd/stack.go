@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1499,6 +1501,30 @@ which the backend WS handler also accepts. API keys are sent as
 X-API-Key but the backend WS endpoint currently only honours JWTs;
 operators using --api-key should expect a 401.
 
+Session end: when the server closes the connection with close code 1008,
+the watch stops with a message on stderr and a non-zero exit code.
+  - "session revoked": the server ended the session after a delete, a
+    disable, a password reset or a role change of the user, or after a
+    logout or logout-all. Log in again.
+  - "token expired": the access token expired. With a username and
+    password login (refresh token), the watch renews the token and
+    connects again, at most once in 30 seconds. With --id it then reads
+    the status of each pending instance, so a terminal status during the
+    reconnect is not lost. An SSO login has no refresh token: the watch
+    stops.
+A long watch can end at the idle limit of the session (server setting
+SESSION_IDLE_TIMEOUT, 30 minutes by default): WebSocket traffic and token
+renewal do not count as activity. Then the renewal fails and the watch
+stops.
+
+Connection loss: with --id, when the connection ends for another reason
+before every listed instance reports a terminal status, the watch stops
+with "connection lost before all instances reached a terminal status" and
+a non-zero exit code. It does not reconnect: events during the gap would
+be lost, and a missed terminal event would make the watch wait forever.
+Run 'stackctl stack status' to see the current status. Without --id, a
+lost connection writes a note to stderr and the exit code is 0.
+
 Ctrl-C exits cleanly with no orphan goroutines.
 
 Examples:
@@ -1559,32 +1585,98 @@ Examples:
 		ctx, stop := signal.NotifyContext(parentCtx, os.Interrupt)
 		defer stop()
 
-		events, err := c.WatchEvents(ctx, client.WatchFilter{
+		filter := client.WatchFilter{
 			InstanceIDs: normIDs,
 			Status:      statusFilter,
-		})
-		if err != nil {
-			return err
+		}
+		var failedIDs []string
+		// handle prints one event and records the terminal status of a
+		// pending instance. It returns true when no instance is pending.
+		handle := func(ev types.WatchEvent) (bool, error) {
+			if err := printWatchEvent(ev); err != nil {
+				return false, err
+			}
+			if !idMode || !pending[ev.InstanceID] || !stackWatchTerminalStatuses[ev.Status] {
+				return false, nil
+			}
+			if stackWatchFailedStatuses[ev.Status] {
+				failedIDs = append(failedIDs, ev.InstanceID)
+			}
+			delete(pending, ev.InstanceID)
+			return len(pending) == 0, nil
 		}
 
-		var failedIDs []string
-		for ev := range events {
-			if err := printWatchEvent(ev); err != nil {
+		var lastReconnect time.Time
+		reconnected := false
+	watch:
+		for {
+			stream, err := c.Watch(ctx, filter)
+			if err != nil {
+				if ctx.Err() != nil {
+					break // Ctrl-C
+				}
 				return err
 			}
-			if !idMode {
-				continue
-			}
-			if stackWatchTerminalStatuses[ev.Status] {
-				if stackWatchFailedStatuses[ev.Status] {
-					failedIDs = append(failedIDs, ev.InstanceID)
-				}
-				delete(pending, ev.InstanceID)
-				if len(pending) == 0 {
+
+			// Events during the renew and dial gap are lost: read the
+			// status of each pending instance after the reconnect.
+			if reconnected && idMode {
+				done, err := watchCatchUp(ctx, c, pending, handle, cmd.ErrOrStderr())
+				if err != nil || done {
 					stop()
-					break
+					drainWatchEvents(stream.Events)
+					if err != nil {
+						return err
+					}
+					break watch
 				}
 			}
+
+			for ev := range stream.Events {
+				done, err := handle(ev)
+				if err != nil || done {
+					stop()
+					drainWatchEvents(stream.Events)
+					if err != nil {
+						return err
+					}
+					break watch
+				}
+			}
+			if ctx.Err() != nil {
+				break // Ctrl-C
+			}
+
+			// The server closed the connection with close code 1008.
+			var closeErr *client.WSClosedError
+			if !errors.As(stream.Err(), &closeErr) {
+				// Any other end of the stream. A lost connection with
+				// pending instances is an error: a reconnect could miss the
+				// terminal event and wait forever.
+				if idMode && len(pending) > 0 {
+					return fmt.Errorf("connection lost before all instances reached a terminal status (pending: %s)", strings.Join(sortedKeys(pending), ", "))
+				}
+				if !idMode {
+					fmt.Fprintln(cmd.ErrOrStderr(), "Note: the connection to the server ended.")
+				}
+				break
+			}
+			if !closeErr.TokenExpired() || time.Since(lastReconnect) < stackWatchMinReconnect {
+				return closeErr
+			}
+			renewed, rerr := c.RenewSession()
+			if ctx.Err() != nil {
+				break // Ctrl-C during the renewal
+			}
+			if rerr != nil {
+				return fmt.Errorf("%w (session renewal failed: %v)", closeErr, rerr)
+			}
+			if !renewed {
+				return closeErr
+			}
+			lastReconnect = time.Now()
+			reconnected = true
+			fmt.Fprintln(cmd.ErrOrStderr(), "Note: the access token expired. Reconnecting with a renewed token.")
 		}
 
 		if len(failedIDs) > 0 {
@@ -1592,6 +1684,60 @@ Examples:
 		}
 		return nil
 	},
+}
+
+// stackWatchMinReconnect is the minimum time between two reconnects of
+// `stack watch` after a "token expired" close. A second close within this
+// time ends the watch, so a server that rejects the renewed token cannot
+// cause a reconnect loop.
+var stackWatchMinReconnect = 30 * time.Second
+
+// watchCatchUp reads the status of each pending instance (GET
+// /api/v1/stack-instances/:id) and passes a terminal status to handle as an
+// event. A failed read writes a warning to warn and the instance stays
+// pending. It returns true when no instance is pending.
+func watchCatchUp(ctx context.Context, c *client.Client, pending map[string]bool, handle func(types.WatchEvent) (bool, error), warn io.Writer) (bool, error) {
+	for _, id := range sortedKeys(pending) {
+		if ctx.Err() != nil {
+			return false, nil
+		}
+		inst, err := c.GetStack(id)
+		if err != nil {
+			fmt.Fprintf(warn, "Warning: could not read the status of instance %s: %v\n", id, err)
+			continue
+		}
+		if !stackWatchTerminalStatuses[inst.Status] {
+			continue
+		}
+		done, err := handle(types.WatchEvent{
+			Type:         "deployment.status",
+			InstanceID:   id,
+			Status:       inst.Status,
+			ErrorMessage: inst.ErrorMessage,
+			Timestamp:    time.Now().UTC(),
+		})
+		if err != nil || done {
+			return done, err
+		}
+	}
+	return false, nil
+}
+
+// sortedKeys returns the keys of m in sorted order.
+func sortedKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// drainWatchEvents reads the event channel until it closes, so the reader
+// goroutine of the stream can exit after the context is cancelled.
+func drainWatchEvents(events <-chan types.WatchEvent) {
+	for range events {
+	}
 }
 
 // printWatchEvent renders one event in the operator's chosen output mode.

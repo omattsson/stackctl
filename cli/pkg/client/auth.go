@@ -108,6 +108,25 @@ func (c *Client) EnsureFreshToken() (string, error) {
 	return c.currentToken(), nil
 }
 
+// RenewSession renews the login session now, also when the stored expiry is
+// not near. Use it when the server reports that the access token expired,
+// for example a WebSocket close with the reason "token expired". It returns
+// false (and no error) when the client cannot renew: an API key, no stored
+// session, or a session without a refresh token (SSO login, old token
+// file). A 401 *APIError means that the server ended the session.
+func (c *Client) RenewSession() (bool, error) {
+	if c.Tokens == nil || c.APIKey != "" {
+		return false, nil
+	}
+	if err := c.renew(c.currentToken()); err != nil {
+		if errors.Is(err, errNoRefreshToken) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // canRenew reports whether a request to path can use session renewal.
 func (c *Client) canRenew(path string) bool {
 	if c.Tokens == nil || c.APIKey != "" {

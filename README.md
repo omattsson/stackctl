@@ -173,6 +173,7 @@ stackctl stack deploy my-app
 # Monitor
 stackctl stack status my-app
 stackctl stack logs my-app
+stackctl stack watch --id 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d
 
 # Lifecycle
 stackctl stack stop my-app
@@ -198,6 +199,15 @@ stackctl stack rollback my-app --target-log <log-id>
 `stack extend --minutes N` adds N minutes to the current expiry, or to now when the stack has expired. It never makes the expiry earlier and does not change the TTL of the stack. The server caps the new expiry at 30 days from now. `--minutes` needs k8s-stack-manager v0.6.0 or later. An older server ignores `--minutes` and resets the expiry to now + TTL. stackctl detects this: it prints the old and the new expiry, then fails (exit code 1) with "the server did not add N minutes ... upgrade k8s-stack-manager to v0.6.0 or later". `--reset-ttl M` (deprecated) keeps the old behaviour: the TTL becomes M minutes and the expiry now + M minutes, which can be earlier. `--yes` has no effect and is accepted for older scripts.
 
 List commands (`stack list`, `definition list`, `template list`) show one page: 25 items by default, `--page-size` up to 100. When the server has more items, the command writes `Showing X of TOTAL. Use --page/--page-size to see more.` to stderr, so `-q` and `-o json` output stays clean. `-q` without `--page` prints the IDs of all pages, so `stackctl stack list --mine -q | xargs ...` gets every ID. k8s-stack-manager v0.7.0 also pages `--mine` and name queries; older servers return every match on one page. When a name matches more than one stack or definition, the error lists the first page and the number of matches.
+
+`stack watch` stops with a non-zero exit code when the server closes the WebSocket connection with close code 1008. It writes the reason to stderr:
+
+- `session revoked`: the server ended the session after a delete, a disable, a password reset or a role change of the user, or after a logout or logout-all. The message is `Connection closed by the server: session revoked. Log in again.`
+- `token expired`: the access token expired. With a username/password login, the watch renews the token and connects again, at most once in 30 seconds. With `--id` it then reads the status of each pending instance, so a terminal status during the reconnect is not lost. An SSO login has no refresh token, so the watch stops: run the command again, and run `stackctl login` if it fails. A failed renewal also stops the watch.
+
+A long watch can end at the idle limit of the session (server setting `SESSION_IDLE_TIMEOUT`, 30 minutes by default), because WebSocket traffic and token renewal do not count as activity. Then the renewal fails and the watch stops.
+
+With `--id`, a connection that ends for another reason before every listed instance reaches a terminal status stops the watch with `connection lost before all instances reached a terminal status` and a non-zero exit code. The watch does not reconnect, because a missed terminal event would make it wait forever. Without `--id`, a lost connection writes a note to stderr and the exit code is 0.
 
 stackctl writes any `Warning` header from the API (for example a deprecation notice) to stderr as `Warning: <text>`, for every command.
 
@@ -362,6 +372,28 @@ stackctl orphaned list -o json
 # Delete an orphaned namespace
 stackctl orphaned delete stack-old-namespace
 ```
+
+### Users
+
+User management needs the admin role. Commands take the user ID; `set-role` also takes the username.
+
+```bash
+stackctl user list
+stackctl user disable <id>
+stackctl user enable <id>
+stackctl user reset-password <id> --password-stdin
+stackctl user delete <id>
+
+# Change the role of a local user: user, devops or admin
+stackctl user set-role alice devops
+```
+
+`user set-role` needs k8s-stack-manager v0.8.0 or later. It prints `Role changed from user to devops. The user must log in again.` or `Role unchanged.` A change ends the sessions of the user; the API keys of the user stay valid and use the new role. The server refuses:
+
+- the role of an SSO user (409): the identity provider sets it at each login;
+- your own role (403);
+- a change when you are no longer an enabled admin (403);
+- removing the admin role from the last enabled admin (409).
 
 ### Scripting Examples
 

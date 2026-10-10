@@ -552,3 +552,175 @@ func TestAuthRegisterCmd_APIErrorMatrix(t *testing.T) {
 		})
 	}
 }
+
+// ---------- user set-role ----------
+
+// setRoleServer answers GET /api/v1/users with sampleUsers and PUT
+// /api/v1/users/:id/role with the given status and body. It records the ID
+// and the role of the PUT.
+func setRoleServer(t *testing.T, status int, body interface{}) (*httptest.Server, *string, *string) {
+	t.Helper()
+	var gotID, gotRole string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/users":
+			require.NoError(t, json.NewEncoder(w).Encode(sampleUsers()))
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/v1/users/") && strings.HasSuffix(r.URL.Path, "/role"):
+			gotID = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/users/"), "/role")
+			var req types.ChangeRoleRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			gotRole = req.Role
+			w.WriteHeader(status)
+			require.NoError(t, json.NewEncoder(w).Encode(body))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return server, &gotID, &gotRole
+}
+
+func TestUserSetRoleCmd_Changed(t *testing.T) {
+	server, gotID, gotRole := setRoleServer(t, http.StatusOK,
+		types.ChangeRoleResponse{ID: "u2", OldRole: "user", NewRole: "devops", Changed: true, Message: "Role changed"})
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	require.NoError(t, userSetRoleCmd.RunE(userSetRoleCmd, []string{"svc-ci", "DevOps"}))
+
+	assert.Equal(t, "u2", *gotID, "username resolved to the ID")
+	assert.Equal(t, "devops", *gotRole, "role is sent in lower case")
+	assert.Equal(t, "Role changed from user to devops. The user must log in again.\n", buf.String())
+}
+
+func TestUserSetRoleCmd_Unchanged(t *testing.T) {
+	server, _, _ := setRoleServer(t, http.StatusOK,
+		types.ChangeRoleResponse{ID: "u1", OldRole: "admin", NewRole: "admin", Changed: false, Message: "Role unchanged"})
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	require.NoError(t, userSetRoleCmd.RunE(userSetRoleCmd, []string{"alice", "admin"}))
+	assert.Equal(t, "Role unchanged.\n", buf.String())
+}
+
+func TestUserSetRoleCmd_OutputModes(t *testing.T) {
+	resp := types.ChangeRoleResponse{ID: "u2", OldRole: "user", NewRole: "admin", Changed: true, Message: "Role changed"}
+
+	t.Run("json", func(t *testing.T) {
+		server, _, _ := setRoleServer(t, http.StatusOK, resp)
+		defer server.Close()
+		buf := setupStackTestCmd(t, server.URL)
+		printer.Format = output.FormatJSON
+
+		require.NoError(t, userSetRoleCmd.RunE(userSetRoleCmd, []string{"u2", "admin"}))
+		var got types.ChangeRoleResponse
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+		assert.Equal(t, resp, got)
+	})
+
+	t.Run("yaml", func(t *testing.T) {
+		server, _, _ := setRoleServer(t, http.StatusOK, resp)
+		defer server.Close()
+		buf := setupStackTestCmd(t, server.URL)
+		printer.Format = output.FormatYAML
+
+		require.NoError(t, userSetRoleCmd.RunE(userSetRoleCmd, []string{"u2", "admin"}))
+		var got types.ChangeRoleResponse
+		require.NoError(t, yaml.Unmarshal(buf.Bytes(), &got))
+		assert.Equal(t, resp, got)
+	})
+
+	t.Run("quiet", func(t *testing.T) {
+		server, _, _ := setRoleServer(t, http.StatusOK, resp)
+		defer server.Close()
+		buf := setupStackTestCmd(t, server.URL)
+		printer.Quiet = true
+
+		require.NoError(t, userSetRoleCmd.RunE(userSetRoleCmd, []string{"u2", "admin"}))
+		assert.Equal(t, "u2\n", buf.String())
+	})
+}
+
+func TestUserSetRoleCmd_UUIDSkipsLookup(t *testing.T) {
+	const id = "6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+	var listCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			listCalls++
+		}
+		require.Equal(t, "/api/v1/users/"+id+"/role", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(types.ChangeRoleResponse{ID: id, OldRole: "user", NewRole: "admin", Changed: true}))
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	require.NoError(t, userSetRoleCmd.RunE(userSetRoleCmd, []string{id, "admin"}))
+	assert.Equal(t, 0, listCalls)
+}
+
+func TestUserSetRoleCmd_Errors(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		status  int
+		message string
+		want    []string
+	}{
+		{"invalid role", []string{"alice", "owner"}, 0, "", []string{`invalid role "owner"`, "user, devops, admin"}},
+		{"unknown user", []string{"nobody", "user"}, 0, "", []string{`no user found with ID or username "nobody"`}},
+		{"own role", []string{"alice", "user"}, http.StatusForbidden, "Cannot change your own role",
+			[]string{"Permission denied. (server: Cannot change your own role)", "Ask another admin"}},
+		{"not admin", []string{"svc-ci", "admin"}, http.StatusForbidden, "Admin role required",
+			[]string{"Permission denied. (server: Admin role required)"}},
+		{"sso user", []string{"svc-ci", "admin"}, http.StatusConflict, "Role is managed by the identity provider",
+			[]string{"Conflict: Role is managed by the identity provider", "change the role there"}},
+		{"last admin", []string{"alice", "user"}, http.StatusConflict, "The last enabled admin cannot be demoted, disabled or deleted",
+			[]string{"Conflict: The last enabled admin cannot be demoted", "Give the admin role to another user first"}},
+		{"bad request", []string{"svc-ci", "admin"}, http.StatusBadRequest, "Role must be one of: user, devops, admin",
+			[]string{"Role must be one of: user, devops, admin"}},
+		{"user not found", []string{"u2", "admin"}, http.StatusNotFound, "User not found",
+			[]string{"Resource not found: User not found"}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			server, _, _ := setRoleServer(t, tt.status, types.ErrorResponse{Error: tt.message})
+			defer server.Close()
+			_ = setupStackTestCmd(t, server.URL)
+
+			err := userSetRoleCmd.RunE(userSetRoleCmd, tt.args)
+			require.Error(t, err)
+			for _, w := range tt.want {
+				assert.Contains(t, err.Error(), w)
+			}
+		})
+	}
+}
+
+func TestUserSetRoleCmd_OldServer(t *testing.T) {
+	// Servers before v0.8.0 have no role route: Gin answers a plain 404.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "404 page not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+	_ = setupStackTestCmd(t, server.URL)
+
+	err := userSetRoleCmd.RunE(userSetRoleCmd, []string{"6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "admin"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "upgrade k8s-stack-manager to v0.8.0 or later")
+}
+
+func TestUserSetRoleCmd_ArgCount(t *testing.T) {
+	assert.Error(t, userSetRoleCmd.Args(userSetRoleCmd, []string{"alice"}))
+	assert.NoError(t, userSetRoleCmd.Args(userSetRoleCmd, []string{"alice", "admin"}))
+}
+
+func TestResolveUserID_CaseInsensitiveUsername(t *testing.T) {
+	server, gotID, _ := setRoleServer(t, http.StatusOK, types.ChangeRoleResponse{ID: "u1", Changed: false})
+	defer server.Close()
+	_ = setupStackTestCmd(t, server.URL)
+
+	require.NoError(t, userSetRoleCmd.RunE(userSetRoleCmd, []string{"ALICE", "admin"}))
+	assert.Equal(t, "u1", *gotID)
+}

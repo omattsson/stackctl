@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
@@ -17,7 +20,7 @@ var userCmd = &cobra.Command{
 
 All user-management commands require admin role. The CLI surface intentionally
 omits a generic 'update' verb because the backend only exposes the
-disable/enable/reset-password operations rather than a full PUT.`,
+disable/enable/reset-password/set-role operations rather than a full PUT.`,
 }
 
 var userListCmd = &cobra.Command{
@@ -180,6 +183,105 @@ Examples:
 	},
 }
 
+// validRoles lists the roles that `user set-role` accepts.
+var validRoles = []string{"user", "devops", "admin"}
+
+var userSetRoleCmd = &cobra.Command{
+	Use:   "set-role <user> <role>",
+	Short: "Change the role of a local user (admin only)",
+	Long: `Change the role of a local user account. Use the user ID or the username.
+The role is one of: user, devops, admin.
+
+Rules:
+  - Only an admin can change a role.
+  - Only local users. The identity provider sets the role of an SSO user
+    at each login. The server refuses the change (409).
+  - You cannot change your own role (403).
+  - The last enabled admin cannot lose the admin role (409).
+  - A change ends the sessions of the user: the user must log in again.
+    The API keys of the user stay valid and use the new role at once.
+  - The same role again changes nothing. The sessions stay valid.
+
+Needs k8s-stack-manager v0.8.0 or later.
+
+Examples:
+  stackctl user set-role alice devops
+  stackctl user set-role 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d admin
+  stackctl user set-role alice user -o json`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		role := strings.ToLower(strings.TrimSpace(args[1]))
+		if !isValidRole(role) {
+			return fmt.Errorf("invalid role %q: use one of %s", args[1], strings.Join(validRoles, ", "))
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		id, err := resolveUserID(c, args[0])
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.ChangeUserRole(id, role)
+		if err != nil {
+			return setRoleError(err, id)
+		}
+
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, resp.ID)
+			return nil
+		}
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(resp)
+		case output.FormatYAML:
+			return printer.PrintYAML(resp)
+		default:
+			if !resp.Changed {
+				printer.PrintMessage("Role unchanged.")
+				return nil
+			}
+			printer.PrintMessage("Role changed from %s to %s. The user must log in again.", resp.OldRole, resp.NewRole)
+			return nil
+		}
+	},
+}
+
+func isValidRole(role string) bool {
+	for _, r := range validRoles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+// setRoleError adds the next step to the server errors of a role change.
+// The server message stays in the text.
+func setRoleError(err error, id string) error {
+	var apiErr *client.APIError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	msg := strings.ToLower(apiErr.Message)
+	switch {
+	case apiErr.StatusCode == http.StatusConflict && strings.Contains(msg, "identity provider"):
+		return fmt.Errorf("%s. The identity provider sets the role of an SSO user at each login; change the role there", apiErr.Error())
+	case apiErr.StatusCode == http.StatusConflict && strings.Contains(msg, "last enabled admin"):
+		return fmt.Errorf("%s. Give the admin role to another user first", apiErr.Error())
+	case apiErr.StatusCode == http.StatusForbidden && strings.Contains(msg, "own role"):
+		return fmt.Errorf("%s. Ask another admin to change your role", apiErr.Error())
+	case apiErr.StatusCode == http.StatusNotFound && !strings.Contains(msg, "user"):
+		// Gin answers an unknown route with a plain 404 ("Not Found"); a
+		// missing user gives "User not found".
+		return fmt.Errorf("the server does not support role changes (404 for user %s): upgrade k8s-stack-manager to v0.8.0 or later", id)
+	}
+	return err
+}
+
 // userToggle backs the user disable/enable commands. label is "Disabled"
 // or "Enabled" (used verbatim in the success message); apply is the client
 // method to invoke.
@@ -240,6 +342,7 @@ func init() {
 	userCmd.AddCommand(userDisableCmd)
 	userCmd.AddCommand(userEnableCmd)
 	userCmd.AddCommand(userResetPasswordCmd)
+	userCmd.AddCommand(userSetRoleCmd)
 
 	rootCmd.AddCommand(userCmd)
 }

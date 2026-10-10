@@ -1547,6 +1547,22 @@ func (c *Client) ResetUserPassword(id, password string) error {
 	return c.Put(fmt.Sprintf("/api/v1/users/%s/password", id), &types.ResetPasswordRequest{Password: password}, nil)
 }
 
+// ChangeUserRole sets the role of a local user account. Admin-only. Needs
+// k8s-stack-manager v0.8.0 or later. The backend returns 403 for the own
+// role or when the caller is no longer an enabled admin, 409 for an SSO user
+// (the identity provider sets the role) or for the last enabled admin, and
+// 400 for a role other than user, devops or admin. A change ends the
+// sessions of the user.
+//
+// @see PUT /api/v1/users/:id/role
+func (c *Client) ChangeUserRole(id, role string) (*types.ChangeRoleResponse, error) {
+	var resp types.ChangeRoleResponse
+	if err := c.Put(fmt.Sprintf("/api/v1/users/%s/role", url.PathEscape(id)), &types.ChangeRoleRequest{Role: role}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ListAPIKeys returns every API key configured for the given user. Callers
 // must be the target user OR have the admin role; the backend returns 403
 // otherwise. The raw key value is NEVER returned by this endpoint — only
