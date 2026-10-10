@@ -70,17 +70,57 @@ func policyCloseError(err error) *WSClosedError {
 	return nil
 }
 
+// terminalStatuses are the stack instance statuses that end an operation
+// (deploy, stop, clean, rollback). k8s-stack-manager sets "running" after a
+// deploy, "stopped" after a stop, "draft" after a clean, "error" after a
+// failure and "partial" when some charts deployed and others failed.
+// "failed" is not a server status; stackctl accepts it for compatibility.
 var terminalStatuses = map[string]bool{
 	"running": true,
 	"stopped": true,
-	"error":   true,
 	"draft":   true,
+	"error":   true,
+	"partial": true,
+	"failed":  true,
+}
+
+// failedStatuses are the terminal statuses of a failed operation.
+var failedStatuses = map[string]bool{
+	"error":   true,
+	"partial": true,
+	"failed":  true,
+}
+
+// IsTerminalStatus reports whether status ends an operation on a stack
+// instance (running, stopped, draft, error, partial, failed).
+func IsTerminalStatus(status string) bool {
+	return terminalStatuses[status]
+}
+
+// IsFailedStatus reports whether status is a terminal status of a failed
+// operation (error, partial, failed).
+func IsFailedStatus(status string) bool {
+	return failedStatuses[status]
+}
+
+// StreamOptions changes the behaviour of StreamDeploymentLogsWithOptions.
+type StreamOptions struct {
+	// AfterSubscribe runs after the connection is open and the subscribe
+	// message is sent, before the first read. A non-nil result ends the
+	// stream with that result. Use it to read the instance status after a
+	// reconnect, so a terminal status during the reconnect gap counts.
+	AfterSubscribe func(ctx context.Context) (*types.StreamResult, error)
 }
 
 // StreamDeploymentLogs connects to the backend WebSocket and streams deployment
 // log lines for the given instance to w. It blocks until a terminal status is
 // received, the context is cancelled, or the connection drops.
 func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w io.Writer, warnWriter io.Writer) (*types.StreamResult, error) {
+	return c.StreamDeploymentLogsWithOptions(ctx, instanceID, w, warnWriter, StreamOptions{})
+}
+
+// StreamDeploymentLogsWithOptions is StreamDeploymentLogs with options.
+func (c *Client) StreamDeploymentLogsWithOptions(ctx context.Context, instanceID string, w io.Writer, warnWriter io.Writer, opts StreamOptions) (*types.StreamResult, error) {
 	conn, err := c.dialWS(ctx, "/ws", warnWriter)
 	if err != nil {
 		return nil, err
@@ -116,6 +156,13 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 		}
 	}()
 	defer close(done)
+
+	if opts.AfterSubscribe != nil {
+		result, err := opts.AfterSubscribe(ctx)
+		if err != nil || result != nil {
+			return result, err
+		}
+	}
 
 	for {
 		_, message, err := conn.ReadMessage()

@@ -19,8 +19,8 @@ import (
 
 func sampleOrphanedNamespaces() []types.OrphanedNamespace {
 	return []types.OrphanedNamespace{
-		{Namespace: "stack-old-app", Cluster: "dev-cluster", CreatedAt: "2025-06-01T10:00:00Z"},
-		{Namespace: "stack-leftover", Cluster: "dev-cluster", CreatedAt: "2025-05-20T08:00:00Z"},
+		{Name: "stack-old-app", Phase: "Active", Managed: true, CreatedAt: "2025-06-01T10:00:00Z", HelmReleases: []string{}},
+		{Name: "stack-leftover", Phase: "Active", CreatedAt: "2025-05-20T08:00:00Z", HelmReleases: []string{}},
 	}
 }
 
@@ -29,8 +29,9 @@ func sampleOrphanedNamespaces() []types.OrphanedNamespace {
 func TestOrphanedListCmd_TableOutput(t *testing.T) {
 	ns := sampleOrphanedNamespaces()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/orphaned-namespaces", r.URL.Path)
+		require.Equal(t, "/api/v1/admin/orphaned-namespaces", r.URL.Path)
 		require.Equal(t, http.MethodGet, r.Method)
+		require.Empty(t, r.URL.Query().Get("details"))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ns)
 	}))
@@ -43,7 +44,8 @@ func TestOrphanedListCmd_TableOutput(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "NAMESPACE")
-	assert.Contains(t, out, "CLUSTER")
+	assert.Contains(t, out, "MANAGED")
+	assert.NotContains(t, out, "RELEASES")
 	assert.Contains(t, out, "stack-old-app")
 	assert.Contains(t, out, "stack-leftover")
 }
@@ -65,7 +67,9 @@ func TestOrphanedListCmd_JSONOutput(t *testing.T) {
 	var result []types.OrphanedNamespace
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
 	assert.Len(t, result, 2)
-	assert.Equal(t, "stack-old-app", result[0].Namespace)
+	assert.Equal(t, "stack-old-app", result[0].Name)
+	assert.True(t, result[0].Managed)
+	assert.Contains(t, buf.String(), `"name": "stack-old-app"`)
 }
 
 func TestOrphanedListCmd_QuietOutput(t *testing.T) {
@@ -121,8 +125,9 @@ func TestOrphanedDeleteCmd_WithYesFlag(t *testing.T) {
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		require.Equal(t, "/api/v1/orphaned-namespaces/stack-old-app", r.URL.Path)
+		require.Equal(t, "/api/v1/admin/orphaned-namespaces/stack-old-app", r.URL.Path)
 		require.Equal(t, http.MethodDelete, r.Method)
+		require.Empty(t, r.URL.RawQuery)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
@@ -220,4 +225,111 @@ func TestOrphanedDeleteCmd_QuietOutput(t *testing.T) {
 	err := orphanedDeleteCmd.RunE(orphanedDeleteCmd, []string{"stack-old-app"})
 	require.NoError(t, err)
 	assert.Equal(t, "stack-old-app\n", buf.String())
+}
+
+func TestOrphanedListCmd_Details(t *testing.T) {
+	ns := []types.OrphanedNamespace{{
+		Name: "stack-old-app", Phase: "Active", CreatedAt: "2025-06-01T10:00:00Z",
+		HelmReleases:   []string{"api", "web"},
+		ResourceCounts: &types.ResourceCounts{Pods: 3, Deployments: 2, Services: 1},
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/admin/orphaned-namespaces", r.URL.Path)
+		require.Equal(t, "true", r.URL.Query().Get("details"))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ns)
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	require.NoError(t, orphanedListCmd.Flags().Set("details", "true"))
+	t.Cleanup(func() { orphanedListCmd.Flags().Set("details", "false") })
+
+	require.NoError(t, orphanedListCmd.RunE(orphanedListCmd, []string{}))
+	out := buf.String()
+	assert.Contains(t, out, "RELEASES")
+	assert.Contains(t, out, "api,web")
+	assert.Contains(t, out, "no")
+}
+
+func TestOrphanedDeleteCmd_ConfirmSendsQuery(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		require.Equal(t, "/api/v1/admin/orphaned-namespaces/stack-other", r.URL.Path)
+		require.Equal(t, "stack-other", r.URL.Query().Get("confirm"))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"message":"Namespace \"stack-other\" deleted successfully"}`))
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	orphanedDeleteCmd.Flags().Set("yes", "true")
+	require.NoError(t, orphanedDeleteCmd.Flags().Set("confirm", "stack-other"))
+	t.Cleanup(func() {
+		orphanedDeleteCmd.Flags().Set("yes", "false")
+		orphanedDeleteCmd.Flags().Set("confirm", "")
+		orphanedDeleteCmd.Flags().Lookup("confirm").Changed = false
+	})
+
+	require.NoError(t, orphanedDeleteCmd.RunE(orphanedDeleteCmd, []string{"stack-other"}))
+	assert.True(t, called)
+	assert.Contains(t, buf.String(), "Deleted orphaned namespace")
+}
+
+func TestOrphanedDeleteCmd_ConfirmMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("API must not be called when --confirm does not match")
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	orphanedDeleteCmd.Flags().Set("yes", "true")
+	require.NoError(t, orphanedDeleteCmd.Flags().Set("confirm", "stack-othr"))
+	t.Cleanup(func() {
+		orphanedDeleteCmd.Flags().Set("yes", "false")
+		orphanedDeleteCmd.Flags().Set("confirm", "")
+		orphanedDeleteCmd.Flags().Lookup("confirm").Changed = false
+	})
+
+	err := orphanedDeleteCmd.RunE(orphanedDeleteCmd, []string{"stack-other"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--confirm must be the full namespace name")
+}
+
+func TestOrphanedDeleteCmd_UnmanagedConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Empty(t, r.URL.Query().Get("confirm"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Namespace is not managed by k8s-stack-manager. To delete it, set confirm to the full namespace name"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	orphanedDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { orphanedDeleteCmd.Flags().Set("yes", "false") })
+
+	err := orphanedDeleteCmd.RunE(orphanedDeleteCmd, []string{"stack-other"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Conflict: Namespace is not managed by k8s-stack-manager")
+	assert.Contains(t, err.Error(), "stackctl orphaned delete stack-other --confirm stack-other")
+}
+
+func TestOrphanedDeleteCmd_NotOrphanedConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(types.ErrorResponse{Error: "Namespace is not orphaned — a matching stack instance exists"})
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	orphanedDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() { orphanedDeleteCmd.Flags().Set("yes", "false") })
+
+	err := orphanedDeleteCmd.RunE(orphanedDeleteCmd, []string{"stack-app"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Conflict: Namespace is not orphaned")
+	assert.NotContains(t, err.Error(), "--confirm")
 }

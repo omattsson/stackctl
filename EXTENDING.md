@@ -113,6 +113,10 @@ that the user exported in the parent shell is kept.
 | `STACKCTL_INSECURE` | `--insecure` flag, parent shell, or current context `insecure: true` | `1` to skip TLS verification |
 | `STACKCTL_QUIET` | `--quiet` flag | `1` when the user requested quiet output |
 | `STACKCTL_OUTPUT` | `--output` flag | `table` / `json` / `yaml` / a registered custom format |
+| `STACKCTL_NO_COLOR` | `--no-color` flag | `1` when the user disabled colored output |
+| `NO_COLOR` | `--no-color` flag, or parent shell | `1` with `--no-color` ([no-color.org](https://no-color.org) convention for the tools that the plugin runs) |
+| `STACKCTL_DEBUG` | `--debug` flag | `1` when the user requested HTTP debug output |
+| `STACKCTL_CONFIG_DIR` | parent shell, or the config directory that stackctl uses | Directory of `config.yaml` and `tokens/`. A plugin that runs `stackctl` again uses the same files |
 | `HOME`, `PATH`, `LANG`, `AWS_*`, `KUBECONFIG`, … | parent shell | the rest of the user's environment |
 
 > Send `STACKCTL_API_KEY` as `X-API-Key` and `STACKCTL_TOKEN` as
@@ -124,6 +128,28 @@ that the user exported in the parent shell is kept.
 > (AWS_ACCESS_KEY_ID, GITHUB_TOKEN, KUBECONFIG contents, …). Install
 > plugins from sources you trust. This matches the `git`/`kubectl`
 > security model.
+
+`STACKCTL_QUIET`, `STACKCTL_OUTPUT`, `STACKCTL_NO_COLOR` and `STACKCTL_DEBUG`
+are set only when the user gives the flag. Without the flag, a value from
+the parent shell is kept.
+
+### Global flags
+
+The global flags of stackctl (`--output`/`-o`, `--quiet`/`-q`, `--no-color`,
+`--api-url`, `--api-key`, `--insecure`, `--debug`) go **before** the plugin
+name. stackctl reads them and does not pass them to the plugin as
+arguments. The plugin gets their values in the environment variables above.
+
+```bash
+stackctl --no-color -o json refresh-db status my-stack
+# The plugin gets the arguments: status my-stack
+# The plugin gets STACKCTL_NO_COLOR=1, NO_COLOR=1 and STACKCTL_OUTPUT=json
+```
+
+Arguments **after** the plugin name belong to the plugin. stackctl passes
+them unchanged, also when they look like stackctl flags
+(`stackctl refresh-db status my-stack -o json` gives the plugin `-o json`).
+An unknown flag before the plugin name is an error of stackctl.
 
 ### Arguments
 

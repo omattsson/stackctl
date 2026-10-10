@@ -236,7 +236,7 @@ Examples:
 			// keyed by (user_id, event_type) server-side, so EventType is the
 			// stable functional identifier — the UUID `ID` is opaque database
 			// state that changes when a row is recreated and is useless for
-			// scripting ("disable stack.deploy.failed" rather than "disable
+			// scripting ("disable deployment.error" rather than "disable
 			// 7f3c…"). Listed in .coderabbit.yaml alongside the other docu-
 			// mented exceptions (cluster nodes/namespaces, orphaned list).
 			for _, p := range prefs {
@@ -272,13 +272,19 @@ var notificationPrefsSetCmd = &cobra.Command{
 array of preference objects:
 
   [
-    {"event_type": "stack.deploy.failed", "enabled": true, "channel": "in_app"},
-    {"event_type": "stack.deploy.succeeded", "enabled": false}
+    {"event_type": "deployment.error", "enabled": true, "channel": "in_app"},
+    {"event_type": "deployment.success", "enabled": false}
   ]
 
 The "channel" field is optional and defaults to "in_app" server-side.
 An empty array, or any element with an empty event_type, is rejected
 with HTTP 400.
+
+Event types:
+` + notificationEventTypesHelp() + `
+The command writes a warning to stderr for an event type that is not in
+this list, and then sends the request. k8s-stack-manager v0.8.0 and later
+refuse an unknown event type with HTTP 400.
 
 The roundtrip "prefs get -o json | edit | prefs set --from-file -" works
 because GET returns the same shape PUT accepts (with id and user_id
@@ -286,6 +292,7 @@ ignored on the wire). Pass "-" as the filename to read from stdin.
 
 Examples:
   stackctl notification prefs set --from-file prefs.json
+  echo '[{"event_type":"deployment.success","enabled":false}]' | stackctl notification prefs set --from-file -
   stackctl notification prefs get -o json > p.json && stackctl notification prefs set --from-file p.json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -320,6 +327,7 @@ Examples:
 		if len(prefs) == 0 {
 			return fmt.Errorf("at least one preference is required")
 		}
+		warnUnknownEventTypes(cmd.ErrOrStderr(), prefs)
 
 		c, err := newClient()
 		if err != nil {
@@ -348,6 +356,74 @@ Examples:
 			return nil
 		}
 	},
+}
+
+// notificationEventType is one in-app notification event type of
+// k8s-stack-manager.
+type notificationEventType struct {
+	Name        string
+	Description string
+}
+
+// notificationEventTypes are the notification event types of
+// k8s-stack-manager v0.8.0, in the order of notifier.AllEventTypes()
+// (backend/internal/notifier/events.go), the source of truth. Only admin
+// and devops users get the system events. Keep this list in sync with the
+// server.
+var notificationEventTypes = []notificationEventType{
+	{"deployment.success", "Deployment succeeded"},
+	{"deployment.error", "Deployment failed"},
+	{"deployment.partial", "Deployment partly failed"},
+	{"deployment.warning", "Deployment warning (post-deploy step failed)"},
+	{"deployment.stopped", "Stack stopped"},
+	{"deploy.timeout", "Deployment timed out"},
+	{"instance.created", "Stack created"},
+	{"instance.deleted", "Stack deleted"},
+	{"clean.completed", "Cleanup completed"},
+	{"clean.error", "Cleanup failed"},
+	{"rollback.completed", "Rollback completed"},
+	{"rollback.error", "Rollback failed"},
+	{"stop.error", "Stop failed"},
+	{"stack.expiring", "Stack expiring soon"},
+	{"stack.expired", "Stack expired"},
+	{"quota.warning", "Cluster quota warning (admin and devops only)"},
+	{"secret.expiring", "Registry secret expiring (admin and devops only)"},
+	{"cleanup.policy.executed", "Cleanup policy ran (admin and devops only)"},
+}
+
+// notificationEventTypesHelp returns the event types as indented help lines.
+func notificationEventTypesHelp() string {
+	var b strings.Builder
+	for _, et := range notificationEventTypes {
+		fmt.Fprintf(&b, "  %-25s %s\n", et.Name, et.Description)
+	}
+	return b.String()
+}
+
+// isKnownNotificationEventType reports whether name is in
+// notificationEventTypes.
+func isKnownNotificationEventType(name string) bool {
+	for _, et := range notificationEventTypes {
+		if et.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// warnUnknownEventTypes writes a warning to w for each preference with an
+// event type that is not in notificationEventTypes. An empty event type is
+// left to the server (400).
+func warnUnknownEventTypes(w io.Writer, prefs []types.NotificationPreference) {
+	seen := map[string]bool{}
+	for _, p := range prefs {
+		if p.EventType == "" || seen[p.EventType] || isKnownNotificationEventType(p.EventType) {
+			continue
+		}
+		seen[p.EventType] = true
+		fmt.Fprintf(w, "Warning: unknown notification event type %q. Run 'stackctl notification prefs set --help' to see the event types. k8s-stack-manager v0.8.0 and later refuse it (HTTP 400).\n",
+			client.SanitizeServerText(p.EventType))
+	}
 }
 
 // readAllStdin reads cmd.InOrStdin() into a byte slice. Extracted so the

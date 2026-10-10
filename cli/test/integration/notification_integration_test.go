@@ -38,7 +38,7 @@ func startNotificationMockServer(t *testing.T, state *notificationState) *httpte
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/notifications":
 			_ = json.NewEncoder(w).Encode(types.PaginatedNotifications{
 				Notifications: []types.Notification{
-					{ID: "n1", Type: "stack.deploy.failed", Title: "Deploy failed", CreatedAt: time.Now().UTC()},
+					{ID: "n1", Type: "deployment.error", Title: "Deploy failed", CreatedAt: time.Now().UTC()},
 				},
 				Total:       1,
 				UnreadCount: atomic.LoadInt64(&state.unread),
@@ -111,8 +111,8 @@ func TestNotificationWorkflow_PrefsRoundTrip(t *testing.T) {
 
 	state := &notificationState{
 		prefs: []types.NotificationPreference{
-			{EventType: "stack.deploy.failed", Enabled: true, Channel: "in_app"},
-			{EventType: "stack.deploy.succeeded", Enabled: true, Channel: "in_app"},
+			{EventType: "deployment.error", Enabled: true, Channel: "in_app"},
+			{EventType: "deployment.success", Enabled: true, Channel: "in_app"},
 		},
 	}
 	server := startNotificationMockServer(t, state)
@@ -126,7 +126,7 @@ func TestNotificationWorkflow_PrefsRoundTrip(t *testing.T) {
 
 	// Mutate: disable succeeded.
 	for i := range got {
-		if got[i].EventType == "stack.deploy.succeeded" {
+		if got[i].EventType == "deployment.success" {
 			got[i].Enabled = false
 		}
 	}
@@ -136,7 +136,7 @@ func TestNotificationWorkflow_PrefsRoundTrip(t *testing.T) {
 	// Verify the mutation persisted.
 	var found bool
 	for _, p := range updated {
-		if p.EventType == "stack.deploy.succeeded" {
+		if p.EventType == "deployment.success" {
 			assert.False(t, p.Enabled, "PUT must persist the Enabled=false mutation")
 			found = true
 		}
@@ -147,7 +147,7 @@ func TestNotificationWorkflow_PrefsRoundTrip(t *testing.T) {
 	again, err := c.GetNotificationPreferences()
 	require.NoError(t, err)
 	for _, p := range again {
-		if p.EventType == "stack.deploy.succeeded" {
+		if p.EventType == "deployment.success" {
 			assert.False(t, p.Enabled, "second GET must reflect the mutation")
 		}
 	}
@@ -165,7 +165,7 @@ func TestNotificationCobra_FullWorkflow(t *testing.T) {
 	state := &notificationState{
 		unread: 5,
 		prefs: []types.NotificationPreference{
-			{EventType: "stack.deploy.failed", Enabled: true, Channel: "in_app"},
+			{EventType: "deployment.error", Enabled: true, Channel: "in_app"},
 		},
 	}
 	server := startNotificationMockServer(t, state)
@@ -192,7 +192,7 @@ func TestNotificationCobra_FullWorkflow(t *testing.T) {
 	resetAll()
 	cmd.SetArgs([]string{"notification", "list"})
 	require.NoError(t, cmd.Execute())
-	assert.Contains(t, buf.String(), "stack.deploy.failed")
+	assert.Contains(t, buf.String(), "deployment.error")
 
 	// read-all
 	resetAll()

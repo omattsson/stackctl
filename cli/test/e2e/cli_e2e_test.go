@@ -2833,7 +2833,7 @@ func startE2ENotificationMockServer(t *testing.T) *httptest.Server {
 		switch r.URL.Path {
 		case "/api/v1/notifications":
 			_, _ = w.Write([]byte(
-				`{"notifications":[{"id":"n1","type":"stack.deploy.failed","title":"Deploy failed","is_read":false,"created_at":"2026-05-01T10:00:00Z","user_id":"u1"}],"total":1,"unread_count":1}`))
+				`{"notifications":[{"id":"n1","type":"deployment.error","title":"Deploy failed","is_read":false,"created_at":"2026-05-01T10:00:00Z","user_id":"u1"}],"total":1,"unread_count":1}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"not found"}`))
@@ -2862,7 +2862,7 @@ func TestE2ENotificationListJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 	assert.Equal(t, int64(1), got.UnreadCount)
 	require.Len(t, got.Notifications, 1)
-	assert.Equal(t, "stack.deploy.failed", got.Notifications[0].Type)
+	assert.Equal(t, "deployment.error", got.Notifications[0].Type)
 }
 
 // startE2EAuditMockServer serves a deterministic audit log list and a CSV
@@ -2952,4 +2952,44 @@ func TestE2EAuditLogListJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 	require.Len(t, got.Data, 1)
 	assert.Equal(t, "stack.deploy", got.Data[0].Action)
+}
+
+// TestE2E_PluginGlobalFlags: the global flags before the plugin name are
+// not passed to the plugin; their values reach it as STACKCTL_* variables.
+// Arguments after the plugin name are passed unchanged (stackctl#144).
+func TestE2E_PluginGlobalFlags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("the plugin is a shell script")
+	}
+
+	dir := t.TempDir()
+	binDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"echo \"args=$*\"\n" +
+		"echo \"no_color=$STACKCTL_NO_COLOR\"\n" +
+		"echo \"NO_COLOR=$NO_COLOR\"\n" +
+		"echo \"output=$STACKCTL_OUTPUT\"\n" +
+		"echo \"quiet=$STACKCTL_QUIET\"\n" +
+		"echo \"api_url=$STACKCTL_API_URL\"\n" +
+		"echo \"config_dir=$STACKCTL_CONFIG_DIR\"\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "stackctl-hello"), []byte(script), 0o755))
+
+	cmd := exec.Command(binaryPath, "--no-color", "-o", "json", "--quiet", "--api-url", "http://plugin.example", "hello", "status", "my-stack", "--output", "x")
+	cmd.Env = append(os.Environ(), "STACKCTL_CONFIG_DIR="+dir, "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	require.NoError(t, cmd.Run(), stderr.String())
+
+	out := stdout.String()
+	assert.Contains(t, out, "args=status my-stack --output x\n")
+	assert.Contains(t, out, "no_color=1\n")
+	assert.Contains(t, out, "NO_COLOR=1\n")
+	assert.Contains(t, out, "output=json\n")
+	assert.Contains(t, out, "quiet=1\n")
+	assert.Contains(t, out, "api_url=http://plugin.example\n")
+	assert.Contains(t, out, "config_dir="+dir+"\n")
 }

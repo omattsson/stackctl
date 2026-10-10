@@ -61,6 +61,8 @@ func TestResponseSchemas_MatchBackend(t *testing.T) {
 			excludeGoTags: append([]string{"definition_name", "cluster_name", "owner_username"}, baseOnly...),
 		},
 		{name: "RollbackResponse", goType: types.RollbackResponse{}, swaggerDef: "handlers.RollbackResponse"},
+		{name: "OrphanedNamespace", goType: types.OrphanedNamespace{}, swaggerDef: "handlers.OrphanedNamespaceResponse"},
+		{name: "ResourceCounts", goType: types.ResourceCounts{}, swaggerDef: "k8s.ResourceCounts"},
 	}
 
 	for _, tc := range cases {

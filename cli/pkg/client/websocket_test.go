@@ -905,3 +905,86 @@ func TestStreamDeploymentLogs_PolicyClose(t *testing.T) {
 	assert.True(t, closeErr.SessionRevoked())
 	assert.Contains(t, err.Error(), "session revoked. Log in again.")
 }
+
+func TestStreamDeploymentLogs_PartialTerminal(t *testing.T) {
+	t.Parallel()
+	server := wsServer(t, func(conn *websocket.Conn) {
+		readSubscribe(t, conn, "42")
+		writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{
+			InstanceID: "42", Status: "partial", ErrorMessage: "chart api failed",
+		})
+		_, _, _ = conn.ReadMessage()
+	})
+	defer server.Close()
+
+	var buf bytes.Buffer
+	result, err := New(server.URL).StreamDeploymentLogs(context.Background(), "42", &buf, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "partial", result.Status)
+	assert.Equal(t, "chart api failed", result.ErrorMessage)
+}
+
+func TestStreamDeploymentLogsWithOptions_AfterSubscribe(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		afterSub   *types.StreamResult
+		wantStatus string
+	}{
+		{"terminal result ends the stream", &types.StreamResult{Status: "running"}, "running"},
+		{"nil result keeps reading", nil, "error"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := wsServer(t, func(conn *websocket.Conn) {
+				readSubscribe(t, conn, "42")
+				writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "error"})
+				_, _, _ = conn.ReadMessage()
+			})
+			defer server.Close()
+
+			var calls int
+			var buf bytes.Buffer
+			result, err := New(server.URL).StreamDeploymentLogsWithOptions(context.Background(), "42", &buf, nil, StreamOptions{
+				AfterSubscribe: func(context.Context) (*types.StreamResult, error) {
+					calls++
+					return tt.afterSub, nil
+				},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 1, calls)
+			assert.Equal(t, tt.wantStatus, result.Status)
+		})
+	}
+}
+
+func TestTerminalAndFailedStatuses(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		status   string
+		terminal bool
+		failed   bool
+	}{
+		{"running", true, false},
+		{"stopped", true, false},
+		{"draft", true, false},
+		{"error", true, true},
+		{"partial", true, true},
+		{"failed", true, true},
+		{"deploying", false, false},
+		{"stabilizing", false, false},
+		{"queued", false, false},
+		{"stopping", false, false},
+		{"cleaning", false, false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.status, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.terminal, IsTerminalStatus(tt.status))
+			assert.Equal(t, tt.failed, IsFailedStatus(tt.status))
+		})
+	}
+}

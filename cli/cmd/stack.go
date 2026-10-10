@@ -21,48 +21,243 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Operations that --follow waits for. followOpLogs is `stack logs -f`: it
+// starts no operation.
+const (
+	followOpDeploy   = "deploy"
+	followOpStop     = "stop"
+	followOpClean    = "clean"
+	followOpRollback = "rollback"
+	followOpLogs     = ""
+)
+
 // followLogs streams deployment logs via WebSocket until a terminal status is
-// received. Returns an error if the deployment ended in error status.
+// received. Returns an error if the operation ended in a failed status
+// (error, partial).
 //
 // Installs an os.Interrupt signal handler for Ctrl-C; writes log lines to
 // os.Stdout and warnings to os.Stderr. Test code should call followLogsCtx
 // directly to inject a context + writers.
-func followLogs(c *client.Client, instanceID string) error {
+func followLogs(c *client.Client, instanceID, op string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	return followLogsCtx(ctx, c, instanceID, os.Stdout, os.Stderr)
+	return followLogsCtx(ctx, c, instanceID, op, os.Stdout, os.Stderr)
 }
 
 // followLogsCtx is the testable core of followLogs. It does NOT install a
 // signal handler — the caller owns ctx and is responsible for cancelling
-// it on shutdown. Returns nil when:
-//   - the deployment reaches a terminal non-error status (running,
+// it on shutdown. op is the operation that the command started (deploy,
+// stop, clean, rollback), or followOpLogs. Returns nil when:
+//   - the operation reaches a terminal non-error status (running,
 //     stopped, draft, "unknown" on graceful server close);
 //   - ctx is cancelled before any other error surfaces (Ctrl-C path).
 //
-// Returns a wrapped error for terminal "error" status, or the underlying
-// network/parse error otherwise.
-func followLogsCtx(ctx context.Context, c *client.Client, instanceID string, out, warn io.Writer) error {
-	result, err := c.StreamDeploymentLogs(ctx, instanceID, out, warn)
+// For an operation, it reads the instance right after the first connect:
+// the server sets the in-progress status (deploying, stopping, cleaning)
+// before it answers 202, so a terminal status there means that the
+// operation ended before the subscribe.
+//
+// When the server closes the connection with "token expired", it renews
+// the session and connects again like `stack watch`, then reads the
+// instance so a terminal status during the gap counts.
+//
+// Returns an error for a failed terminal status (error, partial), or when
+// the stream ends early. The error for an early end says that the
+// operation continues on the server and how to see the result.
+func followLogsCtx(ctx context.Context, c *client.Client, instanceID, op string, out, warn io.Writer) error {
+	var lastReconnect time.Time
+	catchUp := client.StreamOptions{
+		AfterSubscribe: func(ctx context.Context) (*types.StreamResult, error) {
+			return followCatchUp(ctx, c, instanceID, warn), nil
+		},
+	}
+	opts := client.StreamOptions{}
+	if op != followOpLogs {
+		opts = catchUp
+	}
+	for {
+		result, err := c.StreamDeploymentLogsWithOptions(ctx, instanceID, out, warn, opts)
+		if err != nil {
+			if ctx.Err() != nil {
+				// Ctrl-C / parent cancellation — surface as clean exit so
+				// the operator's intentional interrupt doesn't look like a
+				// command failure.
+				return nil
+			}
+			var closeErr *client.WSClosedError
+			if !errors.As(err, &closeErr) {
+				return followStoppedError(err, instanceID, op)
+			}
+			outcome, rerr := renewAfterClose(ctx, c, closeErr, &lastReconnect, warn)
+			switch outcome {
+			case renewReconnect:
+				// Events during the renew and dial gap are lost: read the
+				// instance after the reconnect.
+				opts = catchUp
+				continue
+			case renewCancelled:
+				return nil
+			default:
+				return followStoppedError(followCloseError(closeErr, outcome, rerr), instanceID, op)
+			}
+		}
+		return followResultError(instanceID, op, result)
+	}
+}
+
+// followCloseError returns the message for a server close that ends
+// --follow. It does not tell the user to run the command again: the
+// operation continues on the server.
+func followCloseError(closeErr *client.WSClosedError, outcome renewOutcome, rerr error) error {
+	if !closeErr.TokenExpired() {
+		return closeErr
+	}
+	reason := "the server closed the renewed connection again"
+	switch outcome {
+	case renewNoRefreshToken:
+		reason = "the login has no refresh token, for example an SSO login"
+	case renewFailed:
+		reason = fmt.Sprintf("session renewal failed: %v", rerr)
+	}
+	return fmt.Errorf("connection closed by the server: token expired; stackctl could not renew the session (%s)", reason)
+}
+
+// followStoppedError adds to err that the operation continues on the server
+// and how to see its result. It never suggests starting the operation
+// again.
+func followStoppedError(err error, instanceID, op string) error {
+	what := "The operation"
+	if op != followOpLogs {
+		what = "The " + op
+	}
+	return fmt.Errorf("%w\n%s continues on the server. Do not start it again. Run 'stackctl login' if necessary, then 'stackctl stack watch --id %s' or 'stackctl stack status %s' to see the result",
+		err, what, instanceID, instanceID)
+}
+
+// followCatchUp reads the instance (GET /api/v1/stack-instances/:id) and
+// returns its status as a stream result when the status is terminal, else
+// nil. A failed read writes a warning to warn and returns nil.
+func followCatchUp(ctx context.Context, c *client.Client, instanceID string, warn io.Writer) *types.StreamResult {
+	if ctx.Err() != nil {
+		return nil
+	}
+	inst, err := c.GetStack(instanceID)
 	if err != nil {
-		if ctx.Err() != nil {
-			// Ctrl-C / parent cancellation — surface as clean exit so
-			// the operator's intentional interrupt doesn't look like a
-			// command failure.
-			return nil
-		}
-		return err
+		fmt.Fprintf(warn, "Warning: could not read the status of instance %s: %v\n", instanceID, err)
+		return nil
 	}
-	if result.Status == "error" {
-		if result.ErrorMessage != "" {
-			return fmt.Errorf("deployment failed: %s", result.ErrorMessage)
-		}
-		return fmt.Errorf("deployment failed")
+	if !client.IsTerminalStatus(inst.Status) {
+		return nil
 	}
-	return nil
+	return &types.StreamResult{Status: inst.Status, ErrorMessage: inst.ErrorMessage}
+}
+
+// followResultError returns an error for a failed terminal status of a
+// followed operation, else nil. The message names the operation.
+func followResultError(instanceID, op string, result *types.StreamResult) error {
+	if result == nil || !client.IsFailedStatus(result.Status) {
+		return nil
+	}
+	name := op
+	if name == followOpLogs {
+		name = "operation"
+	}
+	detail := client.SanitizeServerText(result.ErrorMessage)
+	if result.Status == "partial" {
+		msg := name + " partially failed (status partial): some charts did not deploy"
+		if detail != "" {
+			msg += ": " + detail
+		}
+		return fmt.Errorf("%s. Run 'stackctl stack status %s' to see the charts", msg, instanceID)
+	}
+	if detail != "" {
+		return fmt.Errorf("%s failed (status %s): %s", name, result.Status, detail)
+	}
+	return fmt.Errorf("%s failed (status %s)", name, result.Status)
+}
+
+// renewOutcome is the result of renewAfterClose.
+type renewOutcome int
+
+const (
+	// renewReconnect: the session is renewed; connect again.
+	renewReconnect renewOutcome = iota
+	// renewCancelled: Ctrl-C during the renewal (clean exit).
+	renewCancelled
+	// renewNotExpired: the close reason is not "token expired" (for
+	// example "session revoked"). A renewal does not help.
+	renewNotExpired
+	// renewTooSoon: a second "token expired" within stackWatchMinReconnect.
+	renewTooSoon
+	// renewNoRefreshToken: the session has no refresh token (SSO login).
+	renewNoRefreshToken
+	// renewFailed: the renewal failed; the error has the reason.
+	renewFailed
+)
+
+// renewAfterClose handles a close with code 1008 of a WebSocket stream
+// (`stack watch`, `--follow`). After "token expired" it renews the session,
+// at most once per stackWatchMinReconnect. The error is set only for
+// renewFailed.
+func renewAfterClose(ctx context.Context, c *client.Client, closeErr *client.WSClosedError, lastReconnect *time.Time, warn io.Writer) (renewOutcome, error) {
+	if !closeErr.TokenExpired() {
+		return renewNotExpired, nil
+	}
+	if time.Since(*lastReconnect) < stackWatchMinReconnect {
+		return renewTooSoon, nil
+	}
+	renewed, rerr := c.RenewSession()
+	if ctx.Err() != nil {
+		return renewCancelled, nil
+	}
+	if rerr != nil {
+		return renewFailed, rerr
+	}
+	if !renewed {
+		return renewNoRefreshToken, nil
+	}
+	*lastReconnect = time.Now()
+	fmt.Fprintln(warn, "Note: the access token expired. Reconnecting with a renewed token.")
+	return renewReconnect, nil
+}
+
+// renewForReconnect is renewAfterClose for `stack watch`: true means connect
+// again. False with a nil error means Ctrl-C during the renewal. Else the
+// error is the close error (a new watch can renew the session), with the
+// renewal error when the renewal failed.
+func renewForReconnect(ctx context.Context, c *client.Client, closeErr *client.WSClosedError, lastReconnect *time.Time, warn io.Writer) (bool, error) {
+	outcome, rerr := renewAfterClose(ctx, c, closeErr, lastReconnect, warn)
+	switch outcome {
+	case renewReconnect:
+		return true, nil
+	case renewCancelled:
+		return false, nil
+	case renewFailed:
+		return false, fmt.Errorf("%w (session renewal failed: %v)", closeErr, rerr)
+	default:
+		return false, closeErr
+	}
 }
 
 const flagPageSize = "page-size"
+
+// followHelp describes the --follow result and the session handling. It is
+// part of the help of every command with --follow that waits for a status.
+const followHelp = `With --follow, the exit code shows the result of the operation:
+  - running, stopped or draft: exit code 0.
+  - error: exit code 1. The operation failed.
+  - partial: exit code 1. Some charts deployed and others failed.
+The command reads the instance status after it connects, so an operation
+that ends before the connection is complete counts.
+When the access token expires during a long operation (server close
+"token expired"), the command renews the session, connects again and reads
+the instance status, so a status change during the reconnect is not lost.
+The command stops with exit code 1 when it cannot follow the operation to
+the end: the server ends the session ("session revoked"), the login has no
+refresh token (SSO login), the renewal fails, or the connection is lost.
+The operation continues on the server. Do not start it again. Run
+'stackctl stack watch --id <id>' or 'stackctl stack status <id>' to see
+the result (after 'stackctl login' if necessary).`
 
 var stackCmd = &cobra.Command{
 	Use:   "stack",
@@ -296,6 +491,8 @@ var stackDeployCmd = &cobra.Command{
 
 Use --follow to stream deployment logs in real-time until completion.
 
+` + followHelp + `
+
 Examples:
   stackctl stack deploy my-stack
   stackctl stack deploy my-stack --follow
@@ -324,7 +521,7 @@ Examples:
 
 		follow, _ := cmd.Flags().GetBool("follow")
 		if follow {
-			return followLogs(c, id)
+			return followLogs(c, id, followOpDeploy)
 		}
 
 		if printer.Quiet {
@@ -343,6 +540,8 @@ var stackStopCmd = &cobra.Command{
 	Long: `Stop a running stack instance.
 
 Use --follow to stream logs in real-time until completion.
+
+` + followHelp + `
 
 Examples:
   stackctl stack stop my-stack
@@ -371,7 +570,7 @@ Examples:
 
 		follow, _ := cmd.Flags().GetBool("follow")
 		if follow {
-			return followLogs(c, id)
+			return followLogs(c, id, followOpStop)
 		}
 
 		if printer.Quiet {
@@ -391,6 +590,8 @@ var stackCleanCmd = &cobra.Command{
 
 This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified. Use --follow to stream logs in real-time.
+
+` + followHelp + `
 
 Examples:
   stackctl stack clean my-stack
@@ -429,7 +630,7 @@ Examples:
 
 		follow, _ := cmd.Flags().GetBool("follow")
 		if follow {
-			return followLogs(c, id)
+			return followLogs(c, id, followOpClean)
 		}
 
 		if printer.Quiet {
@@ -642,7 +843,7 @@ Examples:
 
 		follow, _ := cmd.Flags().GetBool("follow")
 		if follow {
-			return followLogs(c, id)
+			return followLogs(c, id, followOpLogs)
 		}
 
 		log, err := c.GetStackLogs(id)
@@ -1250,6 +1451,8 @@ a warning to stderr: the next deploy applies the stored overrides again.
 -o json and -o yaml print the response (log_id, message, target_log_id,
 values_drift, warning).
 
+` + followHelp + `
+
 Examples:
   stackctl stack rollback my-stack
   stackctl stack rollback my-stack --yes --follow
@@ -1295,7 +1498,7 @@ Examples:
 
 		follow, _ := cmd.Flags().GetBool("follow")
 		if follow {
-			return followLogs(c, id)
+			return followLogs(c, id, followOpRollback)
 		}
 
 		if printer.Quiet {
@@ -1445,31 +1648,11 @@ func init() {
 	// the first call rather than replacing, so test-cleanup `Set("")` is a
 	// silent no-op and flag values leak across in-process invocations.
 	// Manual splitting in RunE keeps the test-reset story clean.
-	stackWatchCmd.Flags().String("id", "", "Filter to one or more instance IDs (comma-separated); exits when all listed IDs reach a terminal status (running or failed)")
+	stackWatchCmd.Flags().String("id", "", "Filter to one or more instance IDs (comma-separated); exits when all listed IDs reach a terminal status (running, stopped, draft, error or partial)")
 	stackWatchCmd.Flags().String("owner", "", "Filter to a single owner — NOT YET SUPPORTED (the /ws payload does not carry owner_id; see stackctl#75 follow-up)")
 	stackWatchCmd.Flags().String("status", "", "Filter to a single status value (e.g. running, deploying, failed); streams until Ctrl-C")
 
 	rootCmd.AddCommand(stackCmd)
-}
-
-// stackWatchTerminalStatuses lists the status values that count as a
-// terminal outcome for `stack watch --id`. Mirrors backend deployer state
-// transitions: "running" / "stopped" / "draft" → success-ish; "error" /
-// "failed" → failure (the backend uses "error" but issue #75 documents
-// "failed" — we accept both).
-var stackWatchTerminalStatuses = map[string]bool{
-	"running": true,
-	"stopped": true,
-	"draft":   true,
-	"error":   true,
-	"failed":  true,
-}
-
-// stackWatchFailedStatuses lists the terminal statuses that should cause
-// `stack watch --id` to exit with a non-zero exit code.
-var stackWatchFailedStatuses = map[string]bool{
-	"error":  true,
-	"failed": true,
 }
 
 var stackWatchCmd = &cobra.Command{
@@ -1480,8 +1663,9 @@ arrive.
 
   --id <id1,id2,...>   Wait for the listed instance IDs to reach a
                        terminal status (running/stopped/draft → exit 0;
-                       error/failed → exit 1). Exits as soon as every
-                       listed ID has reported terminal.
+                       error/partial/failed → exit 1). Exits as soon as
+                       every listed ID has reported terminal. "partial"
+                       means that some charts deployed and others failed.
   --status <state>     Filter to events with the given status; streams
                        until Ctrl-C.
   --owner <user>       NOT YET SUPPORTED — the /ws status payload does
@@ -1491,7 +1675,7 @@ arrive.
 --id takes precedence over --status: if both are set, --status is
 ignored (with a stderr warning) so the watch sees every status
 transition for the listed instances and can detect opposite-terminal
-states like "error" / "failed" reliably.
+states like "error" / "partial" reliably.
 
 Authentication: reuses the HTTP client auth chain. JWT goes via the
 Authorization: Bearer header; if the WS upgrade is rejected with HTTP
@@ -1596,11 +1780,11 @@ Examples:
 			if err := printWatchEvent(ev); err != nil {
 				return false, err
 			}
-			if !idMode || !pending[ev.InstanceID] || !stackWatchTerminalStatuses[ev.Status] {
+			if !idMode || !pending[ev.InstanceID] || !client.IsTerminalStatus(ev.Status) {
 				return false, nil
 			}
-			if stackWatchFailedStatuses[ev.Status] {
-				failedIDs = append(failedIDs, ev.InstanceID)
+			if client.IsFailedStatus(ev.Status) {
+				failedIDs = append(failedIDs, fmt.Sprintf("%s (%s)", ev.InstanceID, ev.Status))
 			}
 			delete(pending, ev.InstanceID)
 			return len(pending) == 0, nil
@@ -1661,26 +1845,18 @@ Examples:
 				}
 				break
 			}
-			if !closeErr.TokenExpired() || time.Since(lastReconnect) < stackWatchMinReconnect {
-				return closeErr
-			}
-			renewed, rerr := c.RenewSession()
-			if ctx.Err() != nil {
+			reconnect, rerr := renewForReconnect(ctx, c, closeErr, &lastReconnect, cmd.ErrOrStderr())
+			if !reconnect {
+				if rerr != nil {
+					return rerr
+				}
 				break // Ctrl-C during the renewal
 			}
-			if rerr != nil {
-				return fmt.Errorf("%w (session renewal failed: %v)", closeErr, rerr)
-			}
-			if !renewed {
-				return closeErr
-			}
-			lastReconnect = time.Now()
 			reconnected = true
-			fmt.Fprintln(cmd.ErrOrStderr(), "Note: the access token expired. Reconnecting with a renewed token.")
 		}
 
 		if len(failedIDs) > 0 {
-			return fmt.Errorf("instances reached a failed terminal status: %s", strings.Join(failedIDs, ", "))
+			return fmt.Errorf("instances reached a failed terminal status: %s. Run 'stackctl stack status <id>' for details", strings.Join(failedIDs, ", "))
 		}
 		return nil
 	},
@@ -1706,7 +1882,7 @@ func watchCatchUp(ctx context.Context, c *client.Client, pending map[string]bool
 			fmt.Fprintf(warn, "Warning: could not read the status of instance %s: %v\n", id, err)
 			continue
 		}
-		if !stackWatchTerminalStatuses[inst.Status] {
+		if !client.IsTerminalStatus(inst.Status) {
 			continue
 		}
 		done, err := handle(types.WatchEvent{

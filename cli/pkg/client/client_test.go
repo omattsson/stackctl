@@ -3379,7 +3379,7 @@ func TestListNotifications_NoFilters(t *testing.T) {
 		assert.Empty(t, r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(types.PaginatedNotifications{
-			Notifications: []types.Notification{{ID: "n1", Type: "stack.deploy.failed"}},
+			Notifications: []types.Notification{{ID: "n1", Type: "deployment.error"}},
 			Total:         1, UnreadCount: 1,
 		})
 	}))
@@ -3461,7 +3461,7 @@ func TestGetNotificationPreferences_Success(t *testing.T) {
 		assert.Equal(t, "/api/v1/notifications/preferences", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]types.NotificationPreference{
-			{EventType: "stack.deploy.failed", Enabled: true, Channel: "in_app"},
+			{EventType: "deployment.error", Enabled: true, Channel: "in_app"},
 		})
 	}))
 	defer server.Close()
@@ -3470,7 +3470,7 @@ func TestGetNotificationPreferences_Success(t *testing.T) {
 	got, err := c.GetNotificationPreferences()
 	require.NoError(t, err)
 	require.Len(t, got, 1)
-	assert.Equal(t, "stack.deploy.failed", got[0].EventType)
+	assert.Equal(t, "deployment.error", got[0].EventType)
 }
 
 func TestUpdateNotificationPreferences_RoundTrip(t *testing.T) {
@@ -3481,7 +3481,7 @@ func TestUpdateNotificationPreferences_RoundTrip(t *testing.T) {
 		var got []types.NotificationPreference
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
 		require.Len(t, got, 1)
-		assert.Equal(t, "stack.deploy.failed", got[0].EventType)
+		assert.Equal(t, "deployment.error", got[0].EventType)
 		assert.True(t, got[0].Enabled)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(got)
@@ -3490,7 +3490,7 @@ func TestUpdateNotificationPreferences_RoundTrip(t *testing.T) {
 
 	c := New(server.URL)
 	updated, err := c.UpdateNotificationPreferences([]types.NotificationPreference{
-		{EventType: "stack.deploy.failed", Enabled: true, Channel: "in_app"},
+		{EventType: "deployment.error", Enabled: true, Channel: "in_app"},
 	})
 	require.NoError(t, err)
 	require.Len(t, updated, 1)

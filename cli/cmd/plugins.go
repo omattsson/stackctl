@@ -9,12 +9,23 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/omattsson/stackctl/cli/pkg/config"
 	"github.com/spf13/cobra"
 )
 
 // pluginPrefix is the filename prefix that marks an executable as a stackctl
 // plugin. A binary at PATH/stackctl-foo becomes the subcommand `stackctl foo`.
 const pluginPrefix = "stackctl-"
+
+// pluginAnnotation marks a Cobra command that runs an external plugin.
+const pluginAnnotation = "stackctl.plugin"
+
+// targetsPlugin reports whether args select a plugin command of root.
+// Find skips the global flags before the command name and parses nothing.
+func targetsPlugin(root *cobra.Command, args []string) bool {
+	cmd, _, err := root.Find(args)
+	return err == nil && cmd != nil && cmd.Annotations[pluginAnnotation] == "true"
+}
 
 // pluginNamePattern restricts plugin names to lowercase ASCII letters, digits,
 // and dashes, and requires the first character to be a letter or digit so names
@@ -109,7 +120,15 @@ func discoverPlugins(pathEnv string) map[string]string {
 	return found
 }
 
-// pluginEnv returns the environment to pass to a plugin subprocess. It
+// pluginEnv returns the environment to pass to a plugin subprocess.
+//
+// The global flags of stackctl (--output, --quiet, --no-color, --api-url,
+// --api-key, --insecure, --debug) before the plugin name are parsed by the
+// root command (TraverseChildren) and are not passed as arguments. Their
+// values reach the plugin as STACKCTL_* variables. Flags after the plugin
+// name belong to the plugin and are passed unchanged.
+//
+// It
 // preserves the full parent environment — plugins might legitimately need
 // unrelated variables (AWS_PROFILE, KUBECONFIG, etc.) — and injects
 // STACKCTL_* values resolved from flags and from the current context so a
@@ -147,6 +166,23 @@ func pluginEnv(cmd *cobra.Command) []string {
 	if flags.Changed("debug") {
 		if debug, err := flags.GetBool("debug"); err == nil {
 			env = setEnv(env, "STACKCTL_DEBUG", boolEnvValue(debug))
+		}
+	}
+	if flags.Changed("no-color") {
+		if noColor, err := flags.GetBool("no-color"); err == nil {
+			env = setEnv(env, "STACKCTL_NO_COLOR", boolEnvValue(noColor))
+			if noColor {
+				// The common convention (https://no-color.org) for tools
+				// that the plugin runs.
+				env = setEnv(env, "NO_COLOR", "1")
+			}
+		}
+	}
+	if !hasEnv(env, "STACKCTL_CONFIG_DIR") {
+		// The directory stackctl itself uses, so a plugin that reads the
+		// config or calls `stackctl` again uses the same files.
+		if dir, err := config.ConfigDir(); err == nil {
+			env = setEnv(env, "STACKCTL_CONFIG_DIR", dir)
 		}
 	}
 	return contextEnv(env)
@@ -248,6 +284,7 @@ func newPluginCommand(name, binaryPath string) *cobra.Command {
 		Use:                name,
 		Short:              "Plugin: " + name,
 		Long:               "External plugin resolved to " + binaryPath,
+		Annotations:        map[string]string{pluginAnnotation: "true"},
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		SilenceErrors:      true,
