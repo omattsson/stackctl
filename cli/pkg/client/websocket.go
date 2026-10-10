@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,61 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 )
+
+// Close reasons that k8s-stack-manager sends with close code 1008 (policy
+// violation) when it ends a WebSocket connection.
+const (
+	// CloseReasonSessionRevoked: the session of the user ended (delete,
+	// disable, password reset, role change, logout or logout-all).
+	CloseReasonSessionRevoked = "session revoked"
+	// CloseReasonTokenExpired: the access token of the connection expired.
+	CloseReasonTokenExpired = "token expired"
+)
+
+// WSClosedError reports that the server closed the WebSocket connection
+// with close code 1008 (policy violation). Reason is the close reason of the
+// server, for example CloseReasonSessionRevoked or CloseReasonTokenExpired.
+type WSClosedError struct {
+	Code   int
+	Reason string
+}
+
+// Error returns a message for the user, for example "Connection closed by
+// the server: session revoked. Log in again."
+func (e *WSClosedError) Error() string {
+	if e.TokenExpired() {
+		// The session can still be valid (only the access token expired),
+		// so a new command can renew it. An SSO token cannot be renewed.
+		return "Connection closed by the server: token expired. Run the command again. If it fails, run 'stackctl login'."
+	}
+	reason := sanitizeServerMessage(e.Reason)
+	if reason == "" {
+		reason = "policy violation"
+	}
+	return fmt.Sprintf("Connection closed by the server: %s. Log in again.", reason)
+}
+
+// TokenExpired reports whether the server closed the connection because the
+// access token expired. A renewed token can open a new connection.
+func (e *WSClosedError) TokenExpired() bool {
+	return e.Code == websocket.ClosePolicyViolation && e.Reason == CloseReasonTokenExpired
+}
+
+// SessionRevoked reports whether the server closed the connection because
+// the session ended. Only a new login helps.
+func (e *WSClosedError) SessionRevoked() bool {
+	return e.Code == websocket.ClosePolicyViolation && e.Reason == CloseReasonSessionRevoked
+}
+
+// policyCloseError returns a *WSClosedError when err is a close frame with
+// code 1008 (policy violation), else nil.
+func policyCloseError(err error) *WSClosedError {
+	var ce *websocket.CloseError
+	if errors.As(err, &ce) && ce.Code == websocket.ClosePolicyViolation {
+		return &WSClosedError{Code: ce.Code, Reason: ce.Text}
+	}
+	return nil
+}
 
 var terminalStatuses = map[string]bool{
 	"running": true,
@@ -69,6 +125,9 @@ func (c *Client) StreamDeploymentLogs(ctx context.Context, instanceID string, w 
 			}
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 				return &types.StreamResult{Status: "unknown"}, nil
+			}
+			if closeErr := policyCloseError(err); closeErr != nil {
+				return nil, closeErr
 			}
 			return nil, fmt.Errorf("reading WebSocket message: %w", err)
 		}
@@ -233,7 +292,8 @@ func (f WatchFilter) matches(s types.WSDeploymentStatus) bool {
 // Lifecycle:
 //   - The returned channel is closed when ctx is cancelled, when the
 //     connection drops, or when the read loop exits. Receivers should
-//     range over the channel until it closes.
+//     range over the channel until it closes. Use Watch to learn why the
+//     stream ended (for example a server close with code 1008).
 //   - Spawns ONE background goroutine that reads from the WS, decodes
 //     payloads, applies the filter, and forwards matches. Goroutine exits
 //     when ctx is Done or the read loop returns; goleak verified.
@@ -260,6 +320,35 @@ func (f WatchFilter) matches(s types.WSDeploymentStatus) bool {
 // be safely connected to the same /ws endpoint as StreamDeploymentLogs
 // without cross-talk.
 func (c *Client) WatchEvents(ctx context.Context, filter WatchFilter) (<-chan types.WatchEvent, error) {
+	stream, err := c.Watch(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return stream.Events, nil
+}
+
+// WatchStream is an open event stream of Watch.
+type WatchStream struct {
+	// Events receives the matching events. It is closed when the stream
+	// ends.
+	Events <-chan types.WatchEvent
+
+	// err is written before Events is closed, so a read after the close
+	// is safe.
+	err error
+}
+
+// Err returns why the stream ended: a *WSClosedError when the server closed
+// the connection with close code 1008 (session revoked, token expired),
+// else nil (context cancelled, normal close, connection lost). Call it only
+// after Events is closed.
+func (s *WatchStream) Err() error {
+	return s.err
+}
+
+// Watch is WatchEvents with access to the end reason of the stream (see
+// WatchStream.Err).
+func (c *Client) Watch(ctx context.Context, filter WatchFilter) (*WatchStream, error) {
 	conn, err := c.dialWS(ctx, "/ws", nil)
 	if err != nil {
 		return nil, err
@@ -270,6 +359,7 @@ func (c *Client) WatchEvents(ctx context.Context, filter WatchFilter) (<-chan ty
 	// instances). Bumping this only matters if the receiver is slower than
 	// the broadcaster — for an interactive CLI that's unlikely.
 	out := make(chan types.WatchEvent, 8)
+	stream := &WatchStream{Events: out}
 
 	// `done` is closed by the outer goroutine's defer (line 253) — it tells
 	// the watchdog goroutine to exit when the read loop returns on its own
@@ -303,6 +393,11 @@ func (c *Client) WatchEvents(ctx context.Context, filter WatchFilter) (<-chan ty
 		for {
 			_, message, err := conn.ReadMessage()
 			if err != nil {
+				if ctx.Err() == nil {
+					if closeErr := policyCloseError(err); closeErr != nil {
+						stream.err = closeErr
+					}
+				}
 				return
 			}
 			var msg types.WSMessage
@@ -335,7 +430,7 @@ func (c *Client) WatchEvents(ctx context.Context, filter WatchFilter) (<-chan ty
 		}
 	}()
 
-	return out, nil
+	return stream, nil
 }
 
 // appendQueryToken returns a URL with ?token=<jwt> appended (or merged

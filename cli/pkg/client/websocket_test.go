@@ -820,3 +820,88 @@ func drainRemaining(events <-chan types.WatchEvent, budget time.Duration) {
 		}
 	}
 }
+
+// closeWithPolicy sends a close frame with code 1008 and the given reason,
+// like the k8s-stack-manager hub on a revoked session or an expired token.
+func closeWithPolicy(conn *websocket.Conn, reason string) {
+	_ = conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.ClosePolicyViolation, reason),
+		time.Now().Add(time.Second))
+}
+
+func TestWatch_PolicyCloseSetsErr(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		reason      string
+		wantMsg     string
+		wantRevoked bool
+		wantExpired bool
+	}{
+		{"session revoked", CloseReasonSessionRevoked, "Connection closed by the server: session revoked. Log in again.", true, false},
+		{"token expired", CloseReasonTokenExpired, "Connection closed by the server: token expired. Run the command again. If it fails, run 'stackctl login'.", false, true},
+		{"empty reason", "", "Connection closed by the server: policy violation. Log in again.", false, false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := wsServer(t, func(conn *websocket.Conn) {
+				writeWSMessage(t, conn, "deployment.status", types.WSDeploymentStatus{InstanceID: "42", Status: "deploying"})
+				closeWithPolicy(conn, tt.reason)
+			})
+			defer server.Close()
+
+			stream, err := New(server.URL).Watch(context.Background(), WatchFilter{})
+			require.NoError(t, err)
+			evs := drainEvents(t, stream.Events, 1, time.Second)
+			require.Len(t, evs, 1)
+			drainRemaining(stream.Events, 2*time.Second)
+
+			var closeErr *WSClosedError
+			require.ErrorAs(t, stream.Err(), &closeErr)
+			assert.Equal(t, websocket.ClosePolicyViolation, closeErr.Code)
+			assert.Equal(t, tt.wantMsg, closeErr.Error())
+			assert.Equal(t, tt.wantRevoked, closeErr.SessionRevoked())
+			assert.Equal(t, tt.wantExpired, closeErr.TokenExpired())
+		})
+	}
+}
+
+func TestWatch_NormalCloseHasNoErr(t *testing.T) {
+	t.Parallel()
+	server := wsServer(t, func(conn *websocket.Conn) {
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+			time.Now().Add(time.Second))
+	})
+	defer server.Close()
+
+	stream, err := New(server.URL).Watch(context.Background(), WatchFilter{})
+	require.NoError(t, err)
+	drainRemaining(stream.Events, 2*time.Second)
+	assert.NoError(t, stream.Err())
+}
+
+func TestWSClosedError_SanitizesReason(t *testing.T) {
+	t.Parallel()
+	err := &WSClosedError{Code: websocket.ClosePolicyViolation, Reason: "bad\x1b[31m\u202ereason"}
+	assert.Equal(t, "Connection closed by the server: bad [31mreason. Log in again.", err.Error())
+}
+
+func TestStreamDeploymentLogs_PolicyClose(t *testing.T) {
+	t.Parallel()
+	server := wsServer(t, func(conn *websocket.Conn) {
+		readSubscribe(t, conn, "42")
+		closeWithPolicy(conn, CloseReasonSessionRevoked)
+	})
+	defer server.Close()
+
+	var buf bytes.Buffer
+	_, err := New(server.URL).StreamDeploymentLogs(context.Background(), "42", &buf, nil)
+	var closeErr *WSClosedError
+	require.ErrorAs(t, err, &closeErr)
+	assert.True(t, closeErr.SessionRevoked())
+	assert.Contains(t, err.Error(), "session revoked. Log in again.")
+}

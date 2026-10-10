@@ -775,3 +775,62 @@ func TestRenew_OnlyForTheLoginAPIURL(t *testing.T) {
 		})
 	}
 }
+
+func TestRenewSession(t *testing.T) {
+	t.Parallel()
+
+	t.Run("renews a fresh token", func(t *testing.T) {
+		t.Parallel()
+		s, srv := newSessionServer(t)
+		old := s.issueAccess()
+		s.setRefresh("r1")
+		c, store := newSessionClient(t, srv.URL, &config.StoredToken{
+			Token: old, RefreshToken: "r1", Username: "alice", ExpiresAt: time.Now().Add(10 * time.Minute),
+		})
+
+		renewed, err := c.RenewSession()
+		require.NoError(t, err)
+		assert.True(t, renewed)
+		assert.Equal(t, int32(1), s.refreshCalls.Load(), "renews although the local expiry is not near")
+		assert.NotEqual(t, old, c.Token)
+		st, err := store.Load()
+		require.NoError(t, err)
+		assert.Equal(t, c.Token, st.Token)
+	})
+
+	t.Run("no refresh token", func(t *testing.T) {
+		t.Parallel()
+		s, srv := newSessionServer(t)
+		c, _ := newSessionClient(t, srv.URL, &config.StoredToken{Token: "jwt", ExpiresAt: time.Now().Add(time.Hour)})
+
+		renewed, err := c.RenewSession()
+		require.NoError(t, err)
+		assert.False(t, renewed)
+		assert.Equal(t, int32(0), s.refreshCalls.Load())
+	})
+
+	t.Run("api key", func(t *testing.T) {
+		t.Parallel()
+		s, srv := newSessionServer(t)
+		c, _ := newSessionClient(t, srv.URL, &config.StoredToken{Token: "jwt", RefreshToken: "r1", ExpiresAt: time.Now().Add(time.Hour)})
+		c.APIKey = "sk_test"
+
+		renewed, err := c.RenewSession()
+		require.NoError(t, err)
+		assert.False(t, renewed)
+		assert.Equal(t, int32(0), s.refreshCalls.Load())
+	})
+
+	t.Run("session ended", func(t *testing.T) {
+		t.Parallel()
+		s, srv := newSessionServer(t)
+		s.setRefresh("other")
+		c, _ := newSessionClient(t, srv.URL, &config.StoredToken{Token: "jwt", RefreshToken: "r1", ExpiresAt: time.Now().Add(time.Hour)})
+
+		renewed, err := c.RenewSession()
+		assert.False(t, renewed)
+		var apiErr *APIError
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, http.StatusUnauthorized, apiErr.StatusCode)
+	})
+}

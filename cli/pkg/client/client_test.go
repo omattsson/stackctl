@@ -2817,6 +2817,57 @@ func TestResetUserPassword_NonLocalRejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
 }
 
+func TestChangeUserRole_Success(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/users/u1/role", r.URL.Path)
+		var got types.ChangeRoleRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		assert.Equal(t, "devops", got.Role)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(types.ChangeRoleResponse{ID: "u1", OldRole: "user", NewRole: "devops", Changed: true, Message: "Role changed"})
+	}))
+	defer server.Close()
+
+	resp, err := New(server.URL).ChangeUserRole("u1", "devops")
+	require.NoError(t, err)
+	assert.Equal(t, &types.ChangeRoleResponse{ID: "u1", OldRole: "user", NewRole: "devops", Changed: true, Message: "Role changed"}, resp)
+}
+
+func TestChangeUserRole_ServerRules(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		status  int
+		message string
+		want    string
+	}{
+		{"own role", http.StatusForbidden, "Cannot change your own role", "Permission denied. (server: Cannot change your own role)"},
+		{"sso user", http.StatusConflict, "Role is managed by the identity provider", "Conflict: Role is managed by the identity provider"},
+		{"last admin", http.StatusConflict, "The last enabled admin cannot be demoted, disabled or deleted", "Conflict: The last enabled admin cannot be demoted, disabled or deleted"},
+		{"invalid role", http.StatusBadRequest, "Role must be one of: user, devops, admin", "Role must be one of: user, devops, admin"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_ = json.NewEncoder(w).Encode(types.ErrorResponse{Error: tt.message})
+			}))
+			defer server.Close()
+
+			_, err := New(server.URL).ChangeUserRole("u1", "admin")
+			var apiErr *APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tt.status, apiErr.StatusCode)
+			assert.Equal(t, tt.want, err.Error())
+		})
+	}
+}
+
 // TestUserAuthClient_APIErrorMatrix asserts every new user/auth client
 // method surfaces 401/404/500 as a *APIError with the right StatusCode.
 // Genuinely homogeneous error-mapping cases — table-driven is the right
@@ -2840,6 +2891,10 @@ func TestUserAuthClient_APIErrorMatrix(t *testing.T) {
 		{"DisableUser", func(c *Client) error { return c.DisableUser("u1") }},
 		{"EnableUser", func(c *Client) error { return c.EnableUser("u1") }},
 		{"ResetUserPassword", func(c *Client) error { return c.ResetUserPassword("u1", "strongpass!") }},
+		{"ChangeUserRole", func(c *Client) error {
+			_, err := c.ChangeUserRole("u1", "devops")
+			return err
+		}},
 	}
 
 	for _, call := range calls {

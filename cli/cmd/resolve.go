@@ -263,3 +263,51 @@ func pickChartID(charts []types.ChartConfig, nameOrID, scope string) (string, er
 	}
 	return "", err
 }
+
+// resolveUserID returns the ID of the user with the ID or username
+// userOrID. A UUID passes through without an API call. Other values are
+// looked up in GET /api/v1/users (admin only): first as a user ID, then as
+// the exact username, then as a username without case when only one user
+// matches.
+func resolveUserID(c *client.Client, userOrID string) (string, error) {
+	userOrID = strings.TrimSpace(userOrID)
+	if userOrID == "" {
+		return "", fmt.Errorf("user ID or username must not be empty")
+	}
+	if uuidRegex.MatchString(userOrID) {
+		return userOrID, nil
+	}
+
+	users, err := c.ListUsers()
+	if err != nil {
+		return "", fmt.Errorf("resolving user %q: %w", userOrID, err)
+	}
+	for _, u := range users {
+		if u.ID == userOrID {
+			return u.ID, nil
+		}
+	}
+	for _, u := range users {
+		if u.Username == userOrID {
+			return u.ID, nil
+		}
+	}
+	var folded []types.User
+	for _, u := range users {
+		if strings.EqualFold(u.Username, userOrID) {
+			folded = append(folded, u)
+		}
+	}
+	switch len(folded) {
+	case 0:
+		return "", fmt.Errorf("no user found with ID or username %q", userOrID)
+	case 1:
+		return folded[0].ID, nil
+	default:
+		msg := fmt.Sprintf("multiple users match username %q — use the ID instead:\n", userOrID)
+		for _, u := range folded {
+			msg += fmt.Sprintf("  %s  (%s)\n", u.ID, u.Username)
+		}
+		return "", fmt.Errorf("%s", msg)
+	}
+}

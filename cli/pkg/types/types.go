@@ -240,6 +240,23 @@ type ResetPasswordRequest struct {
 	Password string `json:"password" yaml:"password"`
 }
 
+// ChangeRoleRequest is the body for PUT /api/v1/users/:id/role
+// (k8s-stack-manager v0.8.0 or later). Role is "user", "devops" or "admin".
+type ChangeRoleRequest struct {
+	Role string `json:"role" yaml:"role"`
+}
+
+// ChangeRoleResponse is the response of PUT /api/v1/users/:id/role. Changed
+// is false when the user already had the role; the sessions of the user then
+// stay valid.
+type ChangeRoleResponse struct {
+	ID      string `json:"id" yaml:"id"`
+	OldRole string `json:"old_role" yaml:"old_role"`
+	NewRole string `json:"new_role" yaml:"new_role"`
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+	Changed bool   `json:"changed" yaml:"changed"`
+}
+
 // APIKey is one entry in the response of GET /api/v1/users/:id/api-keys.
 // Mirrors backend models.APIKey.
 //
