@@ -20,11 +20,15 @@ curl -fsSL https://raw.githubusercontent.com/omattsson/stackctl/main/install.sh 
 brew install --cask omattsson/tap/stackctl
 ```
 
-No compiler is needed. If you installed the old formula, reinstall once:
+No compiler is needed. The cask removes the macOS quarantine attribute from the binary, because the binary is not signed or notarized. The cask needs Homebrew 6.0.13 or later (`brew update`).
+
+If you installed the old formula, remove it once before the first cask install:
 
 ```bash
-brew uninstall stackctl && brew install --cask omattsson/tap/stackctl
+brew uninstall --formula stackctl && brew install --cask omattsson/tap/stackctl
 ```
+
+Homebrew installs stable releases only. To install a release candidate (for example `v0.7.0-rc.1`), use the release binaries below.
 
 ### From release binaries
 
@@ -34,6 +38,8 @@ Download the latest binary for your platform from [Releases](https://github.com/
 tar -xzf stackctl_*.tar.gz
 sudo install -m 755 stackctl /usr/local/bin/stackctl
 ```
+
+Release candidates (for example `v0.7.0-rc.1`) are GitHub pre-releases. They are not "Latest", and the quick install script and Homebrew do not install them. Download the archive from the release page of the tag, for example `https://github.com/omattsson/stackctl/releases/tag/v0.7.0-rc.1`. On macOS, remove the quarantine attribute before the first run: `xattr -d com.apple.quarantine stackctl`.
 
 ### From source
 
