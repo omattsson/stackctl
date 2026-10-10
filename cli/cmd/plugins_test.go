@@ -373,3 +373,73 @@ func TestContextEnv_NilConfig(t *testing.T) {
 	in := []string{"A=1"}
 	assert.Equal(t, in, contextEnv(in))
 }
+
+// ---------- global flags and plugins (stackctl#144) ----------
+
+func TestTargetsPlugin(t *testing.T) {
+	dir := t.TempDir()
+	_ = writeScript(t, dir, "stackctl-hello", "#!/bin/sh\nexit 0\n")
+
+	root := &cobra.Command{Use: "stackctl"}
+	root.PersistentFlags().StringP("output", "o", "table", "")
+	root.PersistentFlags().Bool("no-color", false, "")
+	root.AddCommand(&cobra.Command{Use: "stack", Run: func(*cobra.Command, []string) {}})
+	registerPlugins(root, dir)
+
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"plugin", []string{"hello", "a"}, true},
+		{"global flags before plugin", []string{"--no-color", "-o", "json", "hello", "status"}, true},
+		{"built-in", []string{"--no-color", "stack"}, false},
+		{"unknown command", []string{"nope"}, false},
+		{"no args", nil, false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, targetsPlugin(root, tt.args))
+		})
+	}
+}
+
+func TestPluginEnv_NoColorAndConfigDir(t *testing.T) {
+	cfgDir := t.TempDir()
+	t.Setenv("STACKCTL_CONFIG_DIR", cfgDir)
+	t.Setenv("STACKCTL_NO_COLOR", "")
+	t.Setenv("NO_COLOR", "")
+	require.NoError(t, os.Unsetenv("STACKCTL_NO_COLOR"))
+	require.NoError(t, os.Unsetenv("NO_COLOR"))
+
+	root := &cobra.Command{Use: "stackctl"}
+	root.PersistentFlags().Bool("no-color", false, "")
+
+	env := pluginEnv(root)
+	_, ok := envValue(env, "STACKCTL_NO_COLOR")
+	assert.False(t, ok, "STACKCTL_NO_COLOR is not set without --no-color")
+	_, ok = envValue(env, "NO_COLOR")
+	assert.False(t, ok)
+	v, _ := envValue(env, "STACKCTL_CONFIG_DIR")
+	assert.Equal(t, cfgDir, v)
+
+	require.NoError(t, root.PersistentFlags().Set("no-color", "true"))
+	env = pluginEnv(root)
+	v, _ = envValue(env, "STACKCTL_NO_COLOR")
+	assert.Equal(t, "1", v)
+	v, _ = envValue(env, "NO_COLOR")
+	assert.Equal(t, "1", v)
+}
+
+func TestPluginEnv_ConfigDirFromDefault(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("STACKCTL_CONFIG_DIR", "")
+	require.NoError(t, os.Unsetenv("STACKCTL_CONFIG_DIR"))
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	env := pluginEnv(&cobra.Command{Use: "stackctl"})
+	v, ok := envValue(env, "STACKCTL_CONFIG_DIR")
+	require.True(t, ok)
+	assert.Equal(t, filepath.Join(xdg, "stackmanager"), v)
+}

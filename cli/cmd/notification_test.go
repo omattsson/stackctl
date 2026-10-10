@@ -25,15 +25,15 @@ func sampleNotifications() []types.Notification {
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 2, 11, 30, 0, 0, time.UTC)
 	return []types.Notification{
-		{ID: "n1", Type: "stack.deploy.succeeded", Title: "Deploy succeeded", IsRead: false, CreatedAt: t1, UserID: "u1"},
-		{ID: "n2", Type: "stack.deploy.failed", Title: "Deploy failed", IsRead: true, CreatedAt: t2, UserID: "u1", Message: "exit 1", EntityType: "stack", EntityID: "s-1"},
+		{ID: "n1", Type: "deployment.success", Title: "Deploy succeeded", IsRead: false, CreatedAt: t1, UserID: "u1"},
+		{ID: "n2", Type: "deployment.error", Title: "Deploy failed", IsRead: true, CreatedAt: t2, UserID: "u1", Message: "exit 1", EntityType: "stack", EntityID: "s-1"},
 	}
 }
 
 func samplePrefs() []types.NotificationPreference {
 	return []types.NotificationPreference{
-		{EventType: "stack.deploy.failed", Enabled: true, Channel: "in_app", ID: "p1", UserID: "u1"},
-		{EventType: "stack.deploy.succeeded", Enabled: false, Channel: "in_app", ID: "p2", UserID: "u1"},
+		{EventType: "deployment.error", Enabled: true, Channel: "in_app", ID: "p1", UserID: "u1"},
+		{EventType: "deployment.success", Enabled: false, Channel: "in_app", ID: "p2", UserID: "u1"},
 	}
 }
 
@@ -57,7 +57,7 @@ func TestNotificationListCmd_TableOutput(t *testing.T) {
 	require.NoError(t, notificationListCmd.RunE(notificationListCmd, []string{}))
 
 	out := buf.String()
-	assert.Contains(t, out, "stack.deploy.succeeded")
+	assert.Contains(t, out, "deployment.success")
 	assert.Contains(t, out, "n1")
 	assert.Contains(t, out, "1 unread of 2 total")
 }
@@ -313,7 +313,7 @@ func TestNotificationPrefsGetCmd_TableOutput(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "EVENT TYPE")
-	assert.Contains(t, out, "stack.deploy.failed")
+	assert.Contains(t, out, "deployment.error")
 	assert.Contains(t, out, "in_app")
 }
 
@@ -331,7 +331,7 @@ func TestNotificationPrefsGetCmd_JSONOutput(t *testing.T) {
 	var got []types.NotificationPreference
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
 	require.Len(t, got, 2)
-	assert.Equal(t, "stack.deploy.failed", got[0].EventType)
+	assert.Equal(t, "deployment.error", got[0].EventType)
 }
 
 func TestNotificationPrefsGetCmd_YAMLOutput(t *testing.T) {
@@ -345,7 +345,7 @@ func TestNotificationPrefsGetCmd_YAMLOutput(t *testing.T) {
 	printer.Format = output.FormatYAML
 	require.NoError(t, notificationPrefsGetCmd.RunE(notificationPrefsGetCmd, []string{}))
 	out := buf.String()
-	assert.Contains(t, out, "event_type: stack.deploy.failed")
+	assert.Contains(t, out, "event_type: deployment.error")
 	assert.Contains(t, out, "channel: in_app")
 }
 
@@ -360,7 +360,7 @@ func TestNotificationPrefsGetCmd_QuietPrintsEventTypes(t *testing.T) {
 	printer.Quiet = true
 	require.NoError(t, notificationPrefsGetCmd.RunE(notificationPrefsGetCmd, []string{}))
 	got := strings.TrimSpace(buf.String())
-	assert.Equal(t, "stack.deploy.failed\nstack.deploy.succeeded", got)
+	assert.Equal(t, "deployment.error\ndeployment.success", got)
 }
 
 func TestNotificationPrefsGetCmd_Empty(t *testing.T) {
@@ -394,7 +394,7 @@ func TestNotificationPrefsSetCmd_FromFile(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "prefs.json")
-	payload := []byte(`[{"event_type":"stack.deploy.failed","enabled":true,"channel":"in_app"}]`)
+	payload := []byte(`[{"event_type":"deployment.error","enabled":true,"channel":"in_app"}]`)
 	require.NoError(t, os.WriteFile(path, payload, 0600))
 	notifPrefsFlagFile = path
 
@@ -406,7 +406,7 @@ func TestNotificationPrefsSetCmd_FromFile(t *testing.T) {
 	var sent []types.NotificationPreference
 	require.NoError(t, json.Unmarshal(gotBody, &sent))
 	require.Len(t, sent, 1)
-	assert.Equal(t, "stack.deploy.failed", sent[0].EventType)
+	assert.Equal(t, "deployment.error", sent[0].EventType)
 }
 
 func TestNotificationPrefsSetCmd_JSONOutput(t *testing.T) {
@@ -453,7 +453,7 @@ func TestNotificationPrefsSetCmd_YAMLOutput(t *testing.T) {
 
 	require.NoError(t, notificationPrefsSetCmd.RunE(notificationPrefsSetCmd, []string{}))
 	out := buf.String()
-	assert.Contains(t, out, "event_type: stack.deploy.failed")
+	assert.Contains(t, out, "event_type: deployment.error")
 	assert.NotContains(t, out, "Updated")
 }
 
@@ -476,7 +476,7 @@ func TestNotificationPrefsSetCmd_QuietPrintsEventTypes(t *testing.T) {
 
 	require.NoError(t, notificationPrefsSetCmd.RunE(notificationPrefsSetCmd, []string{}))
 	got := strings.TrimSpace(buf.String())
-	assert.Equal(t, "stack.deploy.failed\nstack.deploy.succeeded", got)
+	assert.Equal(t, "deployment.error\ndeployment.success", got)
 }
 
 // ---------- list pagination validation ----------
@@ -575,7 +575,7 @@ func TestNotificationPrefsSetCmd_FromStdin(t *testing.T) {
 	notifPrefsFlagFile = "-"
 
 	// Pipe the JSON via cmd.InOrStdin().
-	notificationPrefsSetCmd.SetIn(bytes.NewBufferString(`[{"event_type":"stack.deploy.failed","enabled":true}]`))
+	notificationPrefsSetCmd.SetIn(bytes.NewBufferString(`[{"event_type":"deployment.error","enabled":true}]`))
 	defer notificationPrefsSetCmd.SetIn(nil)
 	require.NoError(t, notificationPrefsSetCmd.RunE(notificationPrefsSetCmd, []string{}))
 }
@@ -610,3 +610,82 @@ func TestNotificationCmds_APIError401(t *testing.T) {
 	}
 }
 
+// ---------- notification prefs set: event types (stackctl#145) ----------
+
+func TestNotificationPrefsSetCmd_EventTypeWarning(t *testing.T) {
+	tests := []struct {
+		name     string
+		payload  string
+		wantWarn []string
+	}{
+		{"known types", `[{"event_type":"deployment.error","enabled":true},{"event_type":"deployment.partial","enabled":true},{"event_type":"stack.expired","enabled":true}]`, nil},
+		{"unknown type", `[{"event_type":"stack.deploy.*","enabled":true},{"event_type":"deployment.success","enabled":false}]`, []string{`unknown notification event type "stack.deploy.*"`}},
+		{"unknown type once", `[{"event_type":"bogus.event","enabled":true},{"event_type":"bogus.event","enabled":false}]`, []string{`"bogus.event"`}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(samplePrefs())
+			}))
+			defer server.Close()
+
+			_ = setupStackTestCmd(t, server.URL)
+			resetNotificationFlagsForTest()
+			defer resetNotificationFlagsForTest()
+			notifPrefsFlagFile = "-"
+			var errBuf bytes.Buffer
+			notificationPrefsSetCmd.SetIn(bytes.NewBufferString(tt.payload))
+			notificationPrefsSetCmd.SetErr(&errBuf)
+			defer notificationPrefsSetCmd.SetIn(nil)
+			defer notificationPrefsSetCmd.SetErr(nil)
+
+			require.NoError(t, notificationPrefsSetCmd.RunE(notificationPrefsSetCmd, []string{}))
+			assert.Equal(t, 1, calls, "the request is sent after a warning")
+			if len(tt.wantWarn) == 0 {
+				assert.Empty(t, errBuf.String())
+				return
+			}
+			for _, w := range tt.wantWarn {
+				assert.Contains(t, errBuf.String(), w)
+			}
+			assert.Equal(t, 1, strings.Count(errBuf.String(), "Warning:"))
+			assert.Contains(t, errBuf.String(), "stackctl notification prefs set --help")
+		})
+	}
+}
+
+func TestNotificationPrefsSetCmd_ServerRejectsUnknownType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"Unknown event type: bogus.event"}`))
+	}))
+	defer server.Close()
+
+	_ = setupStackTestCmd(t, server.URL)
+	resetNotificationFlagsForTest()
+	defer resetNotificationFlagsForTest()
+	notifPrefsFlagFile = "-"
+	var errBuf bytes.Buffer
+	notificationPrefsSetCmd.SetIn(bytes.NewBufferString(`[{"event_type":"bogus.event","enabled":true}]`))
+	notificationPrefsSetCmd.SetErr(&errBuf)
+	defer notificationPrefsSetCmd.SetIn(nil)
+	defer notificationPrefsSetCmd.SetErr(nil)
+
+	err := notificationPrefsSetCmd.RunE(notificationPrefsSetCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Unknown event type: bogus.event")
+	assert.Contains(t, errBuf.String(), `unknown notification event type "bogus.event"`)
+}
+
+func TestNotificationPrefsSetCmd_HelpListsEventTypes(t *testing.T) {
+	t.Parallel()
+	for _, et := range notificationEventTypes {
+		assert.Contains(t, notificationPrefsSetCmd.Long, et.Name)
+	}
+	assert.NotContains(t, notificationPrefsSetCmd.Long, "stack.deploy.")
+}

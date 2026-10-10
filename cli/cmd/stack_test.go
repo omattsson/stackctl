@@ -1619,7 +1619,7 @@ func TestFollowLogsCtx_ExitsOnTerminalStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	var out, warn bytes.Buffer
-	require.NoError(t, followLogsCtx(context.Background(), c, "42", &out, &warn))
+	require.NoError(t, followLogsCtx(context.Background(), c, "42", followOpLogs, &out, &warn))
 	got := out.String()
 	assert.Contains(t, got, "hello")
 	assert.Contains(t, got, "world")
@@ -1627,7 +1627,7 @@ func TestFollowLogsCtx_ExitsOnTerminalStatus(t *testing.T) {
 
 // TestFollowLogsCtx_ErrorStatusBubblesError verifies the documented
 // non-zero exit contract when the deployment ends with a terminal
-// "error" status — the wrapped error must mention "deployment failed".
+// "error" status — the wrapped error names the operation.
 func TestFollowLogsCtx_ErrorStatusBubblesError(t *testing.T) {
 	server := startFollowLogsWS(t, "error", []string{"hint: image pull"})
 	defer server.Close()
@@ -1637,9 +1637,9 @@ func TestFollowLogsCtx_ErrorStatusBubblesError(t *testing.T) {
 	require.NoError(t, err)
 
 	var out, warn bytes.Buffer
-	err = followLogsCtx(context.Background(), c, "42", &out, &warn)
+	err = followLogsCtx(context.Background(), c, "42", followOpLogs, &out, &warn)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "deployment failed")
+	assert.Equal(t, "operation failed (status error)", err.Error())
 }
 
 // TestFollowLogsCtx_CtxCancelSurfacesAsCleanExit verifies the documented
@@ -1673,7 +1673,7 @@ func TestFollowLogsCtx_CtxCancelSurfacesAsCleanExit(t *testing.T) {
 		cancel()
 	}()
 	var out, warn bytes.Buffer
-	err = followLogsCtx(ctx, c, "42", &out, &warn)
+	err = followLogsCtx(ctx, c, "42", followOpLogs, &out, &warn)
 	assert.NoError(t, err, "ctx cancellation must surface as clean exit")
 }
 

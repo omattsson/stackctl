@@ -889,19 +889,33 @@ func (c *Client) DiffTemplateVersions(templateID, leftID, rightID string) (*type
 	return &diff, nil
 }
 
-// ListOrphanedNamespaces returns namespaces that have the stack-manager label but no matching DB record.
-func (c *Client) ListOrphanedNamespaces() ([]types.OrphanedNamespace, error) {
+// ListOrphanedNamespaces returns the stack-* namespaces that have no matching
+// stack instance (GET /api/v1/admin/orphaned-namespaces, admin only). With
+// details the server adds Helm releases and resource counts (slower).
+func (c *Client) ListOrphanedNamespaces(details bool) ([]types.OrphanedNamespace, error) {
 	var ns []types.OrphanedNamespace
-	err := c.Get("/api/v1/orphaned-namespaces", &ns)
+	path := "/api/v1/admin/orphaned-namespaces"
+	if details {
+		path += "?details=true"
+	}
+	err := c.Get(path, &ns)
 	if err != nil {
 		return nil, err
 	}
 	return ns, nil
 }
 
-// DeleteOrphanedNamespace removes an orphaned namespace.
-func (c *Client) DeleteOrphanedNamespace(namespace string) error {
-	return c.Delete(fmt.Sprintf("/api/v1/orphaned-namespaces/%s", namespace))
+// DeleteOrphanedNamespace uninstalls the Helm releases of an orphaned
+// namespace and deletes it (DELETE /api/v1/admin/orphaned-namespaces/:ns).
+// confirm is sent as ?confirm=<value> when not empty; the server requires
+// the full namespace name for a namespace without the managed-by label and
+// returns 409 without it.
+func (c *Client) DeleteOrphanedNamespace(namespace, confirm string) error {
+	path := "/api/v1/admin/orphaned-namespaces/" + url.PathEscape(namespace)
+	if confirm != "" {
+		path += "?confirm=" + url.QueryEscape(confirm)
+	}
+	return c.Delete(path)
 }
 
 // UpdateTemplateChart updates a chart config within a template. The backend

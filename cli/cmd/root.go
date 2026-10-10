@@ -93,12 +93,27 @@ func Execute() error {
 	// erroring keeps the CLI usable if a user happens to have a
 	// `stackctl-<builtin>` binary lying around.
 	registerPlugins(rootCmd, os.Getenv("PATH"))
+	args := os.Args[1:]
+	if testArgs != nil {
+		args = testArgs
+	}
+	// For a plugin, the root command parses the global flags before the
+	// plugin name (TraverseChildren). The plugin (DisableFlagParsing) then
+	// gets only the arguments after its name, and pluginEnv passes the flag
+	// values as STACKCTL_* variables: `stackctl --no-color refresh-db
+	// status x` runs the plugin with "status x" and STACKCTL_NO_COLOR=1
+	// (stackctl#144). Built-in commands keep the default flag parsing.
+	rootCmd.TraverseChildren = targetsPlugin(rootCmd, args)
 	return rootCmd.Execute()
 }
+
+// testArgs holds the arguments of SetArgs (nil: os.Args[1:]).
+var testArgs []string
 
 // SetArgs overrides the command-line arguments for the next Execute call.
 // Intended for integration tests.
 func SetArgs(args []string) {
+	testArgs = args
 	rootCmd.SetArgs(args)
 }
 

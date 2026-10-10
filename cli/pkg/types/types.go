@@ -760,11 +760,25 @@ type UpdateTemplateChartRequest struct {
 	Required        bool   `json:"required" yaml:"required"`
 }
 
-// OrphanedNamespace represents a Kubernetes namespace with no matching stack record.
+// OrphanedNamespace is one entry of GET /api/v1/admin/orphaned-namespaces:
+// a stack-* namespace with no matching stack instance. Managed is true when
+// the namespace has the label managed-by=k8s-stack-manager; the delete of an
+// unmanaged namespace needs ?confirm=<name>. HelmReleases and ResourceCounts
+// are filled only with ?details=true.
 type OrphanedNamespace struct {
-	Namespace string `json:"namespace" yaml:"namespace"`
-	Cluster   string `json:"cluster,omitempty" yaml:"cluster,omitempty"`
-	CreatedAt string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	ResourceCounts *ResourceCounts `json:"resource_counts,omitempty" yaml:"resource_counts,omitempty"`
+	Name           string          `json:"name" yaml:"name"`
+	Phase          string          `json:"phase,omitempty" yaml:"phase,omitempty"`
+	CreatedAt      string          `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	HelmReleases   []string        `json:"helm_releases,omitempty" yaml:"helm_releases,omitempty"`
+	Managed        bool            `json:"managed" yaml:"managed"`
+}
+
+// ResourceCounts holds the number of workload resources in a namespace.
+type ResourceCounts struct {
+	Deployments int `json:"deployments" yaml:"deployments"`
+	Pods        int `json:"pods" yaml:"pods"`
+	Services    int `json:"services" yaml:"services"`
 }
 
 // BulkInstancesRequest is the request body for bulk operations against

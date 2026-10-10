@@ -115,7 +115,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates an existing cleanup policy and reloads the scheduler. See the create endpoint for the condition syntax (status, idle_days, age_days, stopped_days, ttl_expired).",
+                "description": "Updates an existing cleanup policy and reloads the scheduler. Partial update: only the fields in the body change (for example {\"enabled\": false}); the merged policy is validated. See the create endpoint for the condition syntax (status, idle_days, age_days, stopped_days, ttl_expired).",
                 "consumes": [
                     "application/json"
                 ],
@@ -135,12 +135,12 @@
                         "required": true
                     },
                     {
-                        "description": "Cleanup policy",
+                        "description": "Fields to change",
                         "name": "policy",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.CleanupPolicy"
+                            "$ref": "#/definitions/handlers.updateCleanupPolicyRequest"
                         }
                     }
                 ],
@@ -153,6 +153,24 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -232,7 +250,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Executes a cleanup policy immediately. Use ?dry_run=true to preview matches without acting.",
+                "description": "Executes a cleanup policy immediately and answers when the run ends. Use ?dry_run=true to preview matches without acting. Stop and clean only start the operations (fast). A delete runs the pre-instance-delete hooks per instance first, so a delete run can take up to the number of matches times (5 minutes, or the sum of the pre-instance-delete hook timeouts plus one minute when longer); use a client timeout that allows this. The run fires cleanup-policy-executed when at least one instance matched.",
                 "produces": [
                     "application/json"
                 ],
@@ -337,7 +355,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a new notification channel",
+                "description": "Creates a new notification channel. Optional filters limit the channel to some stack instances: instance_name_patterns (globs, path.Match syntax, case-insensitive), owner_ids, definition_ids and cluster_ids. Each set filter must match (AND); one value of a filter is enough (OR); empty filters match all instances. Events without an instance go only to channels without filters; a cleanup policy run goes to a channel when at least one affected instance matches. An invalid pattern gives 400. An ID that does not exist gives a warning in the response; the channel is saved.",
                 "consumes": [
                     "application/json"
                 ],
@@ -363,11 +381,29 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/models.NotificationChannel"
+                            "$ref": "#/definitions/handlers.notificationChannelResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -429,7 +465,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a notification channel by ID",
+                "description": "Returns a notification channel by ID, with its filters",
                 "produces": [
                     "application/json"
                 ],
@@ -488,7 +524,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates an existing notification channel",
+                "description": "Updates an existing notification channel. filters replaces the channel filters (omit it to keep them, send {} to remove them); the rules are the same as for create. An ID that does not exist gives a warning in the response.",
                 "consumes": [
                     "application/json"
                 ],
@@ -521,11 +557,29 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.NotificationChannel"
+                            "$ref": "#/definitions/handlers.notificationChannelResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -866,7 +920,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lists all Kubernetes namespaces matching the stack-* pattern that have no corresponding stack instance in the database. Pass ?details=true to include resource counts and helm releases per namespace (expensive).",
+                "description": "Lists all Kubernetes namespaces matching the stack-* pattern that have no corresponding stack instance in the database. Pass ?details=true to include resource counts and helm releases per namespace (expensive). The managed field is true when the namespace has the label managed-by=k8s-stack-manager.",
                 "produces": [
                     "application/json"
                 ],
@@ -920,7 +974,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Verifies the namespace is orphaned, uninstalls all Helm releases, and deletes the Kubernetes namespace",
+                "description": "Verifies the namespace is orphaned, uninstalls all Helm releases, and deletes the Kubernetes namespace. A namespace without the label managed-by=k8s-stack-manager is deleted only when the confirm query parameter is the full namespace name.",
                 "produces": [
                     "application/json"
                 ],
@@ -935,6 +989,12 @@
                         "name": "namespace",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Full namespace name; required when the namespace is not managed by k8s-stack-manager",
+                        "name": "confirm",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -949,6 +1009,15 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1737,7 +1806,7 @@
         },
         "/api/v1/auth/register": {
             "post": {
-                "description": "Create a new user account (admin only, or when self-registration is enabled)",
+                "description": "Create a new user account (admin only, or when self-registration is enabled) A role outside user, devops and admin gives 400.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2202,7 +2271,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns node count, CPU/memory totals, and namespace count for a cluster.",
+                "description": "Returns node count, CPU/memory totals, and namespace count for a cluster. requested_cpu and requested_memory are the sums of the pod requests of scheduled, unfinished pods (not real use); omitted when the pod list fails.",
                 "produces": [
                     "application/json"
                 ],
@@ -3276,8 +3345,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/handlers.ValidateBranchResponse"
                         }
                     },
                     "400": {
@@ -3872,7 +3940,7 @@
         },
         "/api/v1/stack-definitions": {
             "get": {
-                "description": "List stack definitions with server-side pagination",
+                "description": "List stack definitions with server-side pagination, newest first. The filters name and owner combine (AND); total is the number of definitions that match.\nowner is \"me\" (the authenticated user), a username, or a user ID. A value in UUID form is matched as a user ID first, then as a username. An unknown username or ID gives an empty list. Each definition includes owner_username (omitted when the owner no longer exists) and chart_count (the number of charts; omitted when the count fails).\nThe list is paged (default pageSize 25); with owner=me or name the total is the real number of matches, not the page size.",
                 "produces": [
                     "application/json"
                 ],
@@ -3885,6 +3953,12 @@
                         "type": "string",
                         "description": "Filter by exact name",
                         "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by owner: 'me', a username, or a user ID",
+                        "name": "owner",
                         "in": "query"
                     },
                     {
@@ -3924,6 +3998,24 @@
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Owner filter is too long",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "owner=me without an authenticated user",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "500": {
@@ -4060,7 +4152,7 @@
         },
         "/api/v1/stack-definitions/{id}": {
             "get": {
-                "description": "Get a stack definition by ID, including its chart configurations",
+                "description": "Get a stack definition by ID, including its chart configurations and owner_username (omitted when the owner no longer exists)",
                 "produces": [
                     "application/json"
                 ],
@@ -4651,7 +4743,7 @@
         },
         "/api/v1/stack-instances": {
             "get": {
-                "description": "List stack instances with server-side pagination. Supports page/pageSize or legacy limit/offset params. Use owner=me to filter by the authenticated user. Filter precedence: owner \u003e name \u003e pagination (only the first matching filter is applied).",
+                "description": "List stack instances with server-side pagination, newest first. Supports page/pageSize or legacy limit/offset params.\nThe filters name, status, cluster_id, definition_id and owner combine (AND). total is the number of instances that match the filters.\nowner is \"me\" (the authenticated user), a username, or a user ID. A value in UUID form is matched as a user ID first, then as a username. An unknown username or ID gives an empty list.\nThe list is paged (default pageSize 25); with owner=me or name the total is the real number of matches, not the page size.\nEach instance includes owner_username, definition_name and cluster_name. A field is omitted when the owner, definition or cluster no longer exists; cluster_name is also omitted when cluster_id is empty (older instances).",
                 "produces": [
                     "application/json"
                 ],
@@ -4662,7 +4754,7 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by owner (use 'me' for current user)",
+                        "description": "Filter by owner: 'me', a username, or a user ID",
                         "name": "owner",
                         "in": "query"
                     },
@@ -4670,6 +4762,36 @@
                         "type": "string",
                         "description": "Filter by exact instance name",
                         "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "draft",
+                            "queued",
+                            "deploying",
+                            "stabilizing",
+                            "running",
+                            "stopping",
+                            "stopped",
+                            "cleaning",
+                            "partial",
+                            "error"
+                        ],
+                        "type": "string",
+                        "description": "Filter by status",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by cluster ID",
+                        "name": "cluster_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by stack definition ID",
+                        "name": "definition_id",
                         "in": "query"
                     },
                     {
@@ -4703,6 +4825,24 @@
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown status, or a filter value that is too long",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "owner=me without an authenticated user",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "500": {
@@ -5072,7 +5212,7 @@
         },
         "/api/v1/stack-instances/{id}": {
             "get": {
-                "description": "Get a stack instance by ID. values_drift is true when the running values come from a successful rollback and the stored overrides produce different values: the next deploy undoes the rollback. Only this endpoint computes values_drift; list responses omit it.",
+                "description": "Get a stack instance by ID. values_drift is true when the running values come from a successful rollback and the stored overrides produce different values: the next deploy undoes the rollback. Only this endpoint computes values_drift, following (the caller follows the instance) and follower_count; list responses omit them. owner_username, definition_name and cluster_name are omitted when the owner, definition or cluster no longer exists; cluster_name is also omitted when cluster_id is empty (older instances).",
                 "produces": [
                     "application/json"
                 ],
@@ -5270,9 +5410,86 @@
                 }
             }
         },
+        "/api/v1/stack-instances/{id}/actions": {
+            "get": {
+                "description": "Returns the registered actions with their UI metadata (label, description, confirmation text, parameter schema) and a can_invoke flag. Any authenticated user who can view the instance gets the list; can_invoke is true for the owner, an admin and a devops user. The response never contains the subscriber URL, secret or headers. Without an action registry the list is empty.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-instances"
+                ],
+                "summary": "List the actions that can run on a stack instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.actionListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Instance not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/stack-instances/{id}/actions/{name}": {
             "post": {
-                "description": "Dispatches to the action subscriber webhook and wraps its response in an envelope containing action, instance_id, status_code, and result fields. The subscriber's JSON body is nested under the result key. Returns 200 even for non-2xx subscriber responses — check status_code to distinguish.",
+                "description": "Dispatches to the action subscriber webhook and wraps its response in an envelope containing action, instance_id, status_code, and result fields. The subscriber's JSON body is nested under the result key. Returns 200 even for non-2xx subscriber responses — check status_code to distinguish. When the action declares parameters, they are checked (type, required, enum options) before the call; undeclared parameters pass through. When the action has a log_path, the subscriber answered 2xx and the result has a valid job_id, the envelope also has job_id: poll GET /stack-instances/{id}/actions/{name}/jobs/{job_id}/log for the job log.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5363,6 +5580,121 @@
                 }
             }
         },
+        "/api/v1/stack-instances/{id}/actions/{name}/jobs/{job_id}/log": {
+            "get": {
+                "description": "Fetches the job log of an asynchronous action from the action subscriber, from the byte offset to the end (at most 256 KiB per call). The action config must have a log_path. Poll with next_offset until done is true. Only the instance owner, an admin or a devops user may read the job log (the same rule as invoke). The backend signs the subscriber request like an invoke call and never returns the subscriber URL.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-instances"
+                ],
+                "summary": "Read the job log of an asynchronous action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Action name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Job ID (1-128 characters: A-Z a-z 0-9 . _ -, not starting with a dot)",
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Byte offset to read from (default 0)",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.actionJobLogResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid job_id or offset",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Caller is not the owner, an admin or a devops user",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Instance, action, job log route or job not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Subscriber unreachable or returned an error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Action registry not configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/stack-instances/{id}/branches": {
             "get": {
                 "security": [
@@ -5428,6 +5760,90 @@
             }
         },
         "/api/v1/stack-instances/{id}/branches/{chartId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get the per-chart branch override of one chart in a stack instance. The authorization rule is the same as for the list (owner, admin or devops). An existing override is returned also when its chart is no longer part of the definition. Without an override the response is 404: \"Chart not found in this stack definition\" for an unknown chart, otherwise \"Branch override not found\".",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "branch-overrides"
+                ],
+                "summary": "Get the branch override for a chart",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Chart config ID",
+                        "name": "chartId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ChartBranchOverride"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Instance not found, chart not found in this stack definition, or no override",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
             "put": {
                 "security": [
                     {
@@ -6130,6 +6546,180 @@
                 }
             }
         },
+        "/api/v1/stack-instances/{id}/follow": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The caller follows the instance and gets its in-app notifications, as the owner does, filtered by the notification preferences of the caller. Every authenticated user who can view the instance can follow it. A repeated follow is not an error. Followers get no channel (webhook) deliveries.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-instances"
+                ],
+                "summary": "Follow a stack instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.followStateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "501": {
+                        "description": "Following is not configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The caller stops following the instance. Unfollowing an instance that the caller does not follow is not an error.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-instances"
+                ],
+                "summary": "Unfollow a stack instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.followStateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "501": {
+                        "description": "Following is not configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/stack-instances/{id}/overrides": {
             "get": {
                 "description": "List all value overrides for a stack instance",
@@ -6600,7 +7190,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Upsert the per-instance resource quota override for a stack instance. Each non-empty quantity must be a valid Kubernetes quantity (for example 500m, 2, 512Mi, 10Gi) and not negative; cpu_request must not exceed cpu_limit and memory_request must not exceed memory_limit; pod_limit must not be negative. Values are trimmed. The effective quota (cluster quota of the instance's cluster merged with this override) must follow the same rules, for example \"cpu_request 4 (instance override) exceeds the effective cpu_limit 2 (cluster quota)\". Invalid input returns 400 with the field name. Authorization: the instance owner, admin or devops. An owner without the admin or devops role cannot set a value above the cluster quota of the instance's cluster (403, for example \"cpu_limit 64 exceeds the cluster quota 16; only admin or devops can set a higher quota\"); a field without a cluster value has no cap, and pod_limit 0 (no limit) counts as above a cluster pod_limit. A value equal to the stored override passes, so an owner can change one field without losing an admin grant. Admin and devops may exceed the cluster quota. The check runs on write (and on clone), not on deploy.",
+                "description": "PUT replaces all fields of the override: a field that is not sent is cleared (an empty quantity or a missing pod_limit means no override for that field, so the cluster quota applies). To change one field, read the override with GET, change the field and send all fields. There is no PATCH.\nUpsert the per-instance resource quota override for a stack instance. Each non-empty quantity must be a valid Kubernetes quantity (for example 500m, 2, 512Mi, 10Gi) and not negative; cpu_request must not exceed cpu_limit and memory_request must not exceed memory_limit; pod_limit must not be negative. Values are trimmed. The effective quota (cluster quota of the instance's cluster merged with this override) must follow the same rules, for example \"cpu_request 4 (instance override) exceeds the effective cpu_limit 2 (cluster quota)\". Invalid input returns 400 with the field name. Authorization: the instance owner, admin or devops. An owner without the admin or devops role cannot set a value above the cluster quota of the instance's cluster (403, for example \"cpu_limit 64 exceeds the cluster quota 16; only admin or devops can set a higher quota\"); a field without a cluster value has no cap, and pod_limit 0 (no limit) counts as above a cluster pod_limit. A value equal to the stored override passes, so an owner can change one field without losing an admin grant. Admin and devops may exceed the cluster quota. The check runs on write (and on clone), not on deploy.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7078,7 +7668,7 @@
         },
         "/api/v1/templates": {
             "get": {
-                "description": "List published templates for regular users, all templates for devops/admin. Includes definition_count and owner_username. Supports server-side pagination.\nname filters by exact template name (same as the stack-definitions name filter); the response keeps the paged envelope.",
+                "description": "List published templates for regular users, all templates for devops/admin. Includes definition_count and owner_username (omitted when the owner no longer exists). Supports server-side pagination.\nname filters by exact template name (same as the stack-definitions name filter); the response keeps the paged envelope.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7385,7 +7975,7 @@
         },
         "/api/v1/templates/{id}": {
             "get": {
-                "description": "Get a stack template by ID, including its chart configurations. The template fields and charts are the working copy (draft).\npublished_version and published_version_id describe the latest published snapshot (null when there is none). has_unpublished_changes is true when the working copy differs from that snapshot (or there is no snapshot).\npublished_charts are the charts of that snapshot (what Use Template and Quick Deploy apply; null when there is none). Their IDs are valid chart_overrides keys for Use Template.\ncharts are the working copy charts only for the template owner and admins. For other users charts equals published_charts (an empty list without a snapshot), version is the published version (empty without a snapshot) and has_unpublished_changes is false, so draft information is not exposed.",
+                "description": "Get a stack template by ID, including its chart configurations. The template fields and charts are the working copy (draft). owner_username is the username of the owner (omitted when the owner no longer exists).\npublished_version and published_version_id describe the latest published snapshot (null when there is none). has_unpublished_changes is true when the working copy differs from that snapshot (or there is no snapshot).\npublished_charts are the charts of that snapshot (what Use Template and Quick Deploy apply; null when there is none). Their IDs are valid chart_overrides keys for Use Template.\ncharts are the working copy charts only for the template owner and admins. For other users charts equals published_charts (an empty list without a snapshot), version is the published version (empty without a snapshot) and has_unpublished_changes is false, so draft information is not exposed.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7855,7 +8445,10 @@
         },
         "/api/v1/templates/{id}/clone": {
             "post": {
-                "description": "Create a new draft template that is a copy of the source (devops/admin only)",
+                "description": "Create a new draft template that is a copy of the source (devops/admin only).\nThe body is optional. name sets the name of the clone (trimmed, same rules as create); the default is \"\u003csource name\u003e (Copy)\".",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7870,6 +8463,14 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Clone options",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.cloneTemplateRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -7879,8 +8480,44 @@
                             "$ref": "#/definitions/models.StackTemplate"
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8473,6 +9110,35 @@
                 }
             }
         },
+        "/api/v1/ui-config": {
+            "get": {
+                "description": "Returns the display values of the web UI: product title, logo URL and favicon URL (APP_TITLE, APP_LOGO_URL, APP_FAVICON_URL). Public: no authentication, so the login page can use it. An empty logo_url means the built-in logo. A URL is a same-origin path or an https URL. Cached for 5 minutes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ui"
+                ],
+                "summary": "Web UI display config",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UIConfigResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users": {
             "get": {
                 "security": [
@@ -8526,7 +9192,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Permanently deletes a user account. Admin only. Cannot delete own account. Revokes the user's current access tokens and all refresh tokens, and deletes all API keys of the user.",
+                "description": "Permanently deletes a user account. Admin only. Cannot delete own account (400). The last enabled admin cannot be deleted (409). The caller must still be an enabled admin in the database (403). Revokes the user's current access tokens and all refresh tokens, and deletes all API keys of the user.",
                 "produces": [
                     "application/json"
                 ],
@@ -8576,6 +9242,24 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8820,7 +9504,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Disables a user account. Admin only. Revokes the user's current access tokens and all refresh tokens. API keys stop working while the user is disabled and work again after enable.",
+                "description": "Disables a user account. Admin only. The last enabled admin cannot be disabled (409). The caller must still be an enabled admin in the database (403). Revokes the user's current access tokens and all refresh tokens. API keys stop working while the user is disabled and work again after enable.",
                 "consumes": [
                     "application/json"
                 ],
@@ -8879,6 +9563,15 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9058,6 +9751,106 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/{id}/role": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets the role of a local user. Admin only. The role of an SSO user comes from the identity provider and cannot be changed here (409). An admin cannot change their own role (403), the caller must still be an enabled admin in the database (403), and the last enabled admin cannot lose the admin role (409). An unchanged role is a no-op (changed=false). A change revokes the user's current access tokens, all refresh tokens and open WebSocket connections, so the next request needs a new login with the new role. API keys stay valid and use the new role at once.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Change the role of a user",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New role",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ChangeRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ChangeRoleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9361,6 +10154,45 @@
                 }
             }
         },
+        "handlers.ChangeRoleRequest": {
+            "type": "object",
+            "required": [
+                "role"
+            ],
+            "properties": {
+                "role": {
+                    "description": "Role is the new role: \"user\", \"devops\" or \"admin\".",
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "devops",
+                        "admin"
+                    ],
+                    "example": "devops"
+                }
+            }
+        },
+        "handlers.ChangeRoleResponse": {
+            "type": "object",
+            "properties": {
+                "changed": {
+                    "description": "Changed is false when the user already had the role (no-op: the\nsessions of the user stay valid).",
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "new_role": {
+                    "type": "string"
+                },
+                "old_role": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.ChartConfigExportData": {
             "type": "object",
             "properties": {
@@ -9416,14 +10248,33 @@
                 "cluster_id": {
                     "type": "string"
                 },
+                "cluster_name": {
+                    "description": "ClusterName is the name of the target cluster. Omitted when the\ncluster no longer exists or cluster_id is empty (older instances).",
+                    "type": "string",
+                    "readOnly": true
+                },
                 "created_at": {
                     "type": "string"
+                },
+                "definition_name": {
+                    "description": "DefinitionName is the name of the stack definition. Omitted when the\ndefinition no longer exists.",
+                    "type": "string",
+                    "readOnly": true
                 },
                 "error_message": {
                     "type": "string"
                 },
                 "expires_at": {
                     "type": "string"
+                },
+                "follower_count": {
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "following": {
+                    "description": "Following and FollowerCount are computed, not stored. Only GET\n/stack-instances/{id} sets them: following is true when the caller\nfollows the instance, follower_count is the number of followers.",
+                    "type": "boolean",
+                    "readOnly": true
                 },
                 "id": {
                     "type": "string"
@@ -9439,6 +10290,11 @@
                 },
                 "owner_id": {
                     "type": "string"
+                },
+                "owner_username": {
+                    "description": "OwnerUsername is the username of the owner. Omitted when the owner\nno longer exists (for example, after a delete).",
+                    "type": "string",
+                    "readOnly": true
                 },
                 "stack_definition_id": {
                     "type": "string"
@@ -9824,6 +10680,11 @@
         "handlers.DefinitionWithChartsResponse": {
             "type": "object",
             "properties": {
+                "chart_count": {
+                    "description": "ChartCount is the number of charts. It is computed, not stored; the\npaged list sets it (the list does not load the charts).",
+                    "type": "integer",
+                    "readOnly": true
+                },
                 "charts": {
                     "type": "array",
                     "items": {
@@ -9851,6 +10712,11 @@
                 "owner_instance_id": {
                     "description": "OwnerInstanceID is set when quick deploy created the definition for one\ninstance. Deleting that instance also deletes the definition when no\nother instance uses it. Empty for definitions that users create.",
                     "type": "string"
+                },
+                "owner_username": {
+                    "description": "OwnerUsername is the username of the owner. It is computed, not\nstored; the API sets it in list and detail responses. Omitted when\nthe owner no longer exists (for example, after a delete).",
+                    "type": "string",
+                    "readOnly": true
                 },
                 "source_template_id": {
                     "type": "string"
@@ -9968,6 +10834,10 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "managed": {
+                    "description": "Managed is true when the namespace has the label\nmanaged-by=k8s-stack-manager. An unmanaged namespace can belong to\nanother team or tool; deleting it requires ?confirm=\u003cnamespace\u003e.",
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"
@@ -10105,6 +10975,11 @@
                 "owner_id": {
                     "type": "string"
                 },
+                "owner_username": {
+                    "description": "OwnerUsername is the username of the owner. It is computed, not\nstored; the API sets it in list and detail responses. Omitted when\nthe owner no longer exists (for example, after a delete).",
+                    "type": "string",
+                    "readOnly": true
+                },
                 "published_charts": {
                     "description": "PublishedCharts are the charts of the latest snapshot: what Use\nTemplate and Quick Deploy apply. The IDs are the template chart config\nIDs at publish time; Use Template accepts them as chart_overrides keys.\nNull when the template has no snapshot.",
                     "type": "array",
@@ -10158,6 +11033,26 @@
                 },
                 "template_name": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.UIConfigResponse": {
+            "type": "object",
+            "properties": {
+                "favicon_url": {
+                    "description": "FaviconURL is the browser tab icon (APP_FAVICON_URL).",
+                    "type": "string",
+                    "example": "/favicon.svg"
+                },
+                "logo_url": {
+                    "description": "LogoURL is the logo image (APP_LOGO_URL). Empty: the built-in logo.",
+                    "type": "string",
+                    "example": ""
+                },
+                "title": {
+                    "description": "Title is the product name (APP_TITLE).",
+                    "type": "string",
+                    "example": "K8s Stack Manager"
                 }
             }
         },
@@ -10248,6 +11143,139 @@
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.ValidateBranchResponse": {
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "description": "Branch is the branch name from the request.",
+                    "type": "string",
+                    "example": "main"
+                },
+                "valid": {
+                    "description": "Valid is true when the branch exists in the repository.",
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "handlers.actionInfo": {
+            "type": "object",
+            "properties": {
+                "can_invoke": {
+                    "description": "CanInvoke is true when the caller may run the action on this instance.",
+                    "type": "boolean"
+                },
+                "confirm": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "has_job_log": {
+                    "description": "HasJobLog is true when the backend proxies the job log of the action\n(the action config has a log_path).",
+                    "type": "boolean"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parameters": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.actionParameterInfo"
+                    }
+                }
+            }
+        },
+        "handlers.actionJobLogResponse": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "done": {
+                    "description": "Done is true when the job has ended and the log is read to the end.",
+                    "type": "boolean"
+                },
+                "instance_id": {
+                    "type": "string"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "log": {
+                    "description": "Log is the log text from Offset to NextOffset.",
+                    "type": "string"
+                },
+                "next_offset": {
+                    "description": "NextOffset is the offset for the next poll.",
+                    "type": "integer"
+                },
+                "offset": {
+                    "description": "Offset is the requested byte offset.",
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "Status is the job state from the subscriber: running while the job\nruns, else a final state such as succeeded or failed.",
+                    "type": "string"
+                },
+                "truncated": {
+                    "description": "Truncated is true when the chunk was cut at the size cap; poll again\nat once with next_offset.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.actionListResponse": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.actionInfo"
+                    }
+                },
+                "can_invoke": {
+                    "type": "boolean"
+                },
+                "instance_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.actionParameterInfo": {
+            "type": "object",
+            "properties": {
+                "default": {},
+                "description": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "string",
+                        "bool",
+                        "enum"
+                    ]
                 }
             }
         },
@@ -10366,6 +11394,15 @@
                 }
             }
         },
+        "handlers.cloneTemplateRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "Name of the clone. Default: \"\u003csource name\u003e (Copy)\".",
+                    "type": "string"
+                }
+            }
+        },
         "handlers.createChannelRequest": {
             "type": "object",
             "required": [
@@ -10375,6 +11412,14 @@
             "properties": {
                 "enabled": {
                     "type": "boolean"
+                },
+                "filters": {
+                    "description": "Filters limits the channel to some stack instances. Omit it or send\nempty lists for all instances.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.NotificationChannelFilters"
+                        }
+                    ]
                 },
                 "name": {
                     "type": "string"
@@ -10432,6 +11477,19 @@
                 }
             }
         },
+        "handlers.followStateResponse": {
+            "type": "object",
+            "properties": {
+                "follower_count": {
+                    "description": "FollowerCount is the number of users who follow the instance.",
+                    "type": "integer"
+                },
+                "following": {
+                    "description": "Following is true when the caller follows the instance.",
+                    "type": "boolean"
+                }
+            }
+        },
         "handlers.instantiateTemplateRequest": {
             "type": "object",
             "properties": {
@@ -10459,6 +11517,45 @@
                 }
             }
         },
+        "handlers.notificationChannelResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "description": "Enabled has no GORM default on purpose: with default:true GORM\nwrites true for a new channel with enabled=false (zero value). The\nhandler sets true when the request omits it; the column keeps its\ndatabase default (migration 40).",
+                    "type": "boolean"
+                },
+                "filters": {
+                    "description": "Filters limits the events of the channel to some stack instances.\nEmpty filters (the default) let all events through.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.NotificationChannelFilters"
+                        }
+                    ]
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "warnings": {
+                    "description": "Warnings lists filter IDs that point to no existing user, stack\ndefinition or cluster. The channel is saved with them.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "webhook_url": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.notificationChannelWithCount": {
             "type": "object",
             "properties": {
@@ -10466,7 +11563,16 @@
                     "type": "string"
                 },
                 "enabled": {
+                    "description": "Enabled has no GORM default on purpose: with default:true GORM\nwrites true for a new channel with enabled=false (zero value). The\nhandler sets true when the request omits it; the column keeps its\ndatabase default (migration 40).",
                     "type": "boolean"
+                },
+                "filters": {
+                    "description": "Filters limits the events of the channel to some stack instances.\nEmpty filters (the default) let all events through.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.NotificationChannelFilters"
+                        }
+                    ]
                 },
                 "id": {
                     "type": "string"
@@ -10527,6 +11633,11 @@
                 },
                 "owner_id": {
                     "type": "string"
+                },
+                "owner_username": {
+                    "description": "OwnerUsername is the username of the owner. It is computed, not\nstored; the API sets it in list and detail responses. Omitted when\nthe owner no longer exists (for example, after a delete).",
+                    "type": "string",
+                    "readOnly": true
                 },
                 "published_version": {
                     "type": "string"
@@ -10664,6 +11775,14 @@
                 "enabled": {
                     "type": "boolean"
                 },
+                "filters": {
+                    "description": "Filters replaces the filters of the channel. Omit it to keep them;\nsend {} to remove all filters.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.NotificationChannelFilters"
+                        }
+                    ]
+                },
                 "name": {
                     "type": "string"
                 },
@@ -10671,6 +11790,32 @@
                     "type": "string"
                 },
                 "webhook_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.updateCleanupPolicyRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "cluster_id": {
+                    "type": "string"
+                },
+                "condition": {
+                    "type": "string"
+                },
+                "dry_run": {
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "schedule": {
                     "type": "string"
                 }
             }
@@ -10926,6 +12071,13 @@
                 "ready_node_count": {
                     "type": "integer"
                 },
+                "requested_cpu": {
+                    "description": "RequestedCPU and RequestedMemory are the sums of the pod requests\n(scheduler rule) of all scheduled pods that are not finished. They are\nnot real use (metrics-server). Only GET /clusters/:id/health/summary\nsets them (GetClusterRequests); empty when the pod list fails.",
+                    "type": "string"
+                },
+                "requested_memory": {
+                    "type": "string"
+                },
                 "total_cpu": {
                     "type": "string"
                 },
@@ -11009,6 +12161,10 @@
             "properties": {
                 "created_at": {
                     "type": "string"
+                },
+                "managed": {
+                    "description": "Managed is true when the namespace has the label\nmanaged-by=k8s-stack-manager (set by the deployer).",
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"
@@ -11277,6 +12433,7 @@
                     "type": "string"
                 },
                 "entity_id": {
+                    "description": "63: RFC 1123 label (namespace name); a UUID has 36",
                     "type": "string"
                 },
                 "entity_type": {
@@ -11490,6 +12647,10 @@
                 "target_log_id": {
                     "type": "string"
                 },
+                "user_id": {
+                    "description": "UserID is the user who started a deploy. Per-user analytics count\ndeploys by this field, so the history stays after the instance is\ndeleted. Empty for system deploys and for other actions. Migration 49\nsets it for older deploy logs to the owner of the instance and adds\nthe composite index idx_deployment_logs_user_action (user_id, action,\nstarted_at, completed_at, status) for SummarizeByUsers.",
+                    "type": "string"
+                },
                 "values_snapshot": {
                     "type": "string"
                 }
@@ -11617,7 +12778,16 @@
                     "type": "string"
                 },
                 "enabled": {
+                    "description": "Enabled has no GORM default on purpose: with default:true GORM\nwrites true for a new channel with enabled=false (zero value). The\nhandler sets true when the request omits it; the column keeps its\ndatabase default (migration 40).",
                     "type": "boolean"
+                },
+                "filters": {
+                    "description": "Filters limits the events of the channel to some stack instances.\nEmpty filters (the default) let all events through.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.NotificationChannelFilters"
+                        }
+                    ]
                 },
                 "id": {
                     "type": "string"
@@ -11630,6 +12800,39 @@
                 },
                 "webhook_url": {
                     "type": "string"
+                }
+            }
+        },
+        "models.NotificationChannelFilters": {
+            "type": "object",
+            "properties": {
+                "cluster_ids": {
+                    "description": "ClusterIDs are cluster IDs.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "definition_ids": {
+                    "description": "DefinitionIDs are stack definition IDs.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "instance_name_patterns": {
+                    "description": "InstanceNamePatterns are glob patterns (path.Match syntax: *, ?,\n[a-z]) for the instance name, for example \"rdbtest-*\". The match\nignores case.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "owner_ids": {
+                    "description": "OwnerIDs are user IDs of instance owners.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -11762,6 +12965,11 @@
         "models.StackDefinition": {
             "type": "object",
             "properties": {
+                "chart_count": {
+                    "description": "ChartCount is the number of charts. It is computed, not stored; the\npaged list sets it (the list does not load the charts).",
+                    "type": "integer",
+                    "readOnly": true
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -11784,6 +12992,11 @@
                     "description": "OwnerInstanceID is set when quick deploy created the definition for one\ninstance. Deleting that instance also deletes the definition when no\nother instance uses it. Empty for definitions that users create.",
                     "type": "string"
                 },
+                "owner_username": {
+                    "description": "OwnerUsername is the username of the owner. It is computed, not\nstored; the API sets it in list and detail responses. Omitted when\nthe owner no longer exists (for example, after a delete).",
+                    "type": "string",
+                    "readOnly": true
+                },
                 "source_template_id": {
                     "type": "string"
                 },
@@ -11804,14 +13017,33 @@
                 "cluster_id": {
                     "type": "string"
                 },
+                "cluster_name": {
+                    "description": "ClusterName is the name of the target cluster. Omitted when the\ncluster no longer exists or cluster_id is empty (older instances).",
+                    "type": "string",
+                    "readOnly": true
+                },
                 "created_at": {
                     "type": "string"
+                },
+                "definition_name": {
+                    "description": "DefinitionName is the name of the stack definition. Omitted when the\ndefinition no longer exists.",
+                    "type": "string",
+                    "readOnly": true
                 },
                 "error_message": {
                     "type": "string"
                 },
                 "expires_at": {
                     "type": "string"
+                },
+                "follower_count": {
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "following": {
+                    "description": "Following and FollowerCount are computed, not stored. Only GET\n/stack-instances/{id} sets them: following is true when the caller\nfollows the instance, follower_count is the number of followers.",
+                    "type": "boolean",
+                    "readOnly": true
                 },
                 "id": {
                     "type": "string"
@@ -11827,6 +13059,11 @@
                 },
                 "owner_id": {
                     "type": "string"
+                },
+                "owner_username": {
+                    "description": "OwnerUsername is the username of the owner. Omitted when the owner\nno longer exists (for example, after a delete).",
+                    "type": "string",
+                    "readOnly": true
                 },
                 "stack_definition_id": {
                     "type": "string"
@@ -11876,6 +13113,11 @@
                 },
                 "owner_id": {
                     "type": "string"
+                },
+                "owner_username": {
+                    "description": "OwnerUsername is the username of the owner. It is computed, not\nstored; the API sets it in list and detail responses. Omitted when\nthe owner no longer exists (for example, after a delete).",
+                    "type": "string",
+                    "readOnly": true
                 },
                 "updated_at": {
                     "type": "string"
