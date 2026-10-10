@@ -58,19 +58,30 @@ homebrew_casks:
     license: MIT
     binaries:
       - stackctl
-    hooks:
-      post:
-        # The binary is not signed or notarized.
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/stackctl"]
-          end
+    # A prerelease tag (for example v0.7.0-rc.1) does not update the tap.
+    skip_upload: auto
+    # The binary is not signed or notarized, so remove the quarantine attribute.
+    # goreleaser v2.18 writes `hooks.post.install` as a `postflight` block, which
+    # Homebrew deprecates (#126). `postflight_steps` is Homebrew's declarative
+    # replacement (Homebrew 6.0.13 or later). goreleaser renders this block as a
+    # template, so `{{ "{{staged_path}}" }}` keeps Homebrew's literal token.
+    # Replace with `hooks.post.install_steps` when goreleaser supports it
+    # (goreleaser/goreleaser#6873).
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/stackctl"]
+        end
+      end
 
 release:
   github:
     owner: omattsson
     name: stackctl
   draft: false
+  # A prerelease tag (for example v0.7.0-rc.1) becomes a GitHub pre-release,
+  # not the latest release.
+  prerelease: auto
   # A rerun of a failed release (for example after the Homebrew step failed)
   # uploads the same file names again. Replace them instead of failing with
   # "422 already_exists".
