@@ -988,3 +988,134 @@ func TestTerminalAndFailedStatuses(t *testing.T) {
 		})
 	}
 }
+
+// TestDialWS_HandshakeErrors checks that a refused WebSocket upgrade gives
+// the HTTP status and the server message instead of "websocket: bad
+// handshake", and that the error never contains the credential.
+func TestDialWS_HandshakeErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		apiKey         string
+		token          string
+		status         int
+		body           string
+		wantMsg        string
+		wantNotContain []string
+		wantAPIKeyNA   bool
+	}{
+		{
+			name:         "API key on a server without API key support",
+			apiKey:       "sk_secret_key",
+			status:       http.StatusUnauthorized,
+			body:         `{"error":"Authentication required"}`,
+			wantMsg:      "WebSocket refused by the server (HTTP 401): Authentication required. This server does not accept API keys for live updates; use a login session or upgrade the server (k8s-stack-manager v0.8.0 or later).",
+			wantAPIKeyNA: true,
+		},
+		{
+			name:           "invalid API key on a server with API key support",
+			apiKey:         "sk_secret_key",
+			status:         http.StatusUnauthorized,
+			body:           `{"error":"Invalid API key"}`,
+			wantMsg:        "WebSocket refused by the server (HTTP 401): Invalid API key. Check the API key.",
+			wantNotContain: []string{"does not accept API keys"},
+		},
+		{
+			name:    "expired JWT after the query-param fallback",
+			token:   "jwt-secret-token",
+			status:  http.StatusUnauthorized,
+			body:    `{"error":"Invalid or expired token"}`,
+			wantMsg: "WebSocket refused by the server (HTTP 401): Invalid or expired token. Run 'stackctl login'.",
+		},
+		{
+			name:           "API key and JWT: the JWT fallback error names the JWT",
+			apiKey:         "sk_secret_key",
+			token:          "jwt-secret-token",
+			status:         http.StatusUnauthorized,
+			body:           `{"error":"Authentication required"}`,
+			wantMsg:        "WebSocket refused by the server (HTTP 401): Authentication required. Run 'stackctl login'.",
+			wantNotContain: []string{"does not accept API keys"},
+		},
+		{
+			name:    "message field",
+			token:   "jwt-secret-token",
+			status:  http.StatusServiceUnavailable,
+			body:    `{"status":"error","message":"maintenance"}`,
+			wantMsg: "WebSocket refused by the server (HTTP 503): maintenance",
+		},
+		{
+			name:    "HTML body gives the status text",
+			token:   "jwt-secret-token",
+			status:  http.StatusForbidden,
+			body:    `<html><body>Forbidden by proxy</body></html>`,
+			wantMsg: "WebSocket refused by the server (HTTP 403): Forbidden",
+		},
+		{
+			name:    "control characters are removed",
+			token:   "jwt-secret-token",
+			status:  http.StatusForbidden,
+			body:    `{"error":"bad\u001b[31m request"}`,
+			wantMsg: "WebSocket refused by the server (HTTP 403): bad [31m request",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Debug-Secret", "header-value")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			c := New(server.URL)
+			c.APIKey = tt.apiKey
+			c.Token = tt.token
+			_, err := c.Watch(context.Background(), WatchFilter{})
+			require.Error(t, err)
+			assert.Equal(t, tt.wantMsg, err.Error())
+			assert.NotContains(t, err.Error(), "bad handshake")
+			assert.NotContains(t, err.Error(), "header-value")
+			if tt.apiKey != "" {
+				assert.NotContains(t, err.Error(), tt.apiKey)
+			}
+			if tt.token != "" {
+				assert.NotContains(t, err.Error(), tt.token)
+			}
+			for _, s := range tt.wantNotContain {
+				assert.NotContains(t, err.Error(), s)
+			}
+
+			var hsErr *WSHandshakeError
+			require.ErrorAs(t, err, &hsErr)
+			assert.Equal(t, tt.status, hsErr.StatusCode)
+			assert.Equal(t, tt.wantAPIKeyNA, hsErr.APIKeyNotAccepted())
+			assert.ErrorIs(t, err, websocket.ErrBadHandshake)
+		})
+	}
+}
+
+// TestStreamDeploymentLogs_HandshakeErrorAPIKey checks the --follow path
+// with an API key against a server without API key support on /ws.
+func TestStreamDeploymentLogs_HandshakeErrorAPIKey(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"Authentication required"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	c.APIKey = "sk_follow_key"
+	var buf bytes.Buffer
+	_, err := c.StreamDeploymentLogs(context.Background(), "42", &buf, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 401")
+	assert.Contains(t, err.Error(), "This server does not accept API keys for live updates")
+	assert.NotContains(t, err.Error(), "sk_follow_key")
+}

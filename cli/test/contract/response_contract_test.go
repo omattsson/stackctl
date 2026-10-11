@@ -63,6 +63,22 @@ func TestResponseSchemas_MatchBackend(t *testing.T) {
 		{name: "RollbackResponse", goType: types.RollbackResponse{}, swaggerDef: "handlers.RollbackResponse"},
 		{name: "OrphanedNamespace", goType: types.OrphanedNamespace{}, swaggerDef: "handlers.OrphanedNamespaceResponse"},
 		{name: "ResourceCounts", goType: types.ResourceCounts{}, swaggerDef: "k8s.ResourceCounts"},
+		{name: "BulkResponse", goType: types.BulkResponse{}, swaggerDef: "handlers.BulkOperationResponse"},
+		{name: "BulkTemplateResponse", goType: types.BulkResponse{}, swaggerDef: "handlers.BulkTemplateResponse"},
+		{
+			// One Go type decodes both result shapes: the template tags
+			// are not part of the instance result.
+			name:          "BulkOperationResult",
+			goType:        types.BulkOperationResult{},
+			swaggerDef:    "handlers.BulkOperationResultItem",
+			excludeGoTags: []string{"template_id", "template_name"},
+		},
+		{
+			name:          "BulkTemplateResult",
+			goType:        types.BulkOperationResult{},
+			swaggerDef:    "handlers.BulkTemplateResultItem",
+			excludeGoTags: []string{"instance_id", "instance_name", "log_id"},
+		},
 	}
 
 	for _, tc := range cases {

@@ -641,7 +641,12 @@ type BulkOperationResult struct {
 	// Status is the per-item outcome; backend returns "success" or "error".
 	Status string `json:"status" yaml:"status"`
 	Error  string `json:"error,omitempty" yaml:"error,omitempty"`
-	LogID  string `json:"log_id,omitempty" yaml:"log_id,omitempty"`
+	// LogID is the deployment log of the operation that the item started
+	// (deploy, stop, clean). Bulk delete returns it when the instance has
+	// cluster resources: the backend cleans the instance first and deletes
+	// it when the clean completes, so "success" with a log ID means that the
+	// clean started. Empty for template operations and for a direct delete.
+	LogID string `json:"log_id,omitempty" yaml:"log_id,omitempty"`
 }
 
 // ID returns the identifier carried by this result regardless of whether the
@@ -661,13 +666,14 @@ func (r BulkOperationResult) Success() bool {
 	return r.Status == "success"
 }
 
-// BulkResponse wraps bulk operation results. Total/Successful/Failed mirror
-// the backend's BulkOperationResponse counters; Results retains per-item detail.
+// BulkResponse wraps bulk operation results. Total/Succeeded/Failed mirror
+// the backend's BulkOperationResponse and BulkTemplateResponse counters
+// (json "succeeded"); Results retains per-item detail.
 type BulkResponse struct {
-	Total      int                   `json:"total" yaml:"total"`
-	Successful int                   `json:"successful" yaml:"successful"`
-	Failed     int                   `json:"failed" yaml:"failed"`
-	Results    []BulkOperationResult `json:"results" yaml:"results"`
+	Total     int                   `json:"total" yaml:"total"`
+	Succeeded int                   `json:"succeeded" yaml:"succeeded"`
+	Failed    int                   `json:"failed" yaml:"failed"`
+	Results   []BulkOperationResult `json:"results" yaml:"results"`
 }
 
 // ValueOverride is a per-chart value override. Mirrors backend
