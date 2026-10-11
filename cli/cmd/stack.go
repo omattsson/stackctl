@@ -257,7 +257,10 @@ the end: the server ends the session ("session revoked"), the login has no
 refresh token (SSO login), the renewal fails, or the connection is lost.
 The operation continues on the server. Do not start it again. Run
 'stackctl stack watch --id <id>' or 'stackctl stack status <id>' to see
-the result (after 'stackctl login' if necessary).`
+the result (after 'stackctl login' if necessary).
+--follow works with an API key from k8s-stack-manager v0.8.0. An older
+server refuses an API key for live updates: use a login session, or run
+the command without --follow and use 'stackctl stack status <id>'.`
 
 var stackCmd = &cobra.Command{
 	Use:   "stack",
@@ -1682,8 +1685,13 @@ Authorization: Bearer header; if the WS upgrade is rejected with HTTP
 401 (e.g. a reverse proxy stripped the Authorization header), the
 dialer transparently retries with ?token=<jwt> in the query string,
 which the backend WS handler also accepts. API keys are sent as
-X-API-Key but the backend WS endpoint currently only honours JWTs;
-operators using --api-key should expect a 401.
+X-API-Key. k8s-stack-manager v0.8.0 or later accepts API keys for live
+updates (stack watch, --follow). An older server refuses them with
+"This server does not accept API keys for live updates; use a login
+session or upgrade the server."
+When the server refuses the connection, the error shows the HTTP status
+and the server message, for example "WebSocket refused by the server
+(HTTP 401): Invalid or expired token".
 
 Session end: when the server closes the connection with close code 1008,
 the watch stops with a message on stderr and a non-zero exit code.

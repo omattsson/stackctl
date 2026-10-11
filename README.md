@@ -208,6 +208,8 @@ List commands (`stack list`, `definition list`, `template list`) show one page: 
 
 `stack deploy`, `stop`, `clean` and `rollback` with `--follow` (`-f`), and `stack watch --id`, wait for a terminal status: `running`, `stopped` or `draft` (exit code 0), or `error` or `partial` (exit code 1). `partial` means that some charts deployed and others failed; the message names the operation, the status and the server error, for example `deploy partially failed (status partial): some charts did not deploy: ...`. `--follow` reads the instance after it connects, so an operation that ended before the connection counts. It handles a server close like `stack watch`: after `token expired` it renews the session, connects again and reads the instance, so a final status during the reconnect counts. When `--follow` cannot follow the operation to the end (session revoked, SSO login without refresh token, failed renewal, lost connection), it exits with code 1 and says that the operation continues on the server. Do not start the operation again: run `stackctl stack watch --id <id>` or `stackctl stack status <id>`.
 
+`--follow` and `stack watch` work with an API key from k8s-stack-manager v0.8.0. An older server accepts only a login session for live updates and refuses an API key: stackctl then prints `This server does not accept API keys for live updates; use a login session or upgrade the server.` When the server refuses the WebSocket connection, the error shows the HTTP status and the server message, for example `WebSocket refused by the server (HTTP 401): Invalid or expired token`. The error never shows headers or tokens.
+
 `stack watch` stops with a non-zero exit code when the server closes the WebSocket connection with close code 1008. It writes the reason to stderr:
 
 - `session revoked`: the server ended the session after a delete, a disable, a password reset or a role change of the user, or after a logout or logout-all. The message is `Connection closed by the server: session revoked. Log in again.`
@@ -367,6 +369,10 @@ stackctl bulk clean --ids my-app,other-app
 # Piping workflows with quiet mode
 stackctl stack list --status stopped --mine -q | xargs -n 50 stackctl bulk deploy
 ```
+
+The result table shows `ID`, `STATUS`, `LOG ID` (when the server returns a log ID) and `ERROR`. `-o json` and `-o yaml` print the full response: `total`, `succeeded`, `failed`, and per item `instance_id`, `status`, `error` and `log_id`.
+
+With k8s-stack-manager v0.8.0 or later, `bulk delete` cleans a stack with cluster resources (status `running`, `partial`, `stopped` or `error`) first and deletes it when the clean completes. Its result is `success` with the `log_id` of the clean: `success` then means that the clean started, not that the stack is deleted. A failed clean keeps the stack with status `error`. A draft stack is deleted at once and has no log ID. The table output adds a note when this occurs. Run `stackctl stack get <id>` later: "not found" means that the delete is complete.
 
 ### Orphaned Namespaces
 

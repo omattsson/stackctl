@@ -278,13 +278,104 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 	// transparently switches to the JWT path (documented precedence).
 	if resp != nil && resp.StatusCode == http.StatusUnauthorized && token != "" {
 		fallbackURL := appendQueryToken(wsURL, token)
-		conn2, _, err2 := dialer.DialContext(ctx, fallbackURL, nil)
+		conn2, resp2, err2 := dialer.DialContext(ctx, fallbackURL, nil)
 		if err2 != nil {
+			if hsErr := handshakeError(resp2, err2, false); hsErr != nil {
+				return nil, hsErr
+			}
 			return nil, fmt.Errorf("connecting to WebSocket (header auth failed with 401, query-param fallback also failed): %w", err2)
 		}
 		return conn2, nil
 	}
+	if hsErr := handshakeError(resp, err, c.APIKey != ""); hsErr != nil {
+		return nil, hsErr
+	}
 	return nil, fmt.Errorf("connecting to WebSocket: %w", err)
+}
+
+// wsAuthRequiredMessage is the 401 message of the k8s-stack-manager
+// WebSocket handler when the request has no JWT. A server that accepts API
+// keys on /ws (k8s-stack-manager v0.8.0 or later) answers a bad key with
+// "Invalid API key" or "API key expired" instead.
+const wsAuthRequiredMessage = "Authentication required"
+
+// maxHandshakeBody is the number of response body bytes that
+// handshakeError reads. gorilla/websocket keeps at most 1024 bytes.
+const maxHandshakeBody = 4096
+
+// WSHandshakeError reports that the server refused the WebSocket upgrade
+// with an HTTP status. Message is the sanitized error message from the
+// JSON response body, or the HTTP status text. The error never contains
+// response headers or credentials.
+type WSHandshakeError struct {
+	StatusCode int
+	Message    string
+	// APIKey is true when the refused request used an API key (no JWT
+	// fallback).
+	APIKey bool
+	err    error
+}
+
+// Error returns a message for the user, for example "WebSocket refused by
+// the server (HTTP 401): Invalid or expired token. Run 'stackctl login'."
+func (e *WSHandshakeError) Error() string {
+	msg := fmt.Sprintf("WebSocket refused by the server (HTTP %d): %s", e.StatusCode, e.Message)
+	switch {
+	case e.APIKeyNotAccepted():
+		return msg + ". This server does not accept API keys for live updates; use a login session or upgrade the server (k8s-stack-manager v0.8.0 or later)."
+	case e.StatusCode == http.StatusUnauthorized && e.APIKey:
+		return msg + ". Check the API key."
+	case e.StatusCode == http.StatusUnauthorized:
+		return msg + ". Run 'stackctl login'."
+	default:
+		return msg
+	}
+}
+
+// Unwrap returns the dialer error (websocket.ErrBadHandshake).
+func (e *WSHandshakeError) Unwrap() error {
+	return e.err
+}
+
+// APIKeyNotAccepted reports whether the server refused an API key because
+// its WebSocket endpoint accepts only a JWT (k8s-stack-manager before
+// v0.8.0).
+func (e *WSHandshakeError) APIKeyNotAccepted() bool {
+	return e.APIKey && e.StatusCode == http.StatusUnauthorized &&
+		strings.EqualFold(e.Message, wsAuthRequiredMessage)
+}
+
+// handshakeError returns a *WSHandshakeError when the dial failed because
+// the server answered the upgrade with an HTTP status, else nil (for
+// example a network error). It reads the error message from the JSON body
+// ({"error": "..."} or {"message": "..."}); a body in another format (for
+// example an HTML page of a proxy) gives the HTTP status text.
+func handshakeError(resp *http.Response, err error, apiKey bool) *WSHandshakeError {
+	if resp == nil || !errors.Is(err, websocket.ErrBadHandshake) {
+		return nil
+	}
+	hsErr := &WSHandshakeError{StatusCode: resp.StatusCode, APIKey: apiKey, err: err}
+	if resp.Body != nil {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxHandshakeBody))
+		_ = resp.Body.Close()
+		var errResp struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(body, &errResp) == nil {
+			hsErr.Message = sanitizeServerMessage(errResp.Error)
+			if hsErr.Message == "" {
+				hsErr.Message = sanitizeServerMessage(errResp.Message)
+			}
+		}
+	}
+	if hsErr.Message == "" {
+		hsErr.Message = http.StatusText(resp.StatusCode)
+	}
+	if hsErr.Message == "" {
+		hsErr.Message = "unexpected response"
+	}
+	return hsErr
 }
 
 func (c *Client) websocketURL(path string) (string, error) {
@@ -348,8 +439,9 @@ func (f WatchFilter) matches(s types.WSDeploymentStatus) bool {
 //     does not buffer beyond the returned channel's capacity (8).
 //
 // Auth:
-//   - X-API-Key is sent when c.APIKey is set (the backend WS handler
-//     currently ignores it; documented limitation).
+//   - X-API-Key is sent when c.APIKey is set. k8s-stack-manager accepts
+//     it on /ws from v0.8.0; an older server answers 401 "Authentication
+//     required" (WSHandshakeError.APIKeyNotAccepted).
 //   - Authorization: Bearer <token> is sent when c.Token is set.
 //   - If the upgrade is rejected with HTTP 401 AND c.Token is set, the
 //     dialer retries with the JWT as a ?token= query param (the backend

@@ -1473,3 +1473,129 @@ func TestBulkTemplateDeleteCmd_DryRun(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Would delete 2 templates")
 }
+
+// ---------- log IDs ----------
+
+func sampleBulkDeleteResponse() types.BulkResponse {
+	return types.BulkResponse{
+		Total:     3,
+		Succeeded: 2,
+		Failed:    1,
+		Results: []types.BulkOperationResult{
+			{InstanceID: "1", Status: "success", LogID: "log-clean-1"},
+			{InstanceID: "2", Status: "success"},
+			{InstanceID: "3", Status: "error", Error: "operation in progress"},
+		},
+	}
+}
+
+func runBulkDelete(t *testing.T, resp types.BulkResponse, format output.Format) *bytes.Buffer {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/stack-instances/bulk/delete", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(server.Close)
+
+	buf := setupBulkTestCmd(t, server.URL)
+	if format != "" {
+		printer.Format = format
+	}
+	bulkDeleteCmd.Flags().Set("ids", "1,2,3")
+	bulkDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() {
+		bulkDeleteCmd.Flags().Set("ids", "")
+		bulkDeleteCmd.Flags().Set("yes", "false")
+	})
+
+	require.NoError(t, bulkDeleteCmd.RunE(bulkDeleteCmd, []string{}))
+	return buf
+}
+
+func TestBulkDeleteCmd_TableShowsLogIDAndNote(t *testing.T) {
+	buf := runBulkDelete(t, sampleBulkDeleteResponse(), "")
+	out := buf.String()
+	assert.Contains(t, out, "LOG ID")
+	assert.Contains(t, out, "log-clean-1")
+	assert.Contains(t, out, `"success" with a log ID means that the clean started`)
+	assert.Contains(t, out, "stackctl stack get <id>")
+}
+
+func TestBulkDeleteCmd_NoNoteWithoutLogID(t *testing.T) {
+	resp := sampleBulkDeleteResponse()
+	resp.Results[0].LogID = ""
+	buf := runBulkDelete(t, resp, "")
+	out := buf.String()
+	assert.NotContains(t, out, "LOG ID")
+	assert.NotContains(t, out, "clean started")
+}
+
+func TestBulkDeleteCmd_JSONIncludesLogID(t *testing.T) {
+	buf := runBulkDelete(t, sampleBulkDeleteResponse(), output.FormatJSON)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &raw))
+	assert.EqualValues(t, 2, raw["succeeded"])
+	results := raw["results"].([]interface{})
+	first := results[0].(map[string]interface{})
+	assert.Equal(t, "log-clean-1", first["log_id"])
+	second := results[1].(map[string]interface{})
+	_, has := second["log_id"]
+	assert.False(t, has, "a direct delete has no log_id")
+	assert.NotContains(t, buf.String(), "clean started", "the note must not break JSON output")
+}
+
+func TestBulkDeleteCmd_YAMLIncludesLogID(t *testing.T) {
+	buf := runBulkDelete(t, sampleBulkDeleteResponse(), output.FormatYAML)
+	assert.Contains(t, buf.String(), "log_id: log-clean-1")
+	assert.Contains(t, buf.String(), "succeeded: 2")
+}
+
+func TestBulkDeleteCmd_QuietPrintsIDsOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sampleBulkDeleteResponse())
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+	printer.Quiet = true
+	bulkDeleteCmd.Flags().Set("ids", "1,2,3")
+	bulkDeleteCmd.Flags().Set("yes", "true")
+	t.Cleanup(func() {
+		bulkDeleteCmd.Flags().Set("ids", "")
+		bulkDeleteCmd.Flags().Set("yes", "false")
+	})
+
+	require.NoError(t, bulkDeleteCmd.RunE(bulkDeleteCmd, []string{}))
+	assert.Equal(t, "1\n2", strings.TrimSpace(buf.String()))
+}
+
+func TestBulkDeployCmd_TableShowsLogIDWithoutNote(t *testing.T) {
+	resp := types.BulkResponse{Results: []types.BulkOperationResult{
+		{InstanceID: "1", Status: "success", LogID: "log-deploy-1"},
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	buf := setupBulkTestCmd(t, server.URL)
+	bulkDeployCmd.Flags().Set("ids", "1")
+	t.Cleanup(func() { bulkDeployCmd.Flags().Set("ids", "") })
+
+	require.NoError(t, bulkDeployCmd.RunE(bulkDeployCmd, []string{}))
+	out := buf.String()
+	assert.Contains(t, out, "LOG ID")
+	assert.Contains(t, out, "log-deploy-1")
+	assert.NotContains(t, out, "clean started")
+}
+
+func TestBulkResponse_DecodesSucceededCounter(t *testing.T) {
+	var resp types.BulkResponse
+	require.NoError(t, json.Unmarshal([]byte(`{"total":2,"succeeded":1,"failed":1,"results":[]}`), &resp))
+	assert.Equal(t, 1, resp.Succeeded)
+}

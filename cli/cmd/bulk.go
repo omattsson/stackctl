@@ -26,6 +26,10 @@ var bulkDeployCmd = &cobra.Command{
 
 Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
 
+The LOG ID column shows the deployment log of each started operation.
+-o json and -o yaml print the full response, with log_id per item.
+Run 'stackctl stack logs <id> --follow' to follow one operation.
+
 Examples:
   stackctl bulk deploy --ids my-stack,other-stack
   stackctl bulk deploy my-stack other-stack
@@ -52,7 +56,7 @@ Examples:
 			return err
 		}
 
-		return printBulkResults(resp)
+		return printBulkResults(resp, "")
 	},
 }
 
@@ -62,6 +66,10 @@ var bulkStopCmd = &cobra.Command{
 	Long: `Stop multiple stack instances at once.
 
 Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
+
+The LOG ID column shows the deployment log of each started operation.
+-o json and -o yaml print the full response, with log_id per item.
+Run 'stackctl stack logs <id> --follow' to follow one operation.
 
 Examples:
   stackctl bulk stop --ids my-stack,other-stack
@@ -89,7 +97,7 @@ Examples:
 			return err
 		}
 
-		return printBulkResults(resp)
+		return printBulkResults(resp, "")
 	},
 }
 
@@ -102,6 +110,10 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
+
+The LOG ID column shows the deployment log of each started operation.
+-o json and -o yaml print the full response, with log_id per item.
+Run 'stackctl stack logs <id> --follow' to follow one operation.
 
 Examples:
   stackctl bulk clean --ids my-stack,other-stack
@@ -137,7 +149,7 @@ Examples:
 			return err
 		}
 
-		return printBulkResults(resp)
+		return printBulkResults(resp, "")
 	},
 }
 
@@ -150,6 +162,17 @@ This is a destructive operation. You will be prompted for confirmation
 unless --yes is specified.
 
 Stacks can be specified by name or ID via --ids flag, positional arguments, or both.
+
+With k8s-stack-manager v0.8.0 or later, a stack with cluster resources
+(status running, partial, stopped or error) is cleaned first: the server
+uninstalls the Helm releases, deletes the namespace, and deletes the stack
+when the clean completes. Its result is "success" with a log ID: "success"
+then means that the clean started, not that the stack is deleted. A failed
+clean keeps the stack with status error. A draft stack is deleted at once
+and has no log ID.
+The LOG ID column shows the log of the clean. -o json and -o yaml print
+the full response, with log_id per item. Run 'stackctl stack get <id>'
+later: "not found" means that the delete is complete.
 
 Examples:
   stackctl bulk delete --ids my-stack,other-stack
@@ -185,7 +208,7 @@ Examples:
 			return err
 		}
 
-		return printBulkResults(resp)
+		return printBulkResults(resp, bulkDeleteLogNote)
 	},
 }
 
@@ -227,7 +250,7 @@ Examples:
 			return err
 		}
 
-		return printBulkResults(resp)
+		return printBulkResults(resp, "")
 	},
 }
 
@@ -262,7 +285,7 @@ Examples:
 			return err
 		}
 
-		return printBulkResults(resp)
+		return printBulkResults(resp, "")
 	},
 }
 
@@ -310,7 +333,7 @@ Examples:
 			return err
 		}
 
-		return printBulkResults(resp)
+		return printBulkResults(resp, "")
 	},
 }
 
@@ -452,7 +475,12 @@ func resolveBulkIDs(c *client.Client, cmd *cobra.Command, args []string) ([]stri
 	return ids, nil
 }
 
-func printBulkResults(resp *types.BulkResponse) error {
+// bulkDeleteLogNote explains a bulk delete result with a log ID.
+const bulkDeleteLogNote = `Note: "success" with a log ID means that the clean started. The server deletes the stack when the clean completes. A failed clean keeps the stack with status error. Run 'stackctl stack get <id>' later: "not found" means that the delete is complete.`
+
+// printBulkResults prints the per-item results. In table mode it prints
+// logNote after the table when a successful result has a log ID.
+func printBulkResults(resp *types.BulkResponse, logNote string) error {
 	if printer.Quiet {
 		for _, r := range resp.Results {
 			if r.Success() {
@@ -468,15 +496,45 @@ func printBulkResults(resp *types.BulkResponse) error {
 	case output.FormatYAML:
 		return printer.PrintYAML(resp)
 	default:
-		headers := []string{"ID", "STATUS", "ERROR"}
-		rows := make([][]string, len(resp.Results))
-		for i, r := range resp.Results {
-			rows[i] = []string{
-				r.ID(),
-				printer.StatusColor(r.Status),
-				r.Error,
+		// The LOG ID column is shown only when the server returned a log
+		// ID (instance operations); template operations have none.
+		withLogID := false
+		for _, r := range resp.Results {
+			if r.LogID != "" {
+				withLogID = true
+				break
 			}
 		}
-		return printer.PrintTable(headers, rows)
+		headers := []string{"ID", "STATUS", "ERROR"}
+		if withLogID {
+			headers = []string{"ID", "STATUS", "LOG ID", "ERROR"}
+		}
+		rows := make([][]string, len(resp.Results))
+		for i, r := range resp.Results {
+			if withLogID {
+				rows[i] = []string{r.ID(), printer.StatusColor(r.Status), r.LogID, r.Error}
+			} else {
+				rows[i] = []string{r.ID(), printer.StatusColor(r.Status), r.Error}
+			}
+		}
+		if err := printer.PrintTable(headers, rows); err != nil {
+			return err
+		}
+		if logNote != "" && hasStartedOperation(resp) {
+			printer.PrintMessage("%s", logNote)
+		}
+		return nil
 	}
+}
+
+// hasStartedOperation reports whether a successful result has a log ID,
+// that is, the server started an operation that continues after the
+// response.
+func hasStartedOperation(resp *types.BulkResponse) bool {
+	for _, r := range resp.Results {
+		if r.Success() && r.LogID != "" {
+			return true
+		}
+	}
+	return false
 }

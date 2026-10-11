@@ -46,12 +46,12 @@ func TestLiveNotification_PreferencesRoundTrip(t *testing.T) {
 	// safe — subsequent runs hit the round-trip branch below.
 	if len(prefs) == 0 {
 		seeded := []types.NotificationPreference{
-			{EventType: "stack.deployed", Enabled: true},
+			{EventType: "deployment.success", Enabled: true},
 		}
 		got, err := c.UpdateNotificationPreferences(seeded)
 		require.NoError(t, err, "seed notification preference")
 		require.Len(t, got, 1)
-		assert.Equal(t, "stack.deployed", got[0].EventType)
+		assert.Equal(t, "deployment.success", got[0].EventType)
 		assert.True(t, got[0].Enabled)
 		return
 	}
