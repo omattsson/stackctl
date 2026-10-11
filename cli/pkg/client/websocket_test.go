@@ -1119,3 +1119,26 @@ func TestStreamDeploymentLogs_HandshakeErrorAPIKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "This server does not accept API keys for live updates")
 	assert.NotContains(t, err.Error(), "sk_follow_key")
 }
+
+func TestWSClosedError_APIKeyMessages(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  WSClosedError
+		want string
+	}{
+		{"api key expired", WSClosedError{Code: websocket.ClosePolicyViolation, Reason: CloseReasonAPIKeyExpired, APIKey: true},
+			"Connection closed by the server: the API key expired. Create a new key with 'stackctl apikey create'."},
+		{"api key revoked", WSClosedError{Code: websocket.ClosePolicyViolation, Reason: CloseReasonSessionRevoked, APIKey: true},
+			"Connection closed by the server: session revoked. The API key was deleted or its user changed; check it with 'stackctl apikey list'."},
+		{"login session revoked", WSClosedError{Code: websocket.ClosePolicyViolation, Reason: CloseReasonSessionRevoked},
+			"Connection closed by the server: session revoked. Log in again."},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.err.Error())
+		})
+	}
+}
