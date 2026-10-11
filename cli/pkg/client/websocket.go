@@ -31,7 +31,13 @@ const (
 type WSClosedError struct {
 	Code   int
 	Reason string
+	// APIKey is true when the connection used an API key (no login
+	// session), so "Log in again" is not the right advice.
+	APIKey bool
 }
+
+// CloseReasonAPIKeyExpired: the API key of the connection expired.
+const CloseReasonAPIKeyExpired = "api key expired"
 
 // Error returns a message for the user, for example "Connection closed by
 // the server: session revoked. Log in again."
@@ -41,9 +47,17 @@ func (e *WSClosedError) Error() string {
 		// so a new command can renew it. An SSO token cannot be renewed.
 		return "Connection closed by the server: token expired. Run the command again. If it fails, run 'stackctl login'."
 	}
+	if e.Reason == CloseReasonAPIKeyExpired {
+		return "Connection closed by the server: the API key expired. Create a new key with 'stackctl apikey create'."
+	}
 	reason := sanitizeServerMessage(e.Reason)
 	if reason == "" {
 		reason = "policy violation"
+	}
+	if e.APIKey {
+		// A revoke of an API-key socket: the key was deleted, or its user was
+		// disabled, deleted or had a password reset or role change.
+		return fmt.Sprintf("Connection closed by the server: %s. The API key was deleted or its user changed; check it with 'stackctl apikey list'.", reason)
 	}
 	return fmt.Sprintf("Connection closed by the server: %s. Log in again.", reason)
 }
@@ -174,6 +188,7 @@ func (c *Client) StreamDeploymentLogsWithOptions(ctx context.Context, instanceID
 				return &types.StreamResult{Status: "unknown"}, nil
 			}
 			if closeErr := policyCloseError(err); closeErr != nil {
+				closeErr.APIKey = c.APIKey != ""
 				return nil, closeErr
 			}
 			return nil, fmt.Errorf("reading WebSocket message: %w", err)
@@ -534,6 +549,7 @@ func (c *Client) Watch(ctx context.Context, filter WatchFilter) (*WatchStream, e
 			if err != nil {
 				if ctx.Err() == nil {
 					if closeErr := policyCloseError(err); closeErr != nil {
+						closeErr.APIKey = c.APIKey != ""
 						stream.err = closeErr
 					}
 				}
