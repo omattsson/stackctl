@@ -2,67 +2,95 @@
 
 ## Overview
 
-Go CLI tool (Cobra + Viper) for managing Kubernetes stack deployments. Pure API client — talks to the [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager) backend. No backend logic, no frontend, no database, no direct K8s interaction.
+Go CLI tool (Cobra + yaml.v3) for managing Kubernetes stack deployments. Pure API client — talks to the [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager) backend. No backend logic, no frontend, no database, no direct K8s interaction.
+
+Go version: see `cli/go.mod` (1.26.9 or later); the Dockerfile builder image may be newer.
 
 ## Project Structure
 
 ```
-cli/
+.github/
+  workflows/                  # ci.yml, docker.yml, live-tests.yml, release.yml, security.yml
+  instructions/               # Copilot path instructions
+.claude/agents/               # Claude Code agent definitions
+.goreleaser.yml               # Release config (GoReleaser)
+Dockerfile                    # Container image
+install.sh                    # Install script (honours INSTALL_DIR)
+LICENSE                       # MIT license
+entities.json, mempalace.yaml # Mempalace mining config
+cli/                          # Go module root (github.com/omattsson/stackctl/cli); run go commands here
   main.go                     # Entry point
+  Makefile                    # build, build-all, test, lint, coverage, install, clean, tools
   cmd/
-    root.go                   # Root cobra command, global flags, config loading
+    root.go                   # Root cobra command, global flags, config loading, flag > env > config (resolveAPIURL, resolveAPIKey)
     config.go                 # config set/get/list/use-context/current-context/delete-context
     version.go                # Version info (build-time ldflags)
-    login.go                  # login, logout, whoami
+    login.go                  # login, logout, whoami, auth register
     token.go                  # Token helpers (save/load/delete session, fresh token for plugins)
-    stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend/values/compare
-    template.go               # template list/get/create/update/publish/versions/instantiate/quick-deploy
-    definition.go             # definition list/get/create/update/delete/export/import
-    override.go               # override list/set/delete, branch overrides, quota overrides (quota set merges with GET, --replace)
-    bulk.go                   # bulk deploy/stop/clean/delete (--ids flag or positional args)
-    git.go                    # git branches/validate
-    cluster.go                # cluster list/get (with health summary)
+    stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend/values/compare/history/rollback/history-values/watch
+    template.go               # template list/get/create/update/clone/publish/unpublish/versions/instantiate/quick-deploy/delete
+    definition.go             # definition list/get/create/update/delete/export/import/update-chart
+    override.go               # override list/get/set/unset/delete, branch overrides, quota overrides (quota set merges with GET, --replace)
+    bulk.go                   # bulk deploy/stop/clean/delete, bulk template publish/unpublish/delete (--ids flag or positional args)
+    git.go                    # git providers/branches/validate
+    cluster.go                # cluster list/get/create/update/delete/set-default/test-connection/health/nodes/namespaces/utilization, quota get/set/delete, shared-values list/set/delete
+    analytics.go              # analytics overview/templates/users
+    apikey.go                 # apikey list/create/revoke
+    audit.go                  # audit log list/export
+    cleanup_policy.go         # cleanup-policy list/get/create/update/delete/run
+    favorite.go               # favorite list/add/remove
+    notification.go           # notification list/count/read/read-all/prefs
+    orphaned.go               # orphaned list/delete
+    user.go                   # user list/delete/disable/enable/reset-password/set-role
+    values.go                 # --set value parsing helpers (key paths, scalar types) for stack and override commands
+    browser.go                # Open a URL in the browser (SSO login)
+    paging.go                 # List paging helpers (page, pageSize, listAllIDs)
+    resolve.go                # Name-to-ID resolution
+    plugins.go                # Plugin discovery (stackctl-<name> on PATH) and exec
     completion.go             # Shell completion generation (bash/zsh/fish/powershell)
+    testdata/                 # Golden files for cmd tests
   pkg/
     client/
       client.go              # HTTP client wrapper (auth headers, base URL, error handling)
       auth.go                # Session renewal (refresh token, 401 retry), login/refresh/logout calls
+      websocket.go           # WebSocket client (watch, deploy log streaming)
     types/
       types.go               # Client-side structs matching API responses
     config/
-      config.go              # Viper-based config (~/.stackmanager/config.yaml)
+      config.go              # YAML config via yaml.v3 (config.yaml in the config dir)
       token.go               # Token file store (tokens/<context>.json) + cross-process lock
       lock_*.go              # flock (unix) / LockFileEx (windows) / no-op (other)
     output/
       output.go              # Table, JSON, YAML formatters
   test/
-    e2e/
-      cli_e2e_test.go        # Binary execution end-to-end tests
-    integration/
-      auth_integration_test.go
-      config_integration_test.go
-      override_integration_test.go
-      stack_integration_test.go
-      template_definition_integration_test.go
+    e2e/                     # Binary execution end-to-end tests (cli_e2e_test.go)
+    integration/             # Integration tests against a mock API (*_integration_test.go)
+    contract/                # Swagger contract tests; refresh-swagger.sh refreshes testdata/swagger.json
+    live/                    # Live tests against a real backend (build tag `live`)
 ```
 
 ## Development Commands
 
 | Task | Command |
 |------|---------|
-| Build | `cd cli && go build -o bin/stackctl .` |
-| Run tests | `cd cli && go test ./... -v` |
-| Lint | `cd cli && go vet ./...` |
-| Coverage | `cd cli && go test ./pkg/... ./cmd/ -coverprofile=coverage.out && go tool cover -func=coverage.out` |
-| Install | `cd cli && go install .` → `$GOPATH/bin/stackctl` |
+| Build | `cd cli && make build` (or `go build -o bin/stackctl .`) |
+| Build all platforms | `cd cli && make build-all` |
+| Run tests | `cd cli && make test` (`go test ./... -v`) |
+| Install lint tool | `cd cli && make tools` (installs staticcheck; run once before `make lint`) |
+| Lint | `cd cli && make lint` (`go vet` + `staticcheck`) |
+| Coverage | `cd cli && make coverage` (`go test ./... -coverprofile=coverage.out` + `go tool cover -func`) |
+| Install | `cd cli && make install` |
+| Clean | `cd cli && make clean` |
+| Live tests | `cd cli && go test -tags live ./test/live/...` (env: `STACKCTL_LIVE_URL` and `STACKCTL_LIVE_API_KEY`, or `STACKCTL_LIVE_USER` + `STACKCTL_LIVE_PASS`; skipped without auth) |
+| Contract tests | `cd cli && go test ./test/contract/...`; refresh the vendored swagger with `cli/test/contract/refresh-swagger.sh` |
 
 ## CLI Patterns
 
 **Cobra command structure**: Each command group gets its own file in `cmd/`. Subcommands are added in `init()`. Use `RunE` (not `Run`) to return errors properly.
 
-**Flag precedence**: flag > environment variable > config file. Viper binds all three. Environment variables use `STACKCTL_` prefix.
+**Flag precedence**: flag > environment variable > config file. Cobra + yaml.v3 only (no Viper). `cmd/root.go` resolves the order by hand (`resolveAPIURL`, `resolveAPIKey`, with `os.Getenv`). Environment variables use the `STACKCTL_` prefix.
 
-**Global flags**: `--output table|json|yaml`, `--quiet`, `--api-url`, `--api-key`, `--no-color`, `--insecure`
+**Global flags**: `--output`/`-o table|json|yaml`, `--quiet`/`-q`, `--api-url`, `--api-key`, `--no-color`, `--insecure`, `--debug` (or `STACKCTL_DEBUG=1`; logs HTTP requests and responses to stderr)
 
 **Output modes**:
 - `table` (default): human-readable with colored status badges
@@ -98,7 +126,7 @@ cli/
 
 ## Config System
 
-**Config file**: `~/.stackmanager/config.yaml` (XDG-aware)
+**Config file**: `config.yaml` in the config directory. Lookup order: `STACKCTL_CONFIG_DIR`, else `$XDG_CONFIG_HOME/stackmanager`, else `~/.stackmanager`. `tokens/<context>.json` and the `.lock` files live in the same directory.
 
 **Named contexts**: Support multiple environments (production, local, staging). `current-context` selects the active one.
 
@@ -116,12 +144,16 @@ contexts:
 
 ## Testing Conventions
 
-- `testify/assert`, table-driven tests with `t.Parallel()` on parent and subtests
-- `tt := tt` to capture range variable in table-driven tests
+- `testify/assert`, table-driven tests
+- `pkg/` tests call `t.Parallel()` on the parent test and on subtests
+- `cmd/` tests that touch package globals (`cfg`, `printer`, `flagAPIURL` and other flag variables) must not call `t.Parallel()`. Pure-function tests in `cmd/` (for example `resolve_test.go`) may
+- No `tt := tt` needed (Go 1.22+ loop variable semantics)
+- Test helpers: `setupStackTestCmd` (`cmd/stack_test.go`), `setupTestCmd` (`cmd/config_test.go`)
+- Golden files live in `cmd/testdata`
 - Mock HTTP server (`httptest.NewServer`) for client tests — never call real API in unit tests
 - Test all output modes (table, JSON, YAML, quiet) for each command
 - Test flag parsing and validation for all commands
-- Target 80%+ coverage on `pkg/` packages
+- Coverage: the CI gate is 70% total; aim for 80%+ on `pkg/` packages
 
 ## Security Rules
 
@@ -168,7 +200,7 @@ All API calls go to `/api/v1/*`. Key route groups:
 
 1. Create command file in `cmd/` (or add subcommand to existing file)
 2. Define Cobra command with `Use`, `Short`, `Long`, `RunE`
-3. Add flags and bind to Viper where appropriate
+3. Add flags; resolve flag, env and config values in `cmd/root.go` style (no Viper)
 4. Use `pkg/client` for API calls
 5. Use `pkg/output` for formatting results
 6. Add to parent command in `init()`

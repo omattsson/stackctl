@@ -10,7 +10,7 @@ You are a principal engineer performing code review on the stackctl CLI. Review 
 1. Read the PR description or understand what changed
 2. Read ALL changed files — every line
 3. Cross-reference against existing command implementations for pattern consistency
-4. Run `go test ./... -v` and `go vet ./...`
+4. Run `cd cli && make lint test` (lint includes staticcheck; run `make tools` once)
 5. Provide structured feedback
 
 ## Security Checklist
@@ -33,11 +33,11 @@ You are a principal engineer performing code review on the stackctl CLI. Review 
 
 ## Code Quality Checklist
 - [ ] `RunE` used instead of `Run` on all commands
-- [ ] `SilenceUsage: true` on commands that take arguments
-- [ ] Flag precedence: flag > env > config (Viper binding)
+- [ ] `SilenceUsage` is inherited from root; a command sets it only to override
+- [ ] Flag precedence: flag > `STACKCTL_*` env > config file (resolved in `cmd/root.go`)
 - [ ] No unused imports or variables
 - [ ] Error wrapping with `fmt.Errorf("...: %w", err)` for context
-- [ ] Table-driven tests with `t.Parallel()` and `tt := tt`
+- [ ] Table-driven tests; `t.Parallel()` in `pkg/` tests, not in `cmd/` tests that touch package globals
 - [ ] Mock HTTP server for client tests (no real API calls)
 - [ ] Tests cover success, error, and edge cases
 
@@ -46,7 +46,17 @@ You are a principal engineer performing code review on the stackctl CLI. Review 
 - [ ] Commands in `cmd/` — one file per command group
 - [ ] All output goes through `pkg/output` formatters
 - [ ] All API calls go through `pkg/client`
-- [ ] Global flags handled in `root.go`
+- [ ] Global flags handled in `root.go` (`-o`, `-q`, `--no-color`, `--api-url`, `--api-key`, `--insecure`, `--debug`)
+
+## Project Patterns
+- [ ] `resolveStackID()` for stack name or ID; `parseID()` only for non-name sub-resource IDs
+- [ ] `openBrowser()` keeps its http/https scheme check
+- [ ] Plugin names match `pluginNamePattern` (`^[a-z0-9][a-z0-9-]*$`)
+- [ ] Clients come from `newClient()` (or `newUnauthenticatedClient()` for login)
+- [ ] `--debug` output redacts `Authorization` and `X-API-Key`
+- [ ] Destructive commands need `--yes` (or prompt)
+- [ ] Prompts write to `cmd.ErrOrStderr()`
+- [ ] List commands use `printAllIDs` / `listAllIDs` for `-q`
 
 ## Output Format
 ### Critical (must fix before merge)

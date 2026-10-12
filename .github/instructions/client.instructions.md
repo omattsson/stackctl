@@ -19,16 +19,23 @@ IDs in client method signatures are `string` — no numeric conversion. Callers 
 - **WebSocket**: streaming methods live in `websocket.go` (e.g. `StreamDeploymentLogs`). They reuse the client's `APIKey`/`Token` for auth and the HTTP transport's TLS config — never construct a new dialer with hardcoded settings.
 
 ## Error Handling
-The `do()` method maps HTTP status codes to user-friendly errors:
-- 401 → "Not authenticated. Run 'stackctl login' first."
-- 403 → "Permission denied."
-- 404 → "Resource not found."
-- 409 → "Conflict."
-- 429 → "Rate limited."
-- 500 → "Server error."
+`APIError.UserFacingError()` maps HTTP status codes to user-friendly errors. The server message (after `sanitizeServerMessage`) is added as ` (server: <msg>)` where shown:
+- 401: "Not authenticated. Run 'stackctl login' first." plus ` (server: <msg>)`
+- 403: "Permission denied." plus ` (server: <msg>)`
+- 404: "Resource not found: <msg>" (`<msg>` is "unknown resource" when the server sends none)
+- 409: "Conflict: <msg>" (`<msg>` is "unknown conflict" when the server sends none)
+- 429: "Rate limited. Try again later." plus ` (server: <msg>)`
+- 5xx: "Server error. Check backend logs." plus ` (server: <msg>)`
+- Other status codes: the raw server message.
+
+`sanitizeServerMessage` removes control and bidi characters, collapses whitespace and truncates long text. Always pass server text through it (or `SanitizeServerText`) before display.
+
+## Session Renewal and Warnings
+- `pkg/client/auth.go` renews the JWT session before a request when the token expires within `RenewMargin` (60 s), and after a 401 from a non-auth endpoint (one retry). Do not add renewal logic in individual methods.
+- The client writes `Warning` response headers (for example deprecation notices) to the client warning writer (`WarnWriter`, default stderr) as `Warning: <text>`, once per text (`warnHeaders`).
 
 ## Response Parsing
-Use `json.NewDecoder(resp.Body).Decode(&result)` — never read the full body into a byte slice. Paginated list endpoints return `*types.ListResponse[T]`.
+Use `json.NewDecoder(resp.Body).Decode(&result)` for JSON responses. Do not read a JSON body into a byte slice. For raw payloads (export, import, download), `io.ReadAll` on an `io.LimitReader` is allowed; fail when the limit is exceeded. Paginated list endpoints return `*types.ListResponse[T]`.
 
 All methods return typed results: `(*types.SomeType, error)`, `([]types.SomeType, error)`, or `(*types.ListResponse[T], error)`.
 

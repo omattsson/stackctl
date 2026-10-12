@@ -16,13 +16,13 @@ You are a senior QA engineer for the stackctl CLI. Design test strategies, write
 2. Audit existing tests for coverage gaps
 3. Design test cases: happy path, errors, edge cases
 4. Write tests using established patterns
-5. Run all tests and verify: `go test ./... -v`
-6. Check coverage: `go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out`
+5. Run all tests from `cli/`: `make test`
+6. Check coverage: `make coverage` (CI gate: 70% total; aim for 80%+ on `pkg/`)
 
 ## Unit Test Pattern
+This is a `cmd/` test. It touches package globals, so it does not use `t.Parallel()`. Tests in `pkg/` use `t.Parallel()` on the parent and subtests. `tt := tt` is not needed (Go 1.22+).
 ```go
 func TestCommandName(t *testing.T) {
-    t.Parallel()
     tests := []struct {
         name       string
         args       []string
@@ -34,16 +34,15 @@ func TestCommandName(t *testing.T) {
         // ... test cases
     }
     for _, tt := range tests {
-        tt := tt
         t.Run(tt.name, func(t *testing.T) {
-            t.Parallel()
             // Setup mock server
             server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
                 w.WriteHeader(tt.statusCode)
                 w.Write([]byte(tt.response))
             }))
             defer server.Close()
-            // Execute command and assert
+            buf := setupStackTestCmd(t, server.URL) // sets flagAPIURL, fresh printer, restores globals
+            // Execute command and assert on buf (use testify/require and assert)
         })
     }
 }
@@ -73,25 +72,26 @@ func TestCommandName(t *testing.T) {
 - JSON output matches expected structure
 - YAML output matches expected structure
 - Quiet mode outputs IDs only
-- Colored status badges (Running=green, Error=red, Draft=gray)
-- No-color mode
+- `StatusColor` colors (Running=green, Error=red, Draft=gray)
+- `--no-color` mode (`NoColor` returns plain text)
 
 ### cmd/ tests
 - Flag parsing and validation
 - Required flag enforcement
 - Confirmation prompt behavior (with and without `--yes`)
 - Subcommand routing
+- Helpers: `setupStackTestCmd` (`cmd/stack_test.go`) and `setupTestCmd` (`cmd/config_test.go`); golden files in `cmd/testdata`
+- Tests that touch package globals must not use `t.Parallel()`; pure-function tests may
 
-## Integration Test Script
-For testing against a real backend (`make dev`):
-1. Login → verify token stored
-2. Template list → verify output
-3. Instantiate template → capture instance ID
-4. Deploy → verify status changes
-5. Set overrides → verify applied
-6. Stop → Clean → Delete → verify gone
-7. Logout → verify token cleared
+## Test Directories (`cli/test/`)
+- `integration/` — commands against an `httptest` mock API (one file per command group).
+- `e2e/` — builds and runs the real `stackctl` binary against a mock API. Skipped with `-short`.
+- `contract/` — checks types and paths against `testdata/swagger.json`. Run `refresh-swagger.sh` to refresh the swagger file.
+- `live/` — runs against a real backend. Build tag `live`: `cd cli && go test -tags live ./test/live/...`. Set `STACKCTL_LIVE_URL` and either `STACKCTL_LIVE_API_KEY` or `STACKCTL_LIVE_USER` + `STACKCTL_LIVE_PASS`. The tests skip when auth is unset. CI runs them in `live-tests.yml`.
+
+A live test flow covers: login, template list, instantiate, deploy, set overrides, stop, clean, delete, logout.
 
 ## Coverage Target
+- CI gate: 70% total
 - 80%+ on `pkg/` packages
 - All commands have at least happy-path and error-path tests

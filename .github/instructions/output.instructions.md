@@ -14,18 +14,21 @@ Every formatter MUST handle all four modes consistently:
 - `yaml` — `gopkg.in/yaml.v3`, full structure
 - `quiet` — identifiers only, one per line, no headers, no color
 
-  Most commands print numeric IDs. Documented exceptions that print other stable identifiers:
-  - `orphaned list`, `cluster namespaces` → namespace names
-  - `cluster nodes` → node names
-  - `cluster utilization` → namespace names from the utilization payload
-  - `cluster health` → derived status label (`healthy`/`degraded`/`unknown`)
-  - `cluster test-connection` → connection status string (`success`/`error`)
+  Most commands print IDs. For the commands that print other stable identifiers, see the list of documented exceptions in `commands.instructions.md`.
 
 `--quiet` is checked first and short-circuits the format switch. Quiet output goes to `printer.Writer` (which Cobra sets to the command's stdout).
 
 ## Color
-- Color is enabled by default and disabled when `--no-color` is set, when `NO_COLOR` env is set, or when stdout is not a TTY.
-- Centralise terminal detection here — commands MUST NOT call `isatty` themselves.
+- Color is enabled by default. Only the `--no-color` flag disables it (`Printer.NoColor`, used by `StatusColor`).
+- This package does not check the `NO_COLOR` env var. It does not detect a TTY.
+- Note: TTY checks (`term.IsTerminal`) exist only in `cmd/login.go`, for prompts.
+
+## Printer Methods
+- `Print(data, headers, rows, ids)` — list output. Quiet mode prints `ids`. Table mode uses `headers` and `rows`.
+- `PrintSingle(data, fields)` — one item. Table mode prints `Key:` and value pairs from `[]KeyValue`.
+- `PrintIDs(ids)` — one ID per line, for quiet mode.
+- `PrintJSON`, `PrintYAML`, `PrintTable`, `PrintMessage` — lower-level helpers.
+- `StatusColor(status)` — colors a status string unless `NoColor` is set.
 
 ## Errors
 - Format helpers return `error` for I/O failures only. Do not swallow encoder errors.

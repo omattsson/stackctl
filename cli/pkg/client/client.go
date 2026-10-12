@@ -49,7 +49,8 @@ type Client struct {
 	// session. When it is set and APIKey is empty, the client renews the
 	// access token before it expires and after a 401 (see auth.go).
 	Tokens TokenStore
-	// WarnWriter receives renewal warnings; nil means os.Stderr.
+	// WarnWriter receives session renewal warnings and server Warning headers;
+	// nil means os.Stderr.
 	WarnWriter io.Writer
 
 	tokenMu sync.Mutex          // guards Token and unsaved

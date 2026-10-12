@@ -6,7 +6,7 @@ applyTo: "cli/cmd/**"
 
 ## Required Patterns
 - Use `RunE` (not `Run`) to return errors properly
-- Set `SilenceUsage: true` on all commands that take arguments
+- `SilenceUsage: true` is set on the root command (`root.go`) and inherited. Command files also set it explicitly by convention; keep that for new commands
 - Use `cobra.ExactArgs(N)` ONLY when positional args are required (e.g. `Args: cobra.ExactArgs(1)` for `delete <id>`). Commands that take no positional args (list, create-with-flags, analytics subcommands, etc.) deliberately OMIT the `Args` field — see `clusterListCmd`, `templateListCmd`, `userListCmd`. Do not add `Args: cobra.NoArgs` / `cobra.ExactArgs(0)` to these commands.
 - Register subcommands in `init()` using `parentCmd.AddCommand(childCmd)`
 
@@ -30,15 +30,15 @@ default:
 }
 ```
 
-- `--quiet` must output only numeric IDs, one per line
-- Commands without numeric IDs (like `git branches`) should skip quiet mode handling
-- **Documented exceptions** (print stable identifiers other than numeric IDs):
+- `--quiet` must output only IDs, one per line. For list commands, use `printAllIDs` or `listAllIDs` (`paging.go`) so `-q` covers all pages
+- Commands without IDs (like `git branches`) should skip quiet mode handling
+- **Documented exceptions** (this is the single list; other files point here). These commands print stable identifiers other than IDs:
   - `orphaned list` → prints namespace names
   - `cluster nodes <id>` → prints node names via `printer.PrintIDs`
   - `cluster namespaces <id>` → prints namespace names via `printer.PrintIDs`
   - `cluster utilization <id>` → prints namespace names via `printer.PrintIDs`
   - `cluster health <id>` → prints the derived status label (`healthy`/`degraded`/`unknown`) via `fmt.Fprintln(printer.Writer, deriveHealthStatus(health))`
-  - `cluster test-connection <id>` → prints `result.Status` (only on 2xx responses; non-2xx surfaces as an `APIError` command error, nothing is printed to stdout) via `fmt.Fprintln(printer.Writer, result.Status)`
+  - `cluster test-connection <id>` → prints `result.Status` (for example `success`; only on 2xx responses; a non-2xx response gives an `APIError` command error and nothing is printed to stdout) via `fmt.Fprintln(printer.Writer, result.Status)`
   - `notification prefs get` / `notification prefs set` → prints `event_type` for each preference. Preferences are keyed by `(user_id, event_type)` server-side, so `EventType` is the stable functional identifier; the database UUID `ID` field is opaque and unstable across resets, so scripting like `prefs get -q \| grep failed` requires the event type.
   - `git providers` → prints provider `type` names (`azure_devops`, `gitlab`). The response shape (`gitprovider.ProviderStatus`) has no ID field at all — the provider type IS the identifier.
 
@@ -49,8 +49,8 @@ Commands that delete or clean resources must:
 3. Read from `cmd.InOrStdin()` using `bufio.NewReader`
 
 ## ID & Name Parsing
-- `parseID()` (in `stack.go`) trims whitespace and validates non-empty; returns `string` (no numeric conversion). Use for chart IDs, cluster IDs, version IDs, and other sub-resource identifiers.
-- `resolveStackID()` (in `resolve.go`) accepts a stack name OR a numeric ID OR a UUID and resolves to the canonical ID via the API. Use for ALL stack-instance-scoped commands so users can pass `my-stack` instead of `42`.
+- `parseID()` (in `stack.go`) trims whitespace and rejects an empty value; returns `string` (no numeric conversion). Use for chart IDs, cluster IDs, version IDs, and other non-name sub-resource identifiers.
+- `resolveStackID()` (in `resolve.go`) accepts a stack name OR an ID (UUID) and resolves to the canonical ID via the API. Use for ALL stack-instance-scoped commands so users can pass `my-stack` instead of a UUID.
 - Never parse IDs inline.
 
 ## API Calls

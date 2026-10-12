@@ -40,15 +40,17 @@ install -m 0755 stackctl-hello ~/.local/bin/
 
 ```bash
 stackctl hello world
-# → Hello from a stackctl plugin!
-#     API URL: http://localhost:8081
-#     API key: ***configured***
-#     args:    world
+# Output:
+# Hello from a stackctl plugin!
+#   API URL: http://localhost:8081
+#   API key: ***configured***
+#   args:    world
 ```
 
 ```bash
 stackctl --help | grep hello
-# → hello    Plugin: hello
+# Output:
+# hello    Plugin: hello
 ```
 
 The plugin's absolute path is kept out of `--help` (it was leaking `$HOME` in screenshots). Use `stackctl help hello` to see the full resolved path.
@@ -68,7 +70,7 @@ Any team-specific or company-specific workflow that doesn't belong in core stack
 
 **Good plugin candidates:**
 
-- **Thin wrappers around [k8s-stack-manager action webhooks](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md#action-webhooks).** The action endpoint (`POST /api/v1/stack-instances/:id/actions/:name`) is a k8s-stack-manager feature; stackctl itself has no action logic. A plugin like `stackctl refresh-db <id>` simply POSTs to that server endpoint and pretty-prints the response. Pair your plugin with the webhook handler you registered server-side.
+- **Thin wrappers around [k8s-stack-manager action webhooks](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md#actions--rpc-style-user-initiated).** The action endpoint (`POST /api/v1/stack-instances/:id/actions/:name`) is a k8s-stack-manager feature; stackctl itself has no action logic. A plugin like `stackctl refresh-db <id>` simply POSTs to that server endpoint and pretty-prints the response. Pair your plugin with the webhook handler you registered server-side.
 - **Operations that combine multiple stackctl calls** into a single higher-level command (e.g. "create + deploy + wait for healthy + run smoke test").
 - **Company-specific reporting.** `stackctl stacks-costing-money` that lists instances + pulls cost data from your FinOps API.
 - **Developer conveniences.** `stackctl port-forward <id>` that resolves the stack namespace and wires up a `kubectl port-forward` for common services.
@@ -78,7 +80,7 @@ Any team-specific or company-specific workflow that doesn't belong in core stack
 
 - Things core stackctl already does (shadowing is prevented — built-in subcommands always win).
 - Infrastructure changes. That's k8s-stack-manager's job.
-- Logic that should live on the server side — e.g. orchestration that needs cluster credentials. Put that in an **action webhook** on the k8s-stack-manager side and have the plugin call it. See [k8s-stack-manager EXTENDING.md](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md).
+- Logic that should live on the server side — e.g. orchestration that needs cluster credentials. Put that in an **action webhook** on the k8s-stack-manager side and have the plugin call it. See [k8s-stack-manager EXTENDING.md](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md#actions--rpc-style-user-initiated).
 
 ---
 
@@ -88,8 +90,14 @@ Plugin names follow a strict rule:
 
 - Binary on PATH: `stackctl-<name>`
 - Appears as: `stackctl <name>`
-- `<name>` can contain letters, digits, and dashes — e.g. `stackctl-refresh-db`, `stackctl-port-forward`, `stackctl-sync-cmdb`
+- `<name>` can contain lowercase letters, digits, and dashes. The first character is a letter or a digit. Examples: `stackctl-refresh-db`, `stackctl-port-forward`, `stackctl-sync-cmdb`.
 - **Built-in commands always win.** If you create `stackctl-config`, it'll be shadowed by the built-in `stackctl config`. Pick a name that doesn't collide.
+
+Windows notes:
+
+- stackctl removes a trailing `.exe`. The file `stackctl-foo.exe` becomes `stackctl foo`.
+- stackctl does not recognise `.bat`, `.cmd` and `.ps1` files. Use a `.exe` file, or a `.exe` shim in front of the script.
+- stackctl does not check the file mode on Windows. On Unix, stackctl skips files that are not executable.
 
 Discovery is **first-PATH-wins** (standard PATH semantics). If `stackctl-hello` exists in two PATH entries, the earlier one is used; the later one is silently ignored.
 
@@ -110,14 +118,16 @@ that the user exported in the parent shell is kept.
 | `STACKCTL_API_KEY` | `--api-key` flag, parent shell, or current context `api-key` | API key; send it in the header `X-API-Key` |
 | `STACKCTL_TOKEN` | parent shell, or the session token from `stackctl login` / `stackctl login --sso` | Set only when no API key is set; send it as `Authorization: Bearer <token>`. An expired token is left out. |
 | `STACKCTL_CONTEXT` | parent shell, or the current context name | Name of the current context |
-| `STACKCTL_INSECURE` | `--insecure` flag, parent shell, or current context `insecure: true` | `1` to skip TLS verification |
-| `STACKCTL_QUIET` | `--quiet` flag | `1` when the user requested quiet output |
+| `STACKCTL_INSECURE` | `--insecure` flag, parent shell, or current context `insecure: true` | `1` to skip TLS verification. stackctl exports `0` when the user sets `--insecure=false`. |
+| `STACKCTL_QUIET` | `--quiet` flag | `1` when the user requested quiet output (`0` for `--quiet=false`) |
 | `STACKCTL_OUTPUT` | `--output` flag | `table` / `json` / `yaml` / a registered custom format |
-| `STACKCTL_NO_COLOR` | `--no-color` flag | `1` when the user disabled colored output |
+| `STACKCTL_NO_COLOR` | `--no-color` flag | `1` when the user disabled colored output (`0` for `--no-color=false`) |
 | `NO_COLOR` | `--no-color` flag, or parent shell | `1` with `--no-color` ([no-color.org](https://no-color.org) convention for the tools that the plugin runs) |
-| `STACKCTL_DEBUG` | `--debug` flag | `1` when the user requested HTTP debug output |
+| `STACKCTL_DEBUG` | `--debug` flag | `1` when the user requested HTTP debug output (`0` for `--debug=false`) |
 | `STACKCTL_CONFIG_DIR` | parent shell, or the config directory that stackctl uses | Directory of `config.yaml` and `tokens/`. A plugin that runs `stackctl` again uses the same files |
 | `HOME`, `PATH`, `LANG`, `AWS_*`, `KUBECONFIG`, … | parent shell | the rest of the user's environment |
+
+> A plugin must treat any value other than `1` as off for `STACKCTL_INSECURE`, `STACKCTL_QUIET`, `STACKCTL_NO_COLOR` and `STACKCTL_DEBUG`.
 
 > Send `STACKCTL_API_KEY` as `X-API-Key` and `STACKCTL_TOKEN` as
 > `Authorization: Bearer`. The backend rejects an API key sent as a bearer
@@ -163,11 +173,16 @@ Wired through directly. A plugin can prompt for confirmation, pipe into another 
 
 Propagated back. Non-zero exit from the plugin fails the outer `stackctl` invocation, matching every other Unix tool.
 
+- A plugin that a signal kills gives exit code 255 (Go reports exit code -1).
+- If stackctl cannot start the plugin (for example the file is missing or not executable), stackctl prints `plugin "<name>": <error>` and exits with 1.
+
 ---
 
 ## Recipe: invoking a custom action
 
-The common pattern. You have an action webhook registered on the k8s-stack-manager side (see [server-side extending](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md)); you want a stackctl plugin that invokes it.
+The common pattern. You have an action webhook registered on the k8s-stack-manager side (see [server-side extending](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md#actions--rpc-style-user-initiated)); you want a stackctl plugin that invokes it.
+
+The server wraps the subscriber answer in the envelope `{action, instance_id, status_code, result}`. The request body can carry `{"parameters": {...}}` (caller-supplied JSON). An asynchronous action returns a `job_id` in `result`. Read the job log with `GET /api/v1/stack-instances/:id/actions/:name/jobs/:job_id/log?offset=<n>`. See the server document for details.
 
 ### Bash (no dependencies)
 
@@ -184,10 +199,18 @@ INSTANCE_ID=${1:?usage: stackctl snapshot-pvc <instance-id>}
 CURL_OPTS=()
 [ "${STACKCTL_INSECURE:-}" = "1" ] && CURL_OPTS+=(--insecure)
 
-curl -sS "${CURL_OPTS[@]}" \
+# Send the API key when it is set, else the session token.
+# Bash 3.2 (macOS) fails on an empty array with "set -u", so use the "+" form.
+if [ -n "${STACKCTL_API_KEY:-}" ]; then
+  AUTH_HEADER="X-API-Key: ${STACKCTL_API_KEY}"
+else
+  AUTH_HEADER="Authorization: Bearer ${STACKCTL_TOKEN:-}"
+fi
+
+curl -sS ${CURL_OPTS[@]+"${CURL_OPTS[@]}"} \
      -X POST "${STACKCTL_API_URL%/}/api/v1/stack-instances/${INSTANCE_ID}/actions/snapshot-pvc" \
      -H "Content-Type: application/json" \
-     -H "X-API-Key: ${STACKCTL_API_KEY:-}" \
+     -H "$AUTH_HEADER" \
      -d '{}'
 echo
 ```
@@ -217,14 +240,17 @@ if os.environ.get("STACKCTL_INSECURE") == "1":
 else:
     ctx = None
 
+headers = {"Content-Type": "application/json"}
+if os.environ.get("STACKCTL_API_KEY"):
+    headers["X-API-Key"] = os.environ["STACKCTL_API_KEY"]
+else:
+    headers["Authorization"] = "Bearer " + os.environ.get("STACKCTL_TOKEN", "")
+
 req = request.Request(
     f"{api}/api/v1/stack-instances/{instance_id}/actions/snapshot-pvc",
     data=b"{}",
     method="POST",
-    headers={
-        "Content-Type": "application/json",
-        "X-API-Key": os.environ.get("STACKCTL_API_KEY", ""),
-    },
+    headers=headers,
 )
 
 try:
@@ -236,15 +262,18 @@ except HTTPError as e:                            # 4xx/5xx — read body for de
 except URLError as e:
     sys.exit(f"request failed: {e.reason}")
 
-# Echo server response. If the user set STACKCTL_OUTPUT=json we keep the
-# raw shape; for other values we could reshape into a friendlier table.
+# Echo the server response. stackctl exports STACKCTL_OUTPUT only when the
+# user passes -o before the plugin name. Read it to choose the output format.
 print(json.dumps(body, indent=2))
 ```
 
 ### Go (compiled, single binary)
 
 ```go
-// stackctl-snapshot-pvc/main.go — compile: go build -o stackctl-snapshot-pvc
+// stackctl-snapshot-pvc/main.go
+// Build:
+//   go mod init example.com/stackctl-snapshot-pvc
+//   go build -o stackctl-snapshot-pvc
 package main
 
 import (
@@ -254,6 +283,7 @@ import (
     "io"
     "net/http"
     "os"
+    "strings"
 )
 
 func main() {
@@ -266,10 +296,15 @@ func main() {
         fmt.Fprintln(os.Stderr, "STACKCTL_API_URL not set")
         os.Exit(1)
     }
+    api = strings.TrimRight(api, "/")
     url := fmt.Sprintf("%s/api/v1/stack-instances/%s/actions/snapshot-pvc", api, os.Args[1])
     req, _ := http.NewRequest("POST", url, bytes.NewReader([]byte("{}")))
     req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("X-API-Key", os.Getenv("STACKCTL_API_KEY"))
+    if key := os.Getenv("STACKCTL_API_KEY"); key != "" {
+        req.Header.Set("X-API-Key", key)
+    } else {
+        req.Header.Set("Authorization", "Bearer "+os.Getenv("STACKCTL_TOKEN"))
+    }
     c := &http.Client{}
     if os.Getenv("STACKCTL_INSECURE") == "1" {
         c.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
@@ -306,19 +341,13 @@ NAME=${2:?usage: stackctl deploy-and-wait <definition-id> <name>}
 INST_ID=$(stackctl stack create --definition "$DEF_ID" --name "$NAME" --quiet)
 echo "Created $INST_ID"
 
-# Deploy
-stackctl stack deploy "$INST_ID" --quiet
-
-# Poll until Running (or Error)
-while :; do
-  STATUS=$(stackctl stack get "$INST_ID" -o json | jq -r .status)
-  case "$STATUS" in
-    running) echo "$INST_ID is running."; break ;;
-    error)   echo "deploy failed: $(stackctl stack get "$INST_ID" -o json | jq -r .error_message)"; exit 1 ;;
-    *)       echo "status=$STATUS, waiting..."; sleep 5 ;;
-  esac
-done
+# Deploy and wait. --follow streams the deploy log until a final status.
+# The command exits with 1 when the deploy ends in error or partial.
+stackctl stack deploy "$INST_ID" --follow
+echo "$INST_ID is running."
 ```
+
+If you poll the status yourself, end the loop on every final status: `running`, `stopped`, `draft`, `error`, `partial` and `failed`. Treat `error`, `partial` and `failed` as a failure.
 
 `stackctl stack get -o json` makes this composable — the built-in commands are designed for scripting.
 
@@ -328,7 +357,7 @@ done
 
 ### Respect `--quiet`
 
-If the user sets `STACKCTL_QUIET=1` (or runs your plugin with `--quiet`), minimise output — print just the IDs or the raw result. Match core stackctl's behaviour.
+If the user sets `STACKCTL_QUIET=1` (or runs your plugin and the plugin accepts its own `--quiet` flag), minimise output — print just the IDs or the raw result. Match core stackctl's behaviour.
 
 ### Honour `-o json`
 
@@ -345,7 +374,7 @@ or `stackctl login` without any export.
 Don't parse `~/.stackmanager/config.yaml` or the token files directly — the
 schema is internal and may change.
 
-### Use a deny list for dangerous defaults
+### Confirm destructive actions
 
 If your plugin mutates state (deletes, force-redeploys, wipes data), make it interactive or require `--yes`. The core stackctl conventions are:
 
@@ -412,12 +441,16 @@ On `Execute()`, stackctl scans every directory in `$PATH`. For each regular exec
     - `Use: <name>`
     - `Short: "Plugin: <name>"` (path kept out of the summary listing)
     - `Long`: includes the plugin's absolute path for `stackctl help <name>`
+    - `Annotations: {"stackctl.plugin": "true"}` — marks the command as a plugin
     - `DisableFlagParsing: true` — plugin handles its own flags
+    - `SilenceUsage` and `SilenceErrors` — stackctl does not print usage or Cobra errors for a plugin
     - `RunE`: exec the binary with the remaining args, piping I/O, propagating exit code
+
+`Execute()` sets `rootCmd.TraverseChildren` only when the target command is a plugin. For this reason stackctl parses the global flags before the plugin name, and the plugin gets the arguments after its name unchanged.
 
 If the user runs `stackctl <name> …`, Cobra routes to the registered subcommand's `RunE`, which exec's the plugin.
 
-Source: [cli/cmd/plugins.go](cli/cmd/plugins.go) (≈110 lines). No plugin framework, no SDK — just `os/exec` + `$PATH`.
+Source: [cli/cmd/plugins.go](cli/cmd/plugins.go) (discovery and exec). Also [cli/cmd/root.go](cli/cmd/root.go) (registration and `TraverseChildren`) and [cli/cmd/token.go](cli/cmd/token.go) (`freshSessionToken`, the session token for plugins). No plugin framework, no SDK — just `os/exec` + `$PATH`.
 
 ---
 
@@ -427,6 +460,7 @@ Source: [cli/cmd/plugins.go](cli/cmd/plugins.go) (≈110 lines). No plugin frame
 
 - Check the binary is **executable** (`chmod +x`). Non-executable files in PATH are ignored.
 - Check the directory is actually in `$PATH`. `which stackctl-<name>` should find it.
+- Check the name pattern. stackctl skips, without a message, a name with uppercase letters, underscores or dots (for example `stackctl-Refresh_DB` or `stackctl-sync.py`). Use lowercase letters, digits and dashes only.
 - Check the name starts with `stackctl-` (not `stackctl_<name>` or `stackctl <name>`).
 - Shadow check: is there a built-in `stackctl <name>`? `stackctl --help | grep '<name>'` — if the Short text doesn't say "Plugin:", a built-in is winning.
 
@@ -457,6 +491,6 @@ Built-ins always win. Rename the plugin to something that doesn't collide. (This
 
 ## Related
 
-- [k8s-stack-manager EXTENDING.md](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md) — the server side: how to register a webhook handler that a stackctl plugin can invoke. Most plugins pair with an action webhook; this is the complete picture.
-- [cli/cmd/plugins.go](cli/cmd/plugins.go) — plugin-discovery implementation.
+- [k8s-stack-manager EXTENDING.md](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md#actions--rpc-style-user-initiated) — the server side: how to register a webhook handler that a stackctl plugin can invoke. Most plugins pair with an action webhook; this is the complete picture.
+- [cli/cmd/plugins.go](cli/cmd/plugins.go) — plugin discovery and exec, with [cli/cmd/root.go](cli/cmd/root.go) (registration, `TraverseChildren`) and [cli/cmd/token.go](cli/cmd/token.go) (`freshSessionToken`).
 - [cli/cmd/plugins_test.go](cli/cmd/plugins_test.go) — test patterns for plugin behaviour.

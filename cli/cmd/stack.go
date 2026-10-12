@@ -1948,7 +1948,8 @@ func printWatchEvent(ev types.WatchEvent) error {
 	}
 }
 
-// parseID parses a string argument as a uint ID.
+// parseID trims a string ID argument and rejects an empty one. It does no
+// numeric parsing: IDs are strings (UUIDs).
 func parseID(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
