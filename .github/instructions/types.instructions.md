@@ -10,7 +10,7 @@ applyTo: "cli/pkg/types/**"
 ## Struct Rules
 
 ### Tags
-Every field MUST have both `json:` and `yaml:` struct tags. Omit-empty where the field is optional in the API response:
+Every field of a response or output struct MUST have both `json:` and `yaml:` struct tags. Omit-empty where the field is optional in the API response. Wire-only request and envelope structs may omit `yaml:` tags (for example `LoginRequest`, `ListResponse[T]`, `DeploymentLogResult`):
 ```go
 Name   string `json:"name" yaml:"name"`             // required in response
 Region string `json:"region,omitempty" yaml:"region,omitempty"` // optional
@@ -71,3 +71,7 @@ type ClusterTestConnectionResult struct { ... }
 - No constructor functions
 - No methods that call `pkg/client`
 - No formatting or display logic
+
+## Allowed Exceptions
+- Small pure helper methods on a type are allowed: `BulkOperationResult.ID()` and `Success()`, `TemplateVersion.CreatedByName()`.
+- Shared constants that mirror a backend contract are allowed: `ValuesDriftWarning`, `TemplateVersionWorkingCopy`. Document the backend source in the comment.

@@ -13,24 +13,21 @@ You are a senior DevOps engineer for the stackctl CLI. You own the Makefile, cro
 
 ## Responsibilities
 
-### Makefile (to be created)
-No Makefile exists yet. When creating one, include these targets:
+### Makefile (`cli/Makefile`)
+Run `make` from `cli/`. Targets:
 ```makefile
-build          # Build for current platform → bin/stackctl (with ldflags for version)
-build-all      # Cross-compile: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64
-test           # cd cli && go test ./... -v
-lint           # cd cli && go vet + staticcheck
-coverage       # go test -coverprofile + coverage threshold check (80%)
-install        # cd cli && go install
-clean          # Remove bin/ directory
+build          # Build for the current platform to bin/stackctl (with version ldflags)
+build-all      # Cross-compile for PLATFORMS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+test           # go test ./... -v
+lint           # go vet + staticcheck (run `make tools` first)
+coverage       # go test ./... -coverprofile=coverage.out + go tool cover -func
+install        # go install
+clean          # Remove build output
+tools          # go install staticcheck@$(STATICCHECK_VERSION)
 ```
-
-Current build commands (no Makefile):
-```bash
-cd cli && go build -o bin/stackctl .
-cd cli && go test ./... -v
-cd cli && go vet ./...
-```
+- Variables: `STATICCHECK_VERSION` (pinned, for example 2026.1), `PLATFORMS`, `LDFLAGS`.
+- `LDFLAGS` is `-s -w -X main.version -X main.commit -X main.date`.
+- Builds use `CGO_ENABLED=0`.
 
 ### Build-time Variables (ldflags)
 ```go
@@ -39,24 +36,21 @@ cd cli && go vet ./...
 -X main.date={{.Date}}
 ```
 
-### GitHub Actions CI (.github/workflows/ci.yml)
-- Trigger: push to main, pull requests
-- Matrix: Go 1.22+ on ubuntu-latest
-- Steps: checkout → setup-go (with cache) → lint → test → build
-- Upload test results as artifacts
-
-### GitHub Actions Release (.github/workflows/release.yml)
-- Trigger: tag push (`v*`)
-- Cross-compile all platforms
-- Generate SHA256 checksums
-- Create GitHub Release with binaries attached
-- Alternative: goreleaser for simplified release pipeline
+### GitHub Actions Workflows (`.github/workflows/`)
+- `ci.yml` — trigger: push to main and pull requests. Runs `make lint`, tests and coverage. The coverage gate is 70% total. Uploads `coverage.out`.
+- `docker.yml` — builds the Docker image.
+- `live-tests.yml` — runs `cli/test/live` against a booted k8s-stack-manager on push and pull request to main.
+- `release.yml` — trigger: tag push (`v*`). Runs goreleaser.
+- `security.yml` — security scans.
+- Go version: use `go-version-file: cli/go.mod`. Do not hardcode a Go version in workflows.
+- Release config: `.goreleaser.yml` (in use). It builds all platforms, creates checksums and the GitHub Release, and updates the Homebrew tap `omattsson/homebrew-tap`.
 
 ### Dockerfile
 - Alpine-based, minimal
 - Multi-stage: builder (Go build) → runtime (alpine/scratch)
 - Non-root user
 - Binary only — no source code in image
+- The builder image Go version can be newer than the minimum in `cli/go.mod`. This is allowed.
 
 ## Critical Rules
 - Always include version ldflags in builds
@@ -68,6 +62,6 @@ cd cli && go vet ./...
 ## Verification
 ```bash
 cd cli && go build -o bin/stackctl . && bin/stackctl version    # Verify version info
-cd cli && go test ./... -v                                      # All tests pass
-cd cli && go vet ./...                                          # No warnings
+cd cli && make test                                             # All tests pass
+cd cli && make lint                                             # go vet + staticcheck, no warnings
 ```

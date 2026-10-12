@@ -14,9 +14,11 @@ applyTo: "cli/pkg/config/**"
 - All resolver helpers (`CurrentCtx()`, etc.) MUST return `nil` (never panic) when no context is selected.
 - Per-context `insecure: true` opts the context into TLS skip without requiring `--insecure` on every command.
 
-## Viper Bindings
-- Bind every CLI flag with a config equivalent so flag > env > file precedence is preserved.
-- Environment variable prefix is `STACKCTL_`. Use Viper's `SetEnvPrefix` + `AutomaticEnv` — never read `os.Getenv` directly in this package.
+## Precedence
+- Precedence is flag > `STACKCTL_*` env var > config file.
+- `cmd/root.go` resolves it by hand (`resolveAPIURL`, `resolveAPIKey`) with `os.Getenv`. This package does not resolve precedence.
+- This package reads only `STACKCTL_CONFIG_DIR` and `XDG_CONFIG_HOME` (in `ConfigDir()`).
+- The config file is YAML (`gopkg.in/yaml.v3`). Keys set with `config set`: `api-url`, `api-key`, `insecure`. The `api-key` is stored in plain text in `config.yaml`.
 
 ## Load Behaviour
 - `Load()` MUST succeed (returning an empty config) when the file is missing — first-run UX requires it.

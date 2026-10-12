@@ -14,6 +14,12 @@ Command-line interface for [K8s Stack Manager](https://github.com/omattsson/k8s-
 curl -fsSL https://raw.githubusercontent.com/omattsson/stackctl/main/install.sh | sudo bash
 ```
 
+The script supports Linux and macOS, on amd64 and arm64. It installs to `/usr/local/bin` by default. Set `INSTALL_DIR` to use another directory. This needs no `sudo` when you own the directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/omattsson/stackctl/main/install.sh | INSTALL_DIR=$HOME/.local/bin bash
+```
+
 ### Homebrew (macOS / Linux)
 
 ```bash
@@ -28,7 +34,7 @@ If you installed the old formula, remove it once before the first cask install:
 brew uninstall --formula stackctl && brew install --cask omattsson/tap/stackctl
 ```
 
-Homebrew installs stable releases only. To install a release candidate (for example `v0.7.0-rc.1`), use the release binaries below.
+Homebrew installs stable releases only. To install a release candidate (for example `vX.Y.Z-rc.1`), use the release binaries below.
 
 ### From release binaries
 
@@ -39,16 +45,26 @@ tar -xzf stackctl_*.tar.gz
 sudo install -m 755 stackctl /usr/local/bin/stackctl
 ```
 
-Release candidates (for example `v0.7.0-rc.1`) are GitHub pre-releases. They are not "Latest", and the quick install script and Homebrew do not install them. Download the archive from the release page of the tag, for example `https://github.com/omattsson/stackctl/releases/tag/v0.7.0-rc.1`. On macOS, remove the quarantine attribute before the first run: `xattr -d com.apple.quarantine stackctl`.
+Archive names are `stackctl_<version>_<os>_<arch>`. Linux and macOS archives are `.tar.gz`. Windows archives are `.zip`. Each release also has a `checksums.txt` file with SHA-256 checksums. Verify a download before you install it:
+
+```bash
+sha256sum --check --ignore-missing checksums.txt   # macOS: shasum -a 256 --check --ignore-missing checksums.txt
+```
+
+Release candidates (for example `vX.Y.Z-rc.1`) are GitHub pre-releases. They are not "Latest", and the quick install script and Homebrew do not install them. Download the archive from the release page of the tag, for example `https://github.com/omattsson/stackctl/releases/tag/vX.Y.Z-rc.1`. On macOS, remove the quarantine attribute before the first run: `xattr -d com.apple.quarantine stackctl`.
 
 ### From source
 
 ```bash
 git clone https://github.com/omattsson/stackctl.git
 cd stackctl/cli
-go build -o bin/stackctl .
+make build
 sudo cp bin/stackctl /usr/local/bin/
 ```
+
+`make build` sets the version, commit and date with linker flags. A plain `go build -o bin/stackctl .` also works, but then `stackctl version` prints development values.
+
+A container image is available at `ghcr.io/omattsson/stackctl`. It is published for each `v*` tag.
 
 ## Quick Start
 
@@ -63,10 +79,11 @@ stackctl config list
 
 # 3. Authenticate
 stackctl login
+stackctl whoami
 
 # 4. Browse templates and deploy
 stackctl template list
-stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack
 stackctl stack list --mine
 ```
 
@@ -85,18 +102,33 @@ echo "Hello! API=${STACKCTL_API_URL} args=$*"
 EOF
 chmod +x ~/.local/bin/stackctl-hello
 
-stackctl hello world     # → Hello! API=http://... args=world
+stackctl hello world
 stackctl --help | grep hello
-# hello    Plugin: hello
 ```
 
-The plugin inherits the user's full environment. stackctl also sets the effective settings of the current context and of the global flags as environment variables: `STACKCTL_API_URL`, `STACKCTL_API_KEY` or `STACKCTL_TOKEN`, `STACKCTL_CONTEXT`, `STACKCTL_INSECURE`, `STACKCTL_CONFIG_DIR`, and with the flag `STACKCTL_OUTPUT`, `STACKCTL_QUIET`, `STACKCTL_NO_COLOR` (and `NO_COLOR`), `STACKCTL_DEBUG`. Put the global flags before the plugin name: `stackctl --no-color -o json refresh-db status my-stack` gives the plugin the arguments `status my-stack` and the flag values in the environment. Arguments after the plugin name go to the plugin unchanged. See [EXTENDING.md](EXTENDING.md#what-plugins-receive) for the full contract. Built-in subcommands always win on name collisions (a safety feature — a malicious `stackctl-config` on PATH can't intercept credentials).
+Output:
 
-👉 **[Full guide: EXTENDING.md](EXTENDING.md)** — tutorial, recipes in bash/Python/Go, best practices, and how plugins pair with [server-side action webhooks](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md) for end-to-end custom operations.
+```
+Hello! API=http://... args=world
+hello    Plugin: hello
+```
+
+```bash
+```
+
+The plugin inherits the user's full environment. stackctl also sets the effective settings of the current context and of the global flags as environment variables: `STACKCTL_API_URL`, `STACKCTL_API_KEY` or `STACKCTL_TOKEN` (stackctl sets `STACKCTL_TOKEN` only when no API key resolves), `STACKCTL_CONTEXT`, `STACKCTL_INSECURE`, `STACKCTL_CONFIG_DIR`, and with the flag `STACKCTL_OUTPUT`, `STACKCTL_QUIET`, `STACKCTL_NO_COLOR` (and `NO_COLOR`), `STACKCTL_DEBUG`. Put the global flags before the plugin name. Example: `stackctl --no-color -o json refresh-db status my-stack` gives the plugin the arguments `status my-stack` and the flag values in the environment. Arguments after the plugin name go to the plugin unchanged. See [EXTENDING.md](EXTENDING.md#what-plugins-receive) for the full contract. Built-in subcommands always win on name collisions. This prevents a malicious `stackctl-config` on `PATH` from intercepting credentials.
+
+**[Full guide: EXTENDING.md](EXTENDING.md)** — tutorial, recipes in bash/Python/Go, best practices, and how plugins pair with [server-side action webhooks](https://github.com/omattsson/k8s-stack-manager/blob/main/EXTENDING.md) for end-to-end custom operations.
 
 ## Configuration
 
-stackctl uses named contexts to manage multiple environments. Configuration is stored in `~/.stackmanager/config.yaml`.
+stackctl uses named contexts to manage multiple environments. The config file is `config.yaml` in the config directory. The default directory is `~/.stackmanager`. stackctl finds the directory in this order:
+
+1. `STACKCTL_CONFIG_DIR`
+2. `$XDG_CONFIG_HOME/stackmanager`
+3. `~/.stackmanager`
+
+Tokens (`tokens/<context>.json`) and lock files (`tokens/<context>.lock`) are in the same directory.
 
 ### Contexts
 
@@ -123,28 +155,42 @@ stackctl config list
 stackctl config delete-context staging
 ```
 
+`config set` accepts these keys: `api-url`, `api-key` and `insecure`. `config get <key>` prints one value of the current context. `config list` shows the contexts and the settings of the current context. stackctl stores `api-key` in plain text in `config.yaml`. Restrict access to the file, or use the `STACKCTL_API_KEY` environment variable instead.
+
 ### Authentication
 
 stackctl supports two authentication methods:
 
-- **JWT token** — `stackctl login` prompts for credentials and stores the token in `~/.stackmanager/tokens/<context>.json`
+- **JWT token** — `stackctl login` prompts for credentials and stores the token in `tokens/<context>.json` in the config directory
 - **API key** — `stackctl config set api-key sk_...` for non-interactive / CI use
 
 API key takes precedence when both are configured.
 
+#### Non-interactive login
+
+Set `STACKCTL_USERNAME` and `STACKCTL_PASSWORD`, or use the flags `--username` and `--password`, to log in without a prompt. Use `--sso` to log in through the browser.
+
+```bash
+STACKCTL_USERNAME=alice STACKCTL_PASSWORD=... stackctl login
+stackctl whoami    # show the current user
+stackctl logout    # end the session and remove the token file
+```
+
+`stackctl auth register` creates a user. Its flags are `--username`, `--display-name`, `--role`, `--service-account` and `--password-stdin`. Only an admin can set `--role` and `--service-account`.
+
 #### Session renewal
 
-The server gives a username/password login a short-lived access token (15 minutes by default) and a refresh token. `stackctl login` stores both in the token file (mode `0600`). stackctl renews the access token automatically:
+By default, the server gives a username/password login a short-lived access token (15 minutes) and a refresh token. `stackctl login` stores both in the token file (mode `0600`). stackctl renews the access token automatically:
 
 - before a request, when the access token expires within 60 seconds;
 - after a `401` response, once, and then it retries the request once;
 - before it starts a plugin, so the plugin gets a valid `STACKCTL_TOKEN`.
 
-Renewal works until the session ends: 12 hours after the login, or after 30 minutes without use (server defaults). Then stackctl removes the stored token and shows `Not authenticated. Run 'stackctl login' first.` A network or server error during renewal keeps the stored token.
+Renewal works until the session ends. By default, the server ends a session 12 hours after the login, or after 30 minutes without use. Then stackctl removes the stored token and shows `Not authenticated. Run 'stackctl login' first.` A network or server error during renewal keeps the stored token.
 
 The server rotates the refresh token on each renewal. stackctl holds a lock on `tokens/<context>.lock` during a renewal, so parallel stackctl commands renew only once.
 
-An SSO login (`stackctl login --sso`) gets a longer-lived token (24 hours by default) without a refresh token. It is not renewed. API keys have no session.
+An SSO login (`stackctl login --sso`) gets a token without a refresh token. By default, the server sets its life time to 24 hours (`JWT_EXPIRATION`). stackctl does not renew it. API keys have no session.
 
 `stackctl logout` sends the access token and the refresh token to the server, which ends the session, and then removes the token file. If the server cannot be reached, stackctl prints a warning and still removes the file.
 
@@ -154,7 +200,7 @@ Configuration values are resolved in this order (highest priority first):
 
 1. Command-line flags (`--api-url`, `--api-key`)
 2. Environment variables (`STACKCTL_API_URL`, `STACKCTL_API_KEY`)
-3. Config file (`~/.stackmanager/config.yaml`)
+3. Config file (`config.yaml` in the config directory)
 
 ## Usage
 
@@ -164,7 +210,7 @@ Configuration values are resolved in this order (highest priority first):
   <img src="assets/stackctl-stack.svg" alt="stackctl stack commands" width="700">
 </p>
 
-All stack commands accept a **name or ID** — e.g. `stackctl stack deploy my-app` or `stackctl stack deploy 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d`.
+All stack commands that take `<name|id>` accept a **name or ID**. Example: `stackctl stack deploy my-app` or `stackctl stack deploy 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d`.
 
 ```bash
 # List instances
@@ -179,7 +225,7 @@ stackctl stack deploy my-app
 # Monitor
 stackctl stack status my-app
 stackctl stack logs my-app
-stackctl stack watch --id 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d
+stackctl stack watch --id 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d   # watch uses --id, not a name argument
 
 # Lifecycle
 stackctl stack stop my-app
@@ -198,17 +244,23 @@ stackctl stack history-values my-app <log-id>
 stackctl stack rollback my-app --target-log <log-id>
 ```
 
-`stack rollback --target-log` does not change the stored overrides. When the stored overrides produce other values than the target deploy, the server sets `values_drift` and stackctl writes a warning to stderr: the next deploy applies the stored overrides again. `stack get` writes the same warning while the drift exists; `-o json` and `-o yaml` include `values_drift` and `warning`. `stack rollback -o json|yaml` prints the rollback response, with `values_drift` and `warning`. `stack clone` writes the server warning to stderr when the quota override of the source is not copied, for example because it is above the cluster quota (k8s-stack-manager v0.7.0 or later).
+`stack rollback --target-log` does not change the stored overrides. When the stored overrides produce other values than the target deploy, the server sets `values_drift` and stackctl writes a warning to stderr: the next deploy applies the stored overrides again. `stack get` writes the same warning while the drift exists.
 
-`stack list`, `stack get`, `definition list/get` and `template get` show the owner, cluster and definition names when the server sends them (`owner_username`, `cluster_name`, `definition_name`; k8s-stack-manager v0.7.0 or later, server issue #470). Otherwise they show the IDs. The `stack get` table shows `Cluster` and `Definition` (before: `Cluster ID` and `Definition ID`) as "name (id)" or the ID.
+`stack get -o json` and `-o yaml` include `values_drift` and `warning`. `stack rollback -o json|yaml` prints the rollback response, with `values_drift` and `warning`. `stack clone` writes the server warning to stderr when the quota override of the source is not copied, for example because it is above the cluster quota.
 
-`stack extend --minutes N` adds N minutes to the current expiry, or to now when the stack has expired. It never makes the expiry earlier and does not change the TTL of the stack. The server caps the new expiry at 30 days from now. `--minutes` needs k8s-stack-manager v0.6.0 or later. An older server ignores `--minutes` and resets the expiry to now + TTL. stackctl detects this: it prints the old and the new expiry, then fails (exit code 1) with "the server did not add N minutes ... upgrade k8s-stack-manager to v0.6.0 or later". `--reset-ttl M` (deprecated) keeps the old behaviour: the TTL becomes M minutes and the expiry now + M minutes, which can be earlier. `--yes` has no effect and is accepted for older scripts.
+`stack list`, `stack get`, `definition list/get` and `template get` show the owner, cluster and definition names when the server sends them (`owner_username`, `cluster_name`, `definition_name`). Otherwise they show the IDs. The `stack get` table shows `Cluster` and `Definition` (before: `Cluster ID` and `Definition ID`) as "name (id)" or the ID.
 
-List commands (`stack list`, `definition list`, `template list`) show one page: 25 items by default, `--page-size` up to 100. When the server has more items, the command writes `Showing X of TOTAL. Use --page/--page-size to see more.` to stderr, so `-q` and `-o json` output stays clean. `-q` without `--page` prints the IDs of all pages, so `stackctl stack list --mine -q | xargs ...` gets every ID. k8s-stack-manager v0.7.0 also pages `--mine` and name queries; older servers return every match on one page. When a name matches more than one stack or definition, the error lists the first page and the number of matches.
+`stack extend --minutes N` adds N minutes to the current expiry, or to now when the stack has expired. It never makes the expiry earlier and does not change the TTL of the stack. The server caps the new expiry at 30 days from now. An older server ignores `--minutes` and resets the expiry to now + TTL (see Server version requirements). stackctl detects this: it prints the old and the new expiry, then fails (exit code 1) with "the server did not add N minutes ... upgrade k8s-stack-manager to v0.6.0 or later". 
+
+`--reset-ttl M` (deprecated) keeps the old behaviour: the TTL becomes M minutes and the expiry now + M minutes, which can be earlier. `--yes` has no effect and is accepted for older scripts.
+
+List commands (`stack list`, `definition list`, `template list`) show one page: 25 items by default, `--page-size` up to 100. When the server has more items, the command writes `Showing X of TOTAL. Use --page/--page-size to see more.` to stderr, so `-q` and `-o json` output stays clean. `-q` without `--page` prints the IDs of all pages, so `stackctl stack list --mine -q | xargs ...` gets every ID. Older servers return every match of `--mine` and name queries on one page. When a name matches more than one stack or definition, the error lists the first page and the number of matches.
 
 `stack deploy`, `stop`, `clean` and `rollback` with `--follow` (`-f`), and `stack watch --id`, wait for a terminal status: `running`, `stopped` or `draft` (exit code 0), or `error` or `partial` (exit code 1). `partial` means that some charts deployed and others failed; the message names the operation, the status and the server error, for example `deploy partially failed (status partial): some charts did not deploy: ...`. `--follow` reads the instance after it connects, so an operation that ended before the connection counts. It handles a server close like `stack watch`: after `token expired` it renews the session, connects again and reads the instance, so a final status during the reconnect counts. When `--follow` cannot follow the operation to the end (session revoked, SSO login without refresh token, failed renewal, lost connection), it exits with code 1 and says that the operation continues on the server. Do not start the operation again: run `stackctl stack watch --id <id>` or `stackctl stack status <id>`.
 
-`--follow` and `stack watch` work with an API key from k8s-stack-manager v0.8.0. An older server accepts only a login session for live updates and refuses an API key: stackctl then prints `This server does not accept API keys for live updates; use a login session or upgrade the server.` When the server refuses the WebSocket connection, the error shows the HTTP status and the server message, for example `WebSocket refused by the server (HTTP 401): Invalid or expired token`. The error never shows headers or tokens.
+`--follow` and `stack watch` work with an API key on newer servers. An older server accepts only a login session for live updates and refuses an API key: stackctl then prints `This server does not accept API keys for live updates; use a login session or upgrade the server.`
+
+When the server refuses the WebSocket connection, the error shows the HTTP status and the server message, for example `WebSocket refused by the server (HTTP 401): Invalid or expired token`. The error never shows headers or tokens.
 
 `stack watch` stops with a non-zero exit code when the server closes the WebSocket connection with close code 1008. It writes the reason to stderr:
 
@@ -228,8 +280,8 @@ stackctl writes any `Warning` header from the API (for example a deprecation not
 stackctl template list --published
 stackctl template get 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
 
-# Deploy from template (one command)
-stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
+# Deploy from template (one command; --name is required)
+stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack
 
 # Or step by step
 stackctl template instantiate 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --branch main
@@ -258,15 +310,17 @@ stackctl template versions diff 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f <version-id
 stackctl template delete 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f
 ```
 
-Templates use a draft-and-release model (k8s-stack-manager v0.6.0 or later):
+Most template commands need the template ID. `template publish` accepts a name or an ID.
+
+Templates use a draft-and-release model:
 
 - `template update` and `template update-chart` change only the working copy (draft).
 - Users get the latest released version. Quick deploy, instantiate and definition upgrades use it.
 - After `template update-chart`, run `stackctl template publish <name|id> --version <new-version>` so users get the change.
 - Each version can be released only once. Publish without changes creates no new version.
 - Quick deploy or instantiate of a template without a release fails with "template X has no published version; publish it first: stackctl template publish X --version <version>". When the template has a release but is unpublished, the hint is a plain `stackctl template publish X`.
-- `--version` and `--change-summary` on `template publish` need v0.6.0 or later. The command reads the template first; on an older server it stops with an upgrade hint and publishes nothing.
-- `template update` sends only the changed fields to v0.6.0 or later, and the full record to older servers. `--description ""` clears the description.
+- `--version` and `--change-summary` on `template publish` need a newer server. The command reads the template first; on an older server it stops with an upgrade hint and publishes nothing.
+- `template update` sends only the changed fields to a newer server, and the full record to older servers. `--description ""` clears the description.
 - Template names (`template publish`, bulk template commands) must match exactly. This also works on servers that ignore the `name` filter.
 
 ### Stack Definitions
@@ -343,7 +397,7 @@ stackctl stack compare my-app other-app
 
 `override quota set` reads the current quota override and changes only the given fields (the API replaces the whole override). A change by another user between the read and the write is overwritten. `--pod-limit 0` means no pod limit; an empty value cannot clear `pod_limit` (use `--replace` or `override quota delete`). The command refuses an empty override; use `override quota delete` instead.
 
-The stack owner, admin and devops can set a quota override. A user without the admin or devops role cannot set a value above the cluster quota (403, k8s-stack-manager v0.7.0 or later). A value equal to the stored value is allowed. Admin and devops can set values above the cluster quota.
+The stack owner, admin and devops can set a quota override. A user without the admin or devops role cannot set a value above the cluster quota (403). A value equal to the stored value is allowed. Admin and devops can set values above the cluster quota.
 
 ### Audit Log
 
@@ -353,7 +407,9 @@ stackctl audit log list --entity-type stack_template --action publish
 stackctl audit log export --since 168h --format csv --output-file weekly.csv
 ```
 
-`--action` and `--entity-type` match the stored value exactly. `stackctl audit log list --help` lists the values (for example `deploy`, `rollback`, `extend_ttl`, `quick_deploy`; `stack_instance`, `stack_definition`, `stack_template`, `quota_override`). These values need k8s-stack-manager v0.7.0 or later. Older servers, and entries written before v0.7.0, use the HTTP method and the last route segment, for example `--action create --entity-type deploy` for a deploy.
+Use hours for `--since`, for example `168h` for 7 days. `7d` is not accepted.
+
+`--action` and `--entity-type` match the stored value exactly. `stackctl audit log list --help` lists the values (for example `deploy`, `rollback`, `extend_ttl`, `quick_deploy`; `stack_instance`, `stack_definition`, `stack_template`, `quota_override`). Older servers, and older entries, use the HTTP method and the last route segment, for example `--action create --entity-type deploy` for a deploy.
 
 ### Bulk Operations
 
@@ -372,7 +428,19 @@ stackctl stack list --status stopped --mine -q | xargs -n 50 stackctl bulk deplo
 
 The result table shows `ID`, `STATUS`, `LOG ID` (when the server returns a log ID) and `ERROR`. `-o json` and `-o yaml` print the full response: `total`, `succeeded`, `failed`, and per item `instance_id`, `status`, `error` and `log_id`.
 
-With k8s-stack-manager v0.8.0 or later, `bulk delete` cleans a stack with cluster resources (status `running`, `partial`, `stopped` or `error`) first and deletes it when the clean completes. Its result is `success` with the `log_id` of the clean: `success` then means that the clean started, not that the stack is deleted. A failed clean keeps the stack with status `error`. A draft stack is deleted at once and has no log ID. The table output adds a note when this occurs. Run `stackctl stack get <id>` later: "not found" means that the delete is complete.
+On newer servers, `bulk delete` cleans a stack with cluster resources (status `running`, `partial`, `stopped` or `error`) first and deletes it when the clean completes. Its result is `success` with the `log_id` of the clean: `success` then means that the clean started, not that the stack is deleted. A failed clean keeps the stack with status `error`. A draft stack is deleted at once and has no log ID. The table output adds a note when this occurs.
+
+Run `stackctl stack get <id>` later: "not found" means that the delete is complete.
+
+#### Bulk template operations
+
+```bash
+stackctl bulk template publish --ids my-template,other-template
+stackctl bulk template unpublish --ids my-template
+stackctl bulk template delete --ids my-template --yes
+```
+
+These commands also take names or IDs as positional arguments, and `--dry-run`. They need the devops role or higher.
 
 ### Orphaned Namespaces
 
@@ -387,7 +455,7 @@ stackctl orphaned list -o json
 # Delete an orphaned namespace
 stackctl orphaned delete stack-old-namespace
 
-# Delete a namespace without the managed-by label (k8s-stack-manager v0.8.0+)
+# Delete a namespace without the managed-by label
 stackctl orphaned delete stack-other-tool --confirm stack-other-tool
 ```
 
@@ -408,7 +476,7 @@ stackctl user delete <id>
 stackctl user set-role alice devops
 ```
 
-`user set-role` needs k8s-stack-manager v0.8.0 or later. It prints `Role changed from user to devops. The user must log in again.` or `Role unchanged.` A change ends the sessions of the user; the API keys of the user stay valid and use the new role. The server refuses:
+`user set-role` prints `Role changed from user to devops. The user must log in again.` or `Role unchanged.` A change ends the sessions of the user; the API keys of the user stay valid and use the new role. The server refuses:
 
 - the role of an SSO user (409): the identity provider sets it at each login;
 - your own role (403);
@@ -423,14 +491,11 @@ stackctl stack list --status stopped --mine -q | xargs -n 50 stackctl bulk deplo
 
 # Export all definitions to individual files
 for id in $(stackctl definition list -q); do
-  stackctl definition export "$id" -o json > "definition-${id}.json"
+  stackctl definition export "$id" --output-file "definition-${id}.json"
 done
 
-# CI/CD: deploy and wait for status
-stackctl stack deploy my-app
-while [ "$(stackctl stack get my-app -o json | jq -r '.status')" != "running" ]; do
-  sleep 5
-done
+# CI/CD: deploy and wait for the final status (exit code 1 on error or partial)
+stackctl stack deploy my-app --follow
 echo "Stack my-app is running"
 
 # Delete all stacks on a specific cluster
@@ -457,6 +522,31 @@ stackctl git branches --repo https://dev.azure.com/org/project/_git/repo
 stackctl git validate --repo https://dev.azure.com/org/project/_git/repo --branch main
 ```
 
+## Command reference
+
+These groups have no section above. Run `stackctl <group> --help` for the flags.
+
+- `apikey`: `list`, `create`, `revoke`
+- `analytics`: `overview`, `templates`, `users`
+- `cleanup-policy`: `list`, `get`, `create`, `update`, `delete`, `run`
+- `favorite` (aliases `favorites`, `fav`): `list`, `add`, `remove`
+- `notification` (alias `notifications`): `list`, `count`, `read`, `read-all`, `prefs get`, `prefs set`
+- `cluster`: `list`, `get`, `create`, `update`, `delete`, `set-default`, `test-connection`, `health`, `nodes`, `namespaces`, `utilization`, `quota get|set|delete`, `shared-values list|set|delete`
+- `git`: `providers`, `branches`, `validate`
+- `template`: also `clone`, `unpublish`, `versions list|get|diff`
+- `override`: also `list`, `unset`, `branch list|set|delete`, `quota get|set|delete`
+- `user`: `list`, `delete`, `disable`, `enable`, `reset-password`, `set-role`
+- `orphaned`: `list`, `delete`
+- `version`: print the stackctl version
+
+## Server version requirements
+
+| Feature | k8s-stack-manager version |
+|---------|---------------------------|
+| `stack extend --minutes`, template draft and release, `template publish --version` | v0.6.0 or later |
+| Owner, cluster and definition names in output, audit action and entity type values, paged `--mine` and name queries, quota override limit check, quota warning on `stack clone` | v0.7.0 or later |
+| `--follow` and `stack watch` with an API key, `bulk delete` with clean first, `orphaned delete --confirm`, `user set-role` | v0.8.0 or later |
+
 ## Output Formats
 
 Most commands support multiple output formats via the `--output` flag:
@@ -475,16 +565,19 @@ stackctl stack list -o yaml
 stackctl stack list -q
 ```
 
+`definition export` and `audit log export` do not use `-o`. They use `--output-file` and, for the audit export, `--format` (`json` or `csv`).
+
 ## Global Flags
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--output` | `-o` | Output format: `table`, `json`, `yaml` |
+| `--output` | `-o` | Output format: `table`, `json`, `yaml` (default `table`) |
 | `--quiet` | `-q` | Output only IDs (one per line) |
 | `--no-color` | | Disable colored output |
 | `--api-url` | | Override API server URL |
 | `--api-key` | | Override API key |
 | `--insecure` | | Skip TLS certificate verification |
+| `--debug` | | Print debug output (or set `STACKCTL_DEBUG=1`) |
 | `--help` | `-h` | Show help |
 
 ## Shell Completion
@@ -498,13 +591,16 @@ stackctl completion zsh > "${fpath[1]}/_stackctl"
 
 # Fish
 stackctl completion fish > ~/.config/fish/completions/stackctl.fish
+
+# PowerShell
+stackctl completion powershell | Out-String | Invoke-Expression
 ```
 
 ## Contributing
 
 ### Prerequisites
 
-- Go 1.26+
+- Go version: see `cli/go.mod` (1.26.9 or later)
 - A running [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager) backend for integration/e2e tests (`make dev` in that repo)
 
 ### Getting Started
@@ -512,68 +608,71 @@ stackctl completion fish > ~/.config/fish/completions/stackctl.fish
 ```bash
 git clone https://github.com/omattsson/stackctl.git
 cd stackctl/cli
-go mod tidy
-go build -o bin/stackctl .
+make build
 ```
 
 ### Project Structure
 
 ```
 cli/
-  main.go                 # Entry point
-  cmd/                    # Cobra commands (one file per command group)
-    config.go             # config set/get/list/use-context/current-context/delete-context
-    login.go              # login, logout, whoami
-    stack.go              # stack lifecycle (create, deploy, stop, clean, delete, clone, extend, status, logs, history, rollback, compare, values)
-    template.go           # template list/get/instantiate/quick-deploy/delete
-    definition.go         # definition CRUD + export/import + update-chart
-    override.go           # value, branch, and quota overrides
-    orphaned.go           # orphaned namespace list/delete
-    bulk.go               # bulk deploy/stop/clean/delete (names or IDs)
-    resolve.go            # name/ID resolution helpers
-    git.go                # git branches/validate
-    cluster.go            # cluster list/get + shared-values list/set/delete
-    completion.go         # shell completion (bash/zsh/fish/powershell)
+  main.go
+  Makefile                # build, build-all, test, lint, coverage, install
+  cmd/                    # Cobra commands, one file per command group
+    root.go  resolve.go  paging.go  plugins.go  browser.go  token.go  values.go
+    config.go  login.go  version.go  completion.go
+    stack.go  template.go  definition.go  override.go  bulk.go
+    cluster.go  git.go  orphaned.go  user.go  apikey.go  audit.go
+    analytics.go  cleanup_policy.go  favorite.go  notification.go
+    testdata/             # golden files
   pkg/
-    client/               # HTTP client (auth, error handling)
-    config/               # Config file management (named contexts)
-    output/               # Table, JSON, YAML, quiet formatters
-    types/                # Client-side structs matching API responses
+    client/               # HTTP client, auth renewal, WebSocket
+    config/               # config file, tokens, lock files
+    output/               # table, JSON, YAML, quiet formatters
+    types/                # structs for API responses
   test/
-    integration/          # Filesystem-based integration tests
-    e2e/                  # Binary execution end-to-end tests
+    integration/          # tests with a mock server
+    e2e/                  # tests that run the built binary
+    contract/             # tests against the server swagger file
+    live/                 # tests against a running server (build tag `live`)
 ```
 
 ### Development Workflow
 
+Run these commands in `cli/`.
+
 ```bash
-# Run all tests
-cd cli
-go test ./... -v
+make tools      # install staticcheck (needed once for make lint)
+make build      # build bin/stackctl with version information
+make test       # go test ./... -v
+make lint       # go vet and staticcheck (CI runs this target)
+make coverage   # test with a coverage profile and a summary
 
-# Run only unit tests (skip integration/e2e)
-go test ./... -v -short
+# Unit tests only (skip integration and e2e tests)
+go test ./... -short
 
-# Run a specific test package
+# One package
 go test ./pkg/client/ -v
 
-# Check coverage
-go test ./pkg/... ./cmd/ -coverprofile=coverage.out
-go tool cover -func=coverage.out
+# Live tests against a running server (build tag live)
+STACKCTL_LIVE_URL=http://localhost:8081 STACKCTL_LIVE_API_KEY=... \
+  go test -tags live ./test/live/...
 
-# Lint
-go vet ./...
+# Refresh the server swagger file for the contract tests
+./test/contract/refresh-swagger.sh
 ```
+
+The live tests skip when no auth is set. Set `STACKCTL_LIVE_API_KEY`, or `STACKCTL_LIVE_USER` and `STACKCTL_LIVE_PASS`. CI runs them in `.github/workflows/live-tests.yml` against a new server.
 
 ### Writing Tests
 
-- **Unit tests** go next to the code they test (`foo_test.go` alongside `foo.go`)
-- **Integration tests** go in `test/integration/` — skipped with `-short`
-- **E2E tests** go in `test/e2e/` — build and run the actual binary, skipped with `-short`
-- Use `testify/assert` and `testify/require`
-- Table-driven tests with `t.Parallel()` where possible (not with `t.Setenv`)
-- Mock HTTP servers (`httptest.NewServer`) for client tests — never call a real API in unit tests
-- Target 80%+ coverage on `pkg/` packages
+- **Unit tests** go next to the code they test (`foo_test.go` next to `foo.go`).
+- **Integration tests** go in `test/integration/`. `-short` skips them.
+- **E2E tests** go in `test/e2e/`. They build and run the binary. `-short` skips them.
+- **Contract tests** in `test/contract/` check the client paths and responses against the server swagger file.
+- Use `testify/assert` and `testify/require`.
+- Use table-driven tests. Tests in `pkg/` use `t.Parallel()`. Tests in `cmd/` that change package globals (`cfg`, `printer`, flag variables) must not use `t.Parallel()`. Tests that use `t.Setenv` cannot use it either.
+- Use mock HTTP servers (`httptest.NewServer`) for client tests. Never call a real API in unit tests.
+- CI fails below 70% total coverage. Aim for 80% or more on `pkg/` packages.
 
 ### Adding a New Command
 
@@ -588,10 +687,10 @@ go vet ./...
 
 - Branch from `main` with a descriptive name (e.g., `feature/stack-commands`, `fix/token-expiry`)
 - Include tests for new functionality
-- Run `go test ./... -v` and `go vet ./...` before pushing
+- Run `make test` and `make lint` in `cli/` before you push
 - Keep PRs focused — one feature or fix per PR
 - Reference the relevant GitHub issue in the PR description (e.g., `Closes #3`)
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+stackctl is released under the MIT license. See [LICENSE](LICENSE) for details.

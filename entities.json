@@ -3,7 +3,6 @@
   "projects": [
     "Command",
     "Config",
-    "Viper",
     "Build",
     "Client",
     "Table",

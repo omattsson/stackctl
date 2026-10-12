@@ -1,14 +1,14 @@
 ---
-applyTo: "cli/**_test.go"
+applyTo: "cli/**/*_test.go"
 ---
 
 # Test Conventions
 
 ## Framework
 - Use `testify/assert` for non-fatal assertions and `testify/require` for fatal ones
-- Table-driven tests with `t.Parallel()` on parent and subtests **in `pkg/` only**
-- `cmd/` tests must NOT use `t.Parallel()` — they mutate package-level globals (`cfg`, `printer`, `flagAPIURL`)
-- Capture range variable: `tt := tt` inside the loop (only needed with `t.Parallel()`)
+- Table-driven tests with `t.Parallel()` on parent and subtests in `pkg/`
+- `cmd/` tests that touch package globals (`cfg`, `printer`, `flagAPIURL` and other `flag*` vars) must not use `t.Parallel()`. Pure-function tests in `cmd/` (for example `resolve_test.go`) may use it.
+- `tt := tt` is not needed (Go 1.22+ loop variable semantics)
 
 ### When NOT to use table-driven tests
 Table-driven structure is the right shape when cases share the same setup and differ only in inputs/expectations (e.g. parsing, validation, name-or-ID resolution).
@@ -22,7 +22,7 @@ Do NOT refactor scenario tests into a table when cases:
 These cases stay clearer as separate `func TestX_Scenario` blocks. Reviewers that reflexively suggest "convert to table-driven" on heterogeneous scenarios are wrong here — push back with the scenario-difference reason.
 
 ## API Mocking
-Always use `httptest.NewServer` — never call a real API in unit tests. Live-backend tests belong in `cli/test/live/` and must be opt-in via build tag or env var.
+Always use `httptest.NewServer` — never call a real API in unit tests. Live-backend tests belong in `cli/test/live/` (build tag `live`).
 
 ```go
 server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,15 +54,15 @@ When testing `registerPlugins()`, set up an isolated `PATH` pointing to a `t.Tem
 - Test error cases: API errors (401, 404, 500), invalid input
 - Test flag parsing and validation
 - Test confirmation prompt behavior (yes/no/--yes flag)
-- Target 80%+ coverage on `pkg/` packages
+- CI gate: 70% total coverage (`ci.yml`). Aim for 80%+ on `pkg/` packages
 
 ## cmd/ Test Setup
-Use `setupStackTestCmd(t, apiURL)` or equivalent helper that:
+Use `setupStackTestCmd(t, apiURL)` (`cmd/stack_test.go`) or `setupTestCmd(t)` (`cmd/config_test.go`), or an equivalent helper that:
 1. Sets `flagAPIURL` to the mock server URL
 2. Creates a fresh `printer` with a `bytes.Buffer`
 3. Registers cleanup to restore defaults (`cfg`, `printer`, all `flag*` globals)
 
-Because `cmd/` tests mutate package-level globals, they MUST NOT use `t.Parallel()` — even in subtests. Helpers should snapshot and restore globals via `t.Cleanup()`.
+Because these `cmd/` tests mutate package-level globals, they must not use `t.Parallel()` — even in subtests. Helpers should snapshot and restore globals via `t.Cleanup()`.
 
 ## E2E Tests (`cli/test/e2e/`)
 E2E tests build and invoke the actual `stackctl` binary. Rules:
@@ -74,11 +74,14 @@ E2E tests build and invoke the actual `stackctl` binary. Rules:
 - Assert on stdout/stderr strings and `err` (nil means exit 0; non-nil means non-zero exit).
 - Do NOT use `t.Parallel()` — binary builds and package-global `binaryPath` are not concurrency-safe.
 
+## Contract Tests (`cli/test/contract/`)
+Contract tests check client types and paths against the backend swagger file (`testdata/swagger.json`). Run `cli/test/contract/refresh-swagger.sh` to refresh the swagger file. Update the types or paths when a contract test fails after a refresh.
+
 ## Live Tests (`cli/test/live/`)
 Live tests call a real running backend. Rules:
 - File-level build tag: `//go:build live` — they are never compiled in normal `go test ./...` runs.
-- Run with: `cd cli && go test -tags live ./test/live/ -v`
-- Require env vars `STACKCTL_LIVE_USER` and `STACKCTL_LIVE_PASS`; skip (not fail) if unset.
+- Run with: `cd cli && go test -tags live ./test/live/... -v`
+- Auth env vars: `STACKCTL_LIVE_API_KEY`, or `STACKCTL_LIVE_USER` and `STACKCTL_LIVE_PASS`. The tests skip (not fail) when neither is set.
 - Optional `STACKCTL_LIVE_URL`; defaults to `http://localhost:8081`.
 - The `newLiveClient(t)` helper does a connectivity check and calls `t.Skip()` if the backend is unreachable — never let live tests fail due to infrastructure absence.
-- Do not add live tests to CI pipelines — they are developer opt-in only.
+- CI runs the live tests in `.github/workflows/live-tests.yml` against a booted k8s-stack-manager on push and pull request to main. Locally they skip when auth is unset.

@@ -16,20 +16,22 @@ You are a senior Go engineer specializing in CLI tools. Implement the requested 
 1. Read the request and understand acceptance criteria
 2. Research the codebase — read existing command files in `cmd/` for patterns
 3. Implement incrementally — types → client → command → output → tests
-4. Run `go test ./... -v` and fix failures
-5. Run `go vet ./...` and fix warnings
+4. Run `cd cli && make test` and fix failures
+5. Run `cd cli && make lint` and fix warnings
 
 ## New Command Checklist
 1. Types in `pkg/types/types.go` if new API response structs needed
-2. Client method in `pkg/client/client.go` (HTTP call, error handling, response parsing)
+2. Client method in `pkg/client/client.go` (HTTP call, error handling, response parsing). Auth and session renewal live in `pkg/client/auth.go`; log streaming lives in `pkg/client/websocket.go`
 3. Command in `cmd/<group>.go` — Cobra command with `Use`, `Short`, `Long`, `RunE`
 4. Flags: use `cmd.Flags()` for command-specific, `cmd.PersistentFlags()` for inherited
 5. Output: use `pkg/output` formatters — support table, JSON, YAML, quiet modes
-6. Register subcommand in parent's `init()` function
-7. Tests: flag parsing, success cases, error cases, output modes
+6. Get the client with `newClient()` (`root.go`). For list commands with `-q`, use `printAllIDs` or `listAllIDs` (`paging.go`)
+7. Register subcommand in parent's `init()` function
+8. Tests: flag parsing, success cases, error cases, output modes
 
 ## Flag Conventions
 - `--output`, `-o` — output format (table|json|yaml)
+- `--debug` — log HTTP traffic to stderr (global)
 - `--quiet`, `-q` — ID-only output (one per line, for piping)
 - `--yes`, `-y` — skip confirmation prompts
 - `--mine` — filter to current user
@@ -47,7 +49,7 @@ You are a senior Go engineer specializing in CLI tools. Implement the requested 
 
 ## Critical Rules
 - `RunE` not `Run` — always return errors for proper exit codes
-- `SilenceUsage: true` on commands that take arguments — don't print usage on API errors
-- Config values via Viper: `viper.GetString("api-url")` respects flag > env > config precedence
+- `SilenceUsage: true` is inherited from the root command — do not print usage on API errors; set it on a command only to override
+- Config values: use `resolveAPIURL()` and `resolveAPIKey()` in `cmd/root.go` (flag > `STACKCTL_*` env > config file, resolved with `os.Getenv`)
 - Test with `httptest.NewServer` — never call real API in unit tests
-- `t.Parallel()` on all tests; `tt := tt` for table-driven
+- `t.Parallel()` in `pkg/` tests, not in `cmd/` tests that touch package globals. `tt := tt` is not needed (Go 1.22+)
