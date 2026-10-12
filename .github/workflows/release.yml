@@ -34,3 +34,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Release the pushed tag. Without it goreleaser takes the tag that
+          # git describe finds, and a final tag on the same commit as a
+          # release candidate (v0.7.0 and v0.7.0-rc.3) released the rc again.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
