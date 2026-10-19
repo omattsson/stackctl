@@ -154,6 +154,39 @@ type StackDefinition struct {
 	Owner         string        `json:"owner_id" yaml:"owner_id"`
 	OwnerUsername string        `json:"owner_username,omitempty" yaml:"owner_username,omitempty"`
 	Charts        []ChartConfig `json:"charts,omitempty" yaml:"charts,omitempty"`
+	// SourceTemplateID and SourceTemplateVersion are the template link
+	// (empty when the definition has no source template).
+	SourceTemplateID      string `json:"source_template_id,omitempty" yaml:"source_template_id,omitempty"`
+	SourceTemplateVersion string `json:"source_template_version,omitempty" yaml:"source_template_version,omitempty"`
+}
+
+// UpgradeCheck is the response of GET
+// /api/v1/stack-definitions/:id/check-upgrade. ChartDiffs compares the
+// definition charts now (left) with the latest published template
+// snapshot (right). A chart with change_type "removed" is only in the
+// definition; the upgrade keeps it.
+type UpgradeCheck struct {
+	UpgradeAvailable bool             `json:"upgrade_available" yaml:"upgrade_available"`
+	CurrentVersion   string           `json:"current_version,omitempty" yaml:"current_version,omitempty"`
+	LatestVersion    string           `json:"latest_version,omitempty" yaml:"latest_version,omitempty"`
+	Changes          *UpgradeChanges  `json:"changes,omitempty" yaml:"changes,omitempty"`
+	ChartDiffs       []ChartDiffEntry `json:"chart_diffs,omitempty" yaml:"chart_diffs,omitempty"`
+}
+
+// UpgradeChanges lists the chart names of an upgrade by kind.
+type UpgradeChanges struct {
+	ChartsAdded     []string `json:"charts_added" yaml:"charts_added"`
+	ChartsRemoved   []string `json:"charts_removed" yaml:"charts_removed"`
+	ChartsModified  []string `json:"charts_modified" yaml:"charts_modified"`
+	ChartsUnchanged []string `json:"charts_unchanged" yaml:"charts_unchanged"`
+}
+
+// TemplateLinkRequest is the body of PUT
+// /api/v1/stack-definitions/:id/template-link. An empty TemplateID removes
+// the link. An empty Version means the latest published version.
+type TemplateLinkRequest struct {
+	TemplateID string `json:"template_id" yaml:"template_id"`
+	Version    string `json:"version" yaml:"version"`
 }
 
 // StackTemplate represents a reusable stack template.

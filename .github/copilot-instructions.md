@@ -23,8 +23,8 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 | `login`/`logout`/`whoami` | top-level; supports password + OIDC loopback flow | login.go |
 | `auth` | register | login.go |
 | `stack` | list, get, create, update, deploy, stop, clean, delete, status, logs, clone, extend, values, compare, history, rollback, history-values, watch, preview, pods, recent, follow, unfollow, action (list, run, log) | stack.go; preview/pods/recent: stack_inspect.go; follow/unfollow: stack_followers.go; action: stack_action.go; TTL and stop-time helpers: ttl.go |
-| `template` | list, get, create, update, delete, clone, instantiate, quick-deploy, publish, unpublish, update-chart, versions (list, get, diff) | template.go |
-| `definition` | list, get, create, update, delete, export, import, update-chart | definition.go |
+| `template` | list, get, create, update, delete, clone, instantiate, quick-deploy, publish, unpublish, update-chart, add-chart, remove-chart, versions (list, get, diff) | template.go; add-chart/remove-chart: chart_changes.go |
+| `definition` | list, get, create, update, delete, export, import, update-chart, add-chart, remove-chart, check-upgrade, upgrade, link-template | definition.go; add-chart/remove-chart/check-upgrade/upgrade/link-template: chart_changes.go |
 | `override` | list, get, set, unset, delete, branch (list/set/delete), quota (get/set/delete) | override.go |
 | `bulk` | deploy, stop, clean, delete, template (publish, unpublish, delete) | bulk.go |
 | `git` | providers, branches, validate | git.go |

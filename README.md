@@ -346,6 +346,11 @@ stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4
 stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --file values.yaml --locked-file locked.yaml
 stackctl template update-chart 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f 3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b --build-pipeline-id 42
 
+# Add or remove a chart of the working copy (template name or ID; chart name or ID)
+stackctl template add-chart my-template --name worker --repository-url oci://registry.example.com/helm --chart-version 1.2.0
+stackctl template add-chart my-template --name api --chart-path /charts/api --required --locked-file locked.yaml
+stackctl template remove-chart my-template worker
+
 # Release the working copy to users (name or ID)
 stackctl template publish my-template --version 1.2.0 --change-summary "app-core chart 0.3.7"
 
@@ -365,7 +370,7 @@ Most template commands need the template ID. `template publish` accepts a name o
 
 Templates use a draft-and-release model:
 
-- `template update` and `template update-chart` change only the working copy (draft).
+- `template update`, `template update-chart`, `template add-chart` and `template remove-chart` change only the working copy (draft). `add-chart` and `remove-chart` write a note to stderr: run `template publish` so users get the change.
 - Users get the latest released version. Quick deploy, instantiate and definition upgrades use it.
 - After `template update-chart`, run `stackctl template publish <name|id> --version <new-version>` so users get the change.
 - Each version can be released only once. Publish without changes creates no new version.
@@ -396,6 +401,18 @@ stackctl definition update-chart example-dev my-chart --chart-path /charts/app-c
 stackctl definition update-chart example-dev my-chart --deploy-order 6
 stackctl definition update-chart example-dev my-chart --file values.yaml
 stackctl definition update-chart example-dev my-chart --build-pipeline-id 42
+
+# Add or remove a chart (devops or admin; remove-chart asks for confirmation unless --yes)
+stackctl definition add-chart example-dev --name worker --repository-url oci://registry.example.com/helm --chart-version 1.2.0
+stackctl definition remove-chart example-dev worker
+
+# Upgrade to the latest published version of the source template
+stackctl definition check-upgrade example-dev
+stackctl definition upgrade example-dev           # shows the changes, then asks for confirmation (--yes skips it)
+
+# Link a definition to a published template version, or remove the link (devops or admin)
+stackctl definition link-template example-dev --template web-stack --version 1.2.0
+stackctl definition link-template example-dev --unlink
 
 # Delete
 stackctl definition delete example-dev
@@ -598,6 +615,7 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 | `stack extend --minutes`, template draft and release, `template publish --version` | v0.6.0 or later |
 | Owner, cluster and definition names in output, audit action and entity type values, paged `--mine` and name queries, quota override limit check, quota warning on `stack clone` | v0.7.0 or later |
 | `--follow` and `stack watch` with an API key, `bulk delete` with clean first, `orphaned delete --confirm`, `user set-role` | v0.8.0 or later |
+| `definition link-template` | v0.11.0 or later |
 | `--stop-at`, `stack extend --until`, the TTL limit of `server info` and of the local check (an older server ignores `--stop-at` and `--until`: stackctl shows the result and exits with code 1; it uses 30 days as the limit) | v0.12.0 or later |
 
 ## Output Formats

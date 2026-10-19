@@ -58,7 +58,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a new cleanup policy and reloads the scheduler. condition is a comma-separated list of key:value pairs (all must match): status:\u003cstatus\u003e; idle_days:\u003cN\u003e (no deploy for N days, creation time when never deployed); age_days:\u003cN\u003e (created more than N days ago); stopped_days:\u003cN\u003e (stopped, and the last stop finished N or more days ago; instances without a recorded stop time never match); ttl_expired.",
+                "description": "Creates a new cleanup policy and reloads the scheduler. condition is a comma-separated list of key:value pairs (all must match): status:\u003cstatus\u003e; idle_days:\u003cN\u003e (no deploy for N days, creation time when never deployed; a running or partial instance whose expiry is in the future never matches); age_days:\u003cN\u003e (created more than N days ago); stopped_days:\u003cN\u003e (stopped, and the last stop finished N or more days ago; instances without a recorded stop time never match); cleaned_days:\u003cN\u003e (a draft, and the last clean finished N or more days ago; instances without a recorded clean time never match); ttl_expired; expires_within_hours:\u003cN\u003e (no expiry, or the expiry is at most N hours from now; an instance with a later expiry does not match).",
                 "consumes": [
                     "application/json"
                 ],
@@ -115,7 +115,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates an existing cleanup policy and reloads the scheduler. Partial update: only the fields in the body change (for example {\"enabled\": false}); the merged policy is validated. See the create endpoint for the condition syntax (status, idle_days, age_days, stopped_days, ttl_expired).",
+                "description": "Updates an existing cleanup policy and reloads the scheduler. Partial update: only the fields in the body change (for example {\"enabled\": false}); the merged policy is validated. See the create endpoint for the condition syntax (status, idle_days, age_days, stopped_days, cleaned_days, ttl_expired, expires_within_hours).",
                 "consumes": [
                     "application/json"
                 ],
@@ -355,7 +355,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a new notification channel. Optional filters limit the channel to some stack instances: instance_name_patterns (globs, path.Match syntax, case-insensitive), owner_ids, definition_ids and cluster_ids. Each set filter must match (AND); one value of a filter is enough (OR); empty filters match all instances. Events without an instance go only to channels without filters; a cleanup policy run goes to a channel when at least one affected instance matches. An invalid pattern gives 400. An ID that does not exist gives a warning in the response; the channel is saved.",
+                "description": "Creates a new notification channel. format sets the body of the webhook request: \"generic\" (default, the event JSON) or \"teams\" (a Microsoft Teams Adaptive Card envelope for a Teams workflow made from the template \"Post to a channel when a webhook request is received\"). An unknown format gives 400. Optional filters limit the channel to some stack instances: instance_name_patterns (globs, path.Match syntax, case-insensitive), owner_ids, definition_ids and cluster_ids. Each set filter must match (AND); one value of a filter is enough (OR); empty filters match all instances. Events without an instance go only to channels without filters; a cleanup policy run goes to a channel when at least one affected instance matches. An invalid pattern gives 400. An ID that does not exist gives a warning in the response; the channel is saved.",
                 "consumes": [
                     "application/json"
                 ],
@@ -524,7 +524,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates an existing notification channel. filters replaces the channel filters (omit it to keep them, send {} to remove them); the rules are the same as for create. An ID that does not exist gives a warning in the response.",
+                "description": "Updates an existing notification channel. Only the fields in the body change. format (\"generic\" or \"teams\") replaces the body format; omit it to keep the format; an unknown format gives 400. filters replaces the channel filters (omit it to keep them, send {} to remove them); the rules are the same as for create. An ID that does not exist gives a warning in the response.",
                 "consumes": [
                     "application/json"
                 ],
@@ -858,7 +858,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Sends a test payload to the channel's webhook URL",
+                "description": "Sends a test payload (event type \"test\") to the channel's webhook URL with one attempt, in the format of the channel (generic event JSON or a Teams Adaptive Card envelope). Redirects are not followed. A disabled channel can be tested too; channel_enabled in the response tells whether the channel gets events. Each test send is written to the delivery log of the channel with event_type \"test\".",
                 "produces": [
                     "application/json"
                 ],
@@ -877,7 +877,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "success (bool), message, status_code (0 when no answer), channel_enabled (bool)",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -885,6 +885,24 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -920,7 +938,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lists all Kubernetes namespaces matching the stack-* pattern that have no corresponding stack instance in the database. Pass ?details=true to include resource counts and helm releases per namespace (expensive). The managed field is true when the namespace has the label managed-by=k8s-stack-manager.",
+                "description": "Lists all Kubernetes namespaces matching the stack-* pattern that have no corresponding stack instance in the database. Pass ?details=true to include resource counts and helm releases per namespace (expensive). helm_releases is always an array (empty without details, without releases or when Helm fails), never null. The managed field is true when the namespace has the label managed-by=k8s-stack-manager.",
                 "produces": [
                     "application/json"
                 ],
@@ -1057,7 +1075,7 @@
         },
         "/api/v1/analytics/overview": {
             "get": {
-                "description": "Returns high-level aggregate counts (templates, definitions, instances, deploys, users)",
+                "description": "Returns high-level aggregate counts (templates, definitions, instances, deploys, users).\ndeploy_log_retention_days is DEPLOY_LOG_RETENTION_DAYS: the deploy counts of all analytics endpoints cover only the kept deploy logs (about the last N days). 0 means all deploy logs are kept.",
                 "produces": [
                     "application/json"
                 ],
@@ -1150,7 +1168,12 @@
         },
         "/api/v1/audit-logs": {
             "get": {
-                "description": "List audit logs with optional filters and pagination. Supports cursor-based pagination for efficient large dataset traversal.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List audit logs with optional filters and pagination. Supports cursor-based pagination for efficient large dataset traversal. Requires the devops or admin role.",
                 "produces": [
                     "application/json"
                 ],
@@ -1223,6 +1246,24 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2446,7 +2487,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates or updates the resource quota configuration for a cluster. Admin only. Each non-empty quantity must be a valid Kubernetes quantity (for example 500m, 2, 512Mi, 10Gi) and not negative; cpu_request must not exceed cpu_limit and memory_request must not exceed memory_limit; pod_limit must not be negative. Values are trimmed. Invalid input returns 400 with the field name. The quota is also checked merged with the quota override of every instance on the cluster (for the default cluster also instances without a cluster); a conflict returns 400 listing up to 10 instance names and the first rule broken.",
+                "description": "Creates or updates the resource quota configuration for a cluster. Admin only. Each non-empty quantity must be a valid Kubernetes quantity (for example 500m, 2, 512Mi, 10Gi) and not negative; cpu_request must not exceed cpu_limit and memory_request must not exceed memory_limit; pod_limit must not be negative. The container_* fields set the LimitRange of each stack namespace (defaultRequest, default, max per container); per container, request \u003c= limit \u003c= max, and a container default must not exceed the namespace value of the same resource. ephemeral_storage_limit sets requests.ephemeral-storage and limits.ephemeral-storage of the namespace ResourceQuota. Without container defaults, the LimitRange uses fallback defaults (CPU 100m request / 500m limit, memory 128Mi / 512Mi, ephemeral storage 128Mi / 1Gi), capped at the namespace value and the container max; never the namespace total. Values are trimmed. Invalid input returns 400 with the field name. The quota is also checked merged with the quota override of every instance on the cluster (for the default cluster also instances without a cluster); a conflict returns 400 listing up to 10 instance names and the first rule broken. After the save, the backend applies the quota to every stack namespace on the cluster in the background: the namespace of an instance with a quota override gets the effective quota (the cluster quota merged with the override); other stack namespaces get the cluster quota. A namespace whose merged quota is not valid is skipped.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3271,8 +3312,59 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Provider rate limit retry delay in seconds, when supplied"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3309,6 +3401,33 @@
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/gitprovider.ProviderStatus"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
                             }
                         }
                     }
@@ -3357,6 +3476,48 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "headers": {
+                            "Retry-After": {
+                                "type": "integer",
+                                "description": "Provider rate limit retry delay in seconds, when supplied"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -3366,191 +3527,17 @@
                             }
                         }
                     },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/items": {
-            "get": {
-                "description": "Get a list of all items",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "items"
-                ],
-                "summary": "Get all items",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/models.Item"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Create a new item with the provided information",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "items"
-                ],
-                "summary": "Create a new item",
-                "parameters": [
-                    {
-                        "description": "Item object",
-                        "name": "item",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.Item"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/models.Item"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/items/{id}": {
-            "get": {
-                "description": "Get an item by its ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "items"
-                ],
-                "summary": "Get an item by ID",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Item ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.Item"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "put": {
-                "description": "Update an item's information",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "items"
-                ],
-                "summary": "Update an item",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Item ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Item object",
-                        "name": "item",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.Item"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.Item"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete an item by its ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "items"
-                ],
-                "summary": "Delete an item",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Item ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "404": {
-                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3654,8 +3641,7 @@
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
-                                "type": "integer",
-                                "format": "int64"
+                                "type": "integer"
                             }
                         }
                     },
@@ -3687,7 +3673,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get the authenticated user's notification preferences",
+                "description": "Get the authenticated user's notification preferences. Stored preferences of unknown event types are omitted.",
                 "produces": [
                     "application/json"
                 ],
@@ -3731,7 +3717,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Update the authenticated user's notification preferences (array of event_type + enabled)",
+                "description": "Update the authenticated user's notification preferences (array of event_type + enabled). Each event_type must be a known type (the instance event types, and the system types cleanup.policy.executed, quota.warning and secret.expiring); an unknown type gives 400 and no preference is changed. The response omits stored preferences of unknown event types.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4030,7 +4016,7 @@
                 }
             },
             "post": {
-                "description": "Create a new stack definition. Definition names are unique per owner.",
+                "description": "Create a new stack definition. Definition names are unique per owner. Requires the devops or admin role.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4077,6 +4063,15 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "409": {
                         "description": "The owner already has a definition with this name",
                         "schema": {
@@ -4100,7 +4095,7 @@
         },
         "/api/v1/stack-definitions/import": {
             "post": {
-                "description": "Import a stack definition from a portable JSON bundle, creating a new definition with fresh IDs. Definition names are unique per owner: when the caller already has a definition with the bundle name, the import uses \"\u003cname\u003e (imported)\", then \"\u003cname\u003e (imported 2)\", ... The response holds the final name (409 when no free name is found).",
+                "description": "Import a stack definition from a portable JSON bundle, creating a new definition with fresh IDs. Definition names are unique per owner: when the caller already has a definition with the bundle name, the import uses \"\u003cname\u003e (imported)\", then \"\u003cname\u003e (imported 2)\", ... The response holds the final name (409 when no free name is found).\ndefinition.source_template (optional: id or name, and version) links the new definition to a template, as PUT /stack-definitions/{id}/template-link does. The import looks up the template by ID, else by name among the published templates (not case-sensitive on MySQL). When the template does not exist, is not published, the name matches more than one published template, or the version is not a published version, the import creates the definition without a link and adds a message to warnings; it does not fail.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4126,7 +4121,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/handlers.DefinitionWithChartsResponse"
+                            "$ref": "#/definitions/handlers.definitionImportResponse"
                         }
                     },
                     "400": {
@@ -4242,6 +4237,15 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "Caller is not the owner, devops or admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -4293,6 +4297,15 @@
                     "204": {
                         "description": "No Content"
                     },
+                    "403": {
+                        "description": "Caller is not the owner, devops or admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -4316,7 +4329,7 @@
         },
         "/api/v1/stack-definitions/{id}/charts": {
             "post": {
-                "description": "Add a new chart configuration to a stack definition",
+                "description": "Add a new chart configuration to a stack definition. Requires the devops or admin role.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4354,6 +4367,15 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4479,6 +4501,15 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -4500,7 +4531,7 @@
                 }
             },
             "delete": {
-                "description": "Remove a chart configuration from a stack definition",
+                "description": "Remove a chart configuration from a stack definition. Requires the devops or admin role.",
                 "produces": [
                     "application/json"
                 ],
@@ -4527,6 +4558,15 @@
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     },
                     "404": {
                         "description": "Not Found",
@@ -4664,6 +4704,97 @@
                 }
             }
         },
+        "/api/v1/stack-definitions/{id}/template-link": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets or removes the source template of an existing definition (for example an imported one). The link changes only source_template_id and source_template_version; the charts and the values of the definition do not change.\nA linked definition gets the template rules: required charts cannot be removed, the locked values of the latest published snapshot apply at deploy time (also when the link names an older version; the version is the base of the upgrade check), the upgrade check compares with the template, and the analytics template usage counts the definition, its instances and its deploys. A definition whose charts differ from the template can be linked; the upgrade check then shows the difference.\ntemplate_id empty removes the link (both fields become empty; version must then be empty). The template must exist (404) and be published (409). version must be a published version of the template (400); empty means the latest published version.\nAuthorization: devops or admin (403).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-definitions"
+                ],
+                "summary": "Link a stack definition to a template",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Definition ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Template link",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.templateLinkRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.StackDefinition"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/stack-definitions/{id}/upgrade": {
             "post": {
                 "description": "Upgrade a definition to the latest published snapshot of its source template, adding new charts and updating defaults, repository URL, deploy order and (when the snapshot has them) chart version, chart path, source repo and build pipeline. Charts that are only in the definition stay.\nAn unpublished template, or one without a snapshot, gives 409 \"Template has no published version\".",
@@ -4704,6 +4835,15 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Caller is not the owner, devops or admin",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4855,6 +4995,89 @@
                         }
                     }
                 }
+            },
+            "post": {
+                "description": "Create a new stack instance from a definition.\nExpiry: ttl_minutes counts from the deploy (omitted: DEFAULT_INSTANCE_TTL_MINUTES; 0: no expiry). expires_at (RFC 3339 with a time zone) is a fixed stop time instead: ttl_minutes becomes 0, and a deploy keeps the stop time. expires_at must be in the future and not later than now + MAX_INSTANCE_TTL_DAYS (default 30). A TTL above that limit, or expires_at together with ttl_minutes, gives 400.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-instances"
+                ],
+                "summary": "Create a stack instance",
+                "parameters": [
+                    {
+                        "description": "Instance object",
+                        "name": "instance",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.createInstanceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/models.StackInstance"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid body, or name is not a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "A pre-instance-create hook rejected the request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Stack definition not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Namespace already exists, or the name is taken on the cluster (UNIQUE_INSTANCE_NAMES)",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.NamespaceConflictResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/v1/stack-instances/bulk/clean": {
@@ -4920,7 +5143,7 @@
         },
         "/api/v1/stack-instances/bulk/delete": {
             "post": {
-                "description": "Delete multiple stack instances in a single request. Processes instances sequentially.",
+                "description": "Delete multiple stack instances in a single request. Processes instances sequentially with the rules of DELETE /stack-instances/{id}: an instance with cluster resources (running, partial, stopped, error) is cleaned first (Helm uninstall and namespace delete) and deleted when the clean completes — its result has status \"success\" and the log_id of the clean. \"success\" with a log_id means that the clean started; the row is removed when the clean finishes (WebSocket message instance.deleted). A failed clean keeps the instance with status error. A draft instance is deleted at once. An instance with an operation in progress (checked before pre-instance-delete fires), one that a concurrent delete already started, or one that a pre-instance-delete hook rejects, gets status \"error\".",
                 "consumes": [
                     "application/json"
                 ],
@@ -5275,7 +5498,7 @@
                 }
             },
             "put": {
-                "description": "Update a stack instance (branch, name, etc.). A changed name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters); an unchanged name is not checked, so older instances with other names stay editable. A rename does not change the namespace.",
+                "description": "Update a stack instance (branch, name, etc.). A changed name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters); an unchanged name is not checked, so older instances with other names stay editable. A rename does not change the namespace.\nttl_minutes sets a new TTL from now (0 clears the expiry). expires_at (RFC 3339 with a time zone) sets a fixed stop time and ttl_minutes 0. Do not send both (400). The limits are the same as for create (MAX_INSTANCE_TTL_DAYS).",
                 "consumes": [
                     "application/json"
                 ],
@@ -5306,13 +5529,22 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "The updated instance with the same computed fields as GET (values_drift, names, follow state)",
                         "schema": {
                             "$ref": "#/definitions/models.StackInstance"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5337,11 +5569,26 @@
                                 "type": "string"
                             }
                         }
+                    },
+                    "409": {
+                        "description": "The new name is taken on the cluster (UNIQUE_INSTANCE_NAMES)",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.NamespaceConflictResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             },
             "delete": {
-                "description": "Deletes a stack instance. If the instance has running resources (status running/stopped/error), a cleanup is initiated first — helm releases are uninstalled and the namespace is deleted before the database record is removed. Returns 204 for immediate deletion (draft instances) or 202 when async cleanup is required. When quick deploy created the stack definition of the instance (owner_instance_id) and no other instance uses it, the definition and its charts are deleted with the instance.",
+                "description": "Deletes a stack instance. If the instance has running resources (status running/stopped/error), a cleanup is initiated first — helm releases are uninstalled and the namespace is deleted before the database record is removed. Returns 204 for immediate deletion (draft instances) or 202 when async cleanup is required: the clean started, and the row is removed when the clean finishes (WebSocket message instance.deleted). A failed clean keeps the instance with status error (\"Clean failed; the stack was not deleted.\"). An operation in progress gives 409 before pre-instance-delete fires; of two concurrent deletes one gets 409. When quick deploy created the stack definition of the instance (owner_instance_id) and no other instance uses it, the definition and its charts are deleted with the instance.",
                 "produces": [
                     "application/json"
                 ],
@@ -5390,7 +5637,7 @@
                         }
                     },
                     "409": {
-                        "description": "Instance is in a transient state (deploying/stopping/cleaning)",
+                        "description": "Instance is in a transient state (deploying/stopping/cleaning), or a concurrent delete started first",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5489,7 +5736,7 @@
         },
         "/api/v1/stack-instances/{id}/actions/{name}": {
             "post": {
-                "description": "Dispatches to the action subscriber webhook and wraps its response in an envelope containing action, instance_id, status_code, and result fields. The subscriber's JSON body is nested under the result key. Returns 200 even for non-2xx subscriber responses — check status_code to distinguish. When the action declares parameters, they are checked (type, required, enum options) before the call; undeclared parameters pass through. When the action has a log_path, the subscriber answered 2xx and the result has a valid job_id, the envelope also has job_id: poll GET /stack-instances/{id}/actions/{name}/jobs/{job_id}/log for the job log.",
+                "description": "Dispatches to the action subscriber webhook and wraps its response in an envelope containing action, instance_id, status_code, and result fields. The subscriber's JSON body is nested under the result key. Returns 200 even for non-2xx subscriber responses — check status_code to distinguish. For an answer with status 400 or higher the envelope also has message: the subscriber's reason from a JSON string body or from the message, error, detail or reason field (one line, at most 500 characters, URLs replaced by [url]). A text/plain body of such an answer becomes a JSON string result; another non-JSON body gives a null result. A non-JSON body with a status below 400 gives 502. When the action declares parameters, they are checked (type, required, enum options) before the call; undeclared parameters pass through. When the action has a log_path, the subscriber answered 2xx and the result has a valid job_id, the envelope also has job_id: poll GET /stack-instances/{id}/actions/{name}/jobs/{job_id}/log for the job log.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6070,7 +6317,7 @@
                         }
                     },
                     "409": {
-                        "description": "Invalid status for clean",
+                        "description": "Invalid status for clean, or a concurrent clean or delete started first",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -6092,7 +6339,7 @@
         },
         "/api/v1/stack-instances/{id}/clone": {
             "post": {
-                "description": "Create a new draft stack instance as a copy of an existing one. The clone belongs to the caller and uses the cluster and definition of the source.\nIt copies the TTL (unless ttl_minutes is given), the value overrides and the branch overrides. It copies the instance quota override only when the caller owns the source or is admin or devops; for an owner without the admin or devops role only when the override stays within the cluster quota. When it is not copied for that reason (or the cluster quota lookup fails), the response has a warning and the clone uses the cluster quota.\nThe body is optional. Without a name, the server picks the first free name of \u003csource\u003e-copy, \u003csource\u003e-copy-2, ... (the namespace stack-\u003cname\u003e-\u003cowner\u003e must be free). A given name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).",
+                "description": "Create a new draft stack instance as a copy of an existing one. The clone belongs to the caller and uses the cluster and definition of the source.\nIt copies the TTL (unless ttl_minutes or expires_at is given; a future fixed stop time of the source is copied too), the value overrides and the branch overrides. It copies the instance quota override only when the caller owns the source or is admin or devops; for an owner without the admin or devops role only when the override stays within the cluster quota. When it is not copied for that reason (or the cluster quota lookup fails), the response has a warning and the clone uses the cluster quota.\nThe body is optional. Without a name, the server picks the first free name of \u003csource\u003e-copy, \u003csource\u003e-copy-2, ... (the namespace stack-\u003cname\u003e-\u003cowner\u003e must be free). A given name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).",
                 "consumes": [
                     "application/json"
                 ],
@@ -6164,7 +6411,7 @@
                         }
                     },
                     "409": {
-                        "description": "Namespace already exists (given name), or no free generated name",
+                        "description": "Namespace already exists (given name), the name is taken on the cluster (UNIQUE_INSTANCE_NAMES), or no free generated name",
                         "schema": {
                             "$ref": "#/definitions/handlers.NamespaceConflictResponse"
                         }
@@ -6183,7 +6430,7 @@
         },
         "/api/v1/stack-instances/{id}/deploy": {
             "post": {
-                "description": "Trigger Helm deployment for a stack instance. Allowed for draft, stopped, error, partial and running instances (running = redeploy, a Helm upgrade with the current values). With a TTL, the expiry becomes now + ttl_minutes, unless the current expiry is later (a redeploy never makes the expiry earlier).",
+                "description": "Trigger Helm deployment for a stack instance. Allowed for draft, stopped, error, partial and running instances (running = redeploy, a Helm upgrade with the current values). With a TTL, the expiry becomes now + ttl_minutes, unless the current expiry is later (a redeploy never makes the expiry earlier). A fixed stop time (ttl_minutes 0 with expires_at) stays; when it has passed, the deploy gives 409 \"The stop time has passed. Set a new stop time or a TTL.\"",
                 "produces": [
                     "application/json"
                 ],
@@ -6238,7 +6485,7 @@
                         }
                     },
                     "409": {
-                        "description": "Already deploying",
+                        "description": "Already deploying, or the fixed stop time has passed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -6457,7 +6704,7 @@
         },
         "/api/v1/stack-instances/{id}/extend": {
             "post": {
-                "description": "Extend the expiry time of a stack instance. The extend never makes the expiry earlier and never changes ttl_minutes.\n- {\"minutes\": N}: adds N minutes (N \u003e 0) to the current expires_at, or to now when the instance already expired or has no expiry time. The new expiry is capped at now + 43200 minutes (30 days).\n- Empty body: adds the instance's ttl_minutes in the same way (400 when ttl_minutes is 0).\n- Deprecated {\"ttl_minutes\": N} (without minutes): the old behaviour for older clients (stackctl 0.4.0 and earlier). It sets ttl_minutes to N and expires_at to now + N, which can make the expiry earlier. The response has a Warning header; the server logs a deprecation warning.\nAn instance without TTL and without expiry time has nothing to extend (400).",
+                "description": "Extend the expiry time of a stack instance. The extend never makes the expiry earlier and never changes ttl_minutes.\n- {\"minutes\": N}: adds N minutes (N \u003e 0) to the current expires_at, or to now when the instance already expired or has no expiry time. The new expiry is capped at now + MAX_INSTANCE_TTL_DAYS (default 30 days).\n- {\"until\": \"\u003cRFC 3339\u003e\"}: sets expires_at to this time. It must be after the current expiry (or after now when the expiry has passed) and not later than now + MAX_INSTANCE_TTL_DAYS (400). It works for a TTL and for a fixed stop time. Do not send it with minutes or ttl_minutes (400).\n- Empty body: adds the instance's ttl_minutes in the same way (400 when ttl_minutes is 0).\n- Deprecated {\"ttl_minutes\": N} (without minutes): the old behaviour for older clients (stackctl 0.4.0 and earlier). It sets ttl_minutes to N and expires_at to now + N, which can make the expiry earlier. The response has a Warning header; the server logs a deprecation warning.\nAn instance without TTL and without expiry time has nothing to extend (400).",
                 "consumes": [
                     "application/json"
                 ],
@@ -6477,7 +6724,7 @@
                         "required": true
                     },
                     {
-                        "description": "Minutes to add (or the deprecated ttl_minutes)",
+                        "description": "Minutes to add, the new expiry (until), or the deprecated ttl_minutes",
                         "name": "body",
                         "in": "body",
                         "schema": {
@@ -6487,7 +6734,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "The instance with the new expires_at",
+                        "description": "The instance with the new expires_at and the same computed fields as GET (values_drift, names, follow state)",
                         "schema": {
                             "$ref": "#/definitions/models.StackInstance"
                         },
@@ -7190,7 +7437,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "PUT replaces all fields of the override: a field that is not sent is cleared (an empty quantity or a missing pod_limit means no override for that field, so the cluster quota applies). To change one field, read the override with GET, change the field and send all fields. There is no PATCH.\nUpsert the per-instance resource quota override for a stack instance. Each non-empty quantity must be a valid Kubernetes quantity (for example 500m, 2, 512Mi, 10Gi) and not negative; cpu_request must not exceed cpu_limit and memory_request must not exceed memory_limit; pod_limit must not be negative. Values are trimmed. The effective quota (cluster quota of the instance's cluster merged with this override) must follow the same rules, for example \"cpu_request 4 (instance override) exceeds the effective cpu_limit 2 (cluster quota)\". Invalid input returns 400 with the field name. Authorization: the instance owner, admin or devops. An owner without the admin or devops role cannot set a value above the cluster quota of the instance's cluster (403, for example \"cpu_limit 64 exceeds the cluster quota 16; only admin or devops can set a higher quota\"); a field without a cluster value has no cap, and pod_limit 0 (no limit) counts as above a cluster pod_limit. A value equal to the stored override passes, so an owner can change one field without losing an admin grant. Admin and devops may exceed the cluster quota. The check runs on write (and on clone), not on deploy.",
+                "description": "PUT replaces all fields of the override: a field that is not sent is cleared (an empty quantity or a missing pod_limit means no override for that field, so the cluster quota applies). To change one field, read the override with GET, change the field and send all fields. There is no PATCH.\nUpsert the per-instance resource quota override for a stack instance. Each non-empty quantity must be a valid Kubernetes quantity (for example 500m, 2, 512Mi, 10Gi) and not negative; cpu_request must not exceed cpu_limit and memory_request must not exceed memory_limit; pod_limit must not be negative. The container_* fields (LimitRange defaultRequest, default and max per container) and ephemeral_storage_limit follow the same per-field merge: a non-empty value replaces the cluster value. Per container, request \u003c= limit \u003c= max, and a container default must not exceed the namespace value of the same resource. Values are trimmed. The effective quota (cluster quota of the instance's cluster merged with this override) must follow the same rules, for example \"cpu_request 4 (instance override) exceeds the effective cpu_limit 2 (cluster quota)\". Invalid input returns 400 with the field name. Authorization: the instance owner, admin or devops. An owner without the admin or devops role cannot set a value above the cluster quota of the instance's cluster (403, for example \"cpu_limit 64 exceeds the cluster quota 16; only admin or devops can set a higher quota\"); the check covers every field, also the container_* fields and ephemeral_storage_limit; a field without a cluster value has no cap, and pod_limit 0 (no limit) counts as above a cluster pod_limit. A value equal to the stored override passes, so an owner can change one field without losing an admin grant. Admin and devops may exceed the cluster quota. The check runs on write (and on clone), not on deploy. After the write, the backend applies the effective quota to the namespace of a deployed instance in the background (not for a draft or cleaning instance). The backend logs a failure, and the next deploy applies the quota.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7270,7 +7517,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Remove the per-instance resource quota override for a stack instance",
+                "description": "Remove the per-instance resource quota override for a stack instance. The backend then applies the cluster quota to the namespace of a deployed instance in the background (not for a draft or cleaning instance). Without a cluster quota, the namespace keeps its current ResourceQuota and LimitRange until the instance is cleaned.",
                 "produces": [
                     "application/json"
                 ],
@@ -8715,7 +8962,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Instantiate a template, create an instance, set branch overrides, and trigger deployment in a single call.\ninstance_name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).\nThe template content comes from the latest published snapshot, not the working copy. A template that is not published, or has no snapshot, gives 409 \"Template has no published version\".\nThe new stack definition is owned by the instance (owner_instance_id): deleting the instance deletes the definition when no other instance uses it. The definition is named after the instance; when the caller already has a definition with that name, the name gets the suffix \" (2)\", \" (3)\", ...",
+                "description": "Instantiate a template, create an instance, set branch overrides, and trigger deployment in a single call.\ninstance_name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).\nExpiry: ttl_minutes (omitted: DEFAULT_INSTANCE_TTL_MINUTES; 0: no expiry) or expires_at, a fixed stop time (RFC 3339 with a time zone, in the future, not later than now + MAX_INSTANCE_TTL_DAYS). Do not send both (400).\nThe template content comes from the latest published snapshot, not the working copy. A template that is not published, or has no snapshot, gives 409 \"Template has no published version\".\nThe new stack definition is owned by the instance (owner_instance_id): deleting the instance deletes the definition when no other instance uses it. The definition is named after the instance; when the caller already has a definition with that name, the name gets the suffix \" (2)\", \" (3)\", ...",
                 "consumes": [
                     "application/json"
                 ],
@@ -8788,7 +9035,7 @@
                         }
                     },
                     "409": {
-                        "description": "Namespace already exists, or the template has no published version ({error})",
+                        "description": "Namespace already exists, the name is taken on the cluster (UNIQUE_INSTANCE_NAMES), or the template has no published version ({error})",
                         "schema": {
                             "$ref": "#/definitions/handlers.NamespaceConflictResponse"
                         }
@@ -8946,7 +9193,7 @@
         },
         "/api/v1/templates/{id}/versions/diff": {
             "get": {
-                "description": "Compare two template version snapshots side by side. Either side may be \"working\" to compare the working copy (draft), for example left=\u003clatest version ID\u003e\u0026right=working shows the unpublished changes.\nOnly the template owner and admins can compare the working copy (others get 403).\nleft.version and right.version are version strings; the other side fields (id, created_by, created_by_username, created_at, is_working_copy) describe the side.",
+                "description": "Compare two template version snapshots side by side. Either side may be \"working\" to compare the working copy (draft), for example left=\u003clatest version ID\u003e\u0026right=working shows the unpublished changes.\nOnly the template owner and admins can compare the working copy (others get 403).\nleft.version and right.version are version strings; the other side fields (id, created_by, created_by_username, created_at, is_working_copy) describe the side.\ntemplate_diffs lists the changed template fields (name, description, category, default_branch, version) with the left and right value; chart_diffs compares the charts.",
                 "consumes": [
                     "application/json"
                 ],
@@ -9112,7 +9359,7 @@
         },
         "/api/v1/ui-config": {
             "get": {
-                "description": "Returns the display values of the web UI: product title, logo URL and favicon URL (APP_TITLE, APP_LOGO_URL, APP_FAVICON_URL). Public: no authentication, so the login page can use it. An empty logo_url means the built-in logo. A URL is a same-origin path or an https URL. Cached for 5 minutes.",
+                "description": "Returns the display values of the web UI: product title, logo URL and favicon URL (APP_TITLE, APP_LOGO_URL, APP_FAVICON_URL), the start value of the TTL field in the create forms (default_instance_ttl_minutes, DEFAULT_INSTANCE_TTL_MINUTES; 0 means no expiry), and the maximum TTL and stop-time distance in days (max_instance_ttl_days, MAX_INSTANCE_TTL_DAYS). Public: no authentication, so the login page can use it. An empty logo_url means the built-in logo. A URL is a same-origin path or an https URL. Cached for 5 minutes.",
                 "produces": [
                     "application/json"
                 ],
@@ -9430,7 +9677,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Deletes the specified API key. Admin or own user only.",
+                "description": "Deletes the specified API key. Admin or own user only. Open WebSocket connections opened with the key close with code 1008.",
                 "produces": [
                     "application/json"
                 ],
@@ -9949,7 +10196,7 @@
         },
         "/ws": {
             "get": {
-                "description": "Upgrades the HTTP connection to a WebSocket for real-time events. Authenticate via one of: `Sec-WebSocket-Protocol: bearer, \u003cjwt\u003e` subprotocol header, `Authorization: Bearer \u003cjwt\u003e` header, or `?token=\u003cjwt\u003e` query parameter (the query token is redacted from access logs and traces by middleware before the handler runs). The upgrade runs the same checks as the HTTP JWT auth: a revoked token (logout), a token issued at or before a user block (user deleted, disabled or password reset), a deleted user and a disabled user get 401. The server closes an open socket with close code 1008 when the session is revoked and when the access token expires; the client must reconnect with a fresh token.",
+                "description": "Upgrades the HTTP connection to a WebSocket for real-time events. Authenticate via one of: `Sec-WebSocket-Protocol: bearer, \u003cjwt\u003e` subprotocol header, `Authorization: Bearer \u003cjwt\u003e` header, `X-API-Key: sk_\u003ckey\u003e` header, or `?token=\u003cjwt\u003e` query parameter (the query token is redacted from access logs and traces by middleware before the handler runs). An API key is accepted only in the X-API-Key header, never in the query. The upgrade runs the same checks as the HTTP auth: a revoked token (logout), a token issued at or before a user block (user deleted, disabled or password reset), an unknown, deleted or expired API key, a deleted user and a disabled user get 401. An API-key upgrade counts against the per-IP API rate limit before the key lookup (429), and gets 503 when the server has no free slot for an Argon2id key verify. The server closes an open socket with close code 1008 when the session or the API key is revoked (key deleted; user deleted, disabled, password reset or role change, which also close the API-key sockets of the user although HTTP API-key requests keep working), when the access token expires and when the API key expires; the client must reconnect.",
                 "tags": [
                     "websocket"
                 ],
@@ -9960,6 +10207,12 @@
                         "description": "JWT authentication token (also accepted via Authorization header or Sec-WebSocket-Protocol subprotocol)",
                         "name": "token",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "API key (sk_\u003ckey\u003e); header only, used when no JWT is sent in the subprotocol or the Authorization header",
+                        "name": "X-API-Key",
+                        "in": "header"
                     }
                 ],
                 "responses": {
@@ -9993,8 +10246,26 @@
                             }
                         }
                     },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -10023,6 +10294,11 @@
             "properties": {
                 "available": {
                     "type": "boolean"
+                },
+                "origin": {
+                    "description": "Origin is the API origin of the provider (scheme, host and optional\nport). It is set only for GitLab, whose origin is configurable\n(GITLAB_BASE_URL), so that clients can attribute repository URLs the\nsame way as the registry. It never contains credentials or a path.",
+                    "type": "string",
+                    "example": "https://gitlab.com"
                 },
                 "type": {
                     "type": "string"
@@ -10245,6 +10521,10 @@
                 "branch": {
                     "type": "string"
                 },
+                "cleaned_at": {
+                    "description": "CleanedAt is the time the last successful clean finished. It is nil\nwhen the instance was not cleaned since its last deploy. A deploy\nclears it. Cleanup policies use it for the cleaned_days condition (a\nclean also clears LastDeployedAt, so idle_days cannot count from it).",
+                    "type": "string"
+                },
                 "cluster_id": {
                     "type": "string"
                 },
@@ -10272,7 +10552,7 @@
                     "readOnly": true
                 },
                 "following": {
-                    "description": "Following and FollowerCount are computed, not stored. Only GET\n/stack-instances/{id} sets them: following is true when the caller\nfollows the instance, follower_count is the number of followers.",
+                    "description": "Following and FollowerCount are computed, not stored. GET, PUT and\nPOST .../extend on /stack-instances/{id} set them: following is true\nwhen the caller follows the instance, follower_count is the number of\nfollowers. List responses do not set them.",
                     "type": "boolean",
                     "readOnly": true
                 },
@@ -10313,7 +10593,7 @@
                     "type": "string"
                 },
                 "values_drift": {
-                    "description": "ValuesDrift is computed, not stored. GET /stack-instances/{id} sets it\nto true when the running values come from a successful rollback and\nthe stored overrides produce different values (the next deploy undoes\nthe rollback). List responses do not compute it.",
+                    "description": "ValuesDrift is computed, not stored. GET, PUT and POST .../extend on\n/stack-instances/{id} set it to true when the running values come from\na successful rollback and the stored overrides produce different values\n(the next deploy undoes the rollback). List responses do not compute it.",
                     "type": "boolean"
                 },
                 "warning": {
@@ -10674,6 +10954,14 @@
                 },
                 "name": {
                     "type": "string"
+                },
+                "source_template": {
+                    "description": "SourceTemplate is the template that the definition is linked to. The\nexport sets it for a linked definition; the import links the new\ndefinition when the template and the version exist.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/handlers.SourceTemplateExportData"
+                        }
+                    ]
                 }
             }
         },
@@ -10830,6 +11118,7 @@
                     "type": "string"
                 },
                 "helm_releases": {
+                    "description": "HelmReleases is always an array, never null.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -10853,6 +11142,10 @@
         "handlers.OverviewStats": {
             "type": "object",
             "properties": {
+                "deploy_log_retention_days": {
+                    "description": "DeployLogRetentionDays is DEPLOY_LOG_RETENTION_DAYS. The deploy counts\n(here, per template and per user) cover only the kept deploy logs:\nabout the last N days. 0 means all deploy logs are kept.",
+                    "type": "integer"
+                },
                 "running_instances": {
                     "type": "integer"
                 },
@@ -10935,6 +11228,21 @@
                 },
                 "warning": {
                     "description": "Warning explains ValuesDrift when it is true.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SourceTemplateExportData": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Version is a published version of the template. Empty means the\nlatest published version.",
                     "type": "string"
                 }
             }
@@ -11039,6 +11347,11 @@
         "handlers.UIConfigResponse": {
             "type": "object",
             "properties": {
+                "default_instance_ttl_minutes": {
+                    "description": "DefaultInstanceTTLMinutes is the start value of the TTL field in the\ncreate forms (DEFAULT_INSTANCE_TTL_MINUTES). 0: no expiry.",
+                    "type": "integer",
+                    "example": 480
+                },
                 "favicon_url": {
                     "description": "FaviconURL is the browser tab icon (APP_FAVICON_URL).",
                     "type": "string",
@@ -11048,6 +11361,11 @@
                     "description": "LogoURL is the logo image (APP_LOGO_URL). Empty: the built-in logo.",
                     "type": "string",
                     "example": ""
+                },
+                "max_instance_ttl_days": {
+                    "description": "MaxInstanceTTLDays is the maximum TTL and the maximum distance of a\nstop time from now (MAX_INSTANCE_TTL_DAYS). The forms limit the\nTTL field and the stop-time picker with it.",
+                    "type": "integer",
+                    "example": 30
                 },
                 "title": {
                     "description": "Title is the product name (APP_TITLE).",
@@ -11106,11 +11424,48 @@
         "handlers.UpdateQuotaRequest": {
             "type": "object",
             "properties": {
+                "container_cpu_limit": {
+                    "type": "string",
+                    "example": "500m"
+                },
+                "container_cpu_max": {
+                    "type": "string",
+                    "example": "2"
+                },
+                "container_cpu_request": {
+                    "description": "Per-container LimitRange values and the namespace ephemeral-storage total.",
+                    "type": "string",
+                    "example": "100m"
+                },
+                "container_ephemeral_storage_limit": {
+                    "type": "string",
+                    "example": "1Gi"
+                },
+                "container_ephemeral_storage_request": {
+                    "type": "string",
+                    "example": "128Mi"
+                },
+                "container_memory_limit": {
+                    "type": "string",
+                    "example": "512Mi"
+                },
+                "container_memory_max": {
+                    "type": "string",
+                    "example": "4Gi"
+                },
+                "container_memory_request": {
+                    "type": "string",
+                    "example": "128Mi"
+                },
                 "cpu_limit": {
                     "type": "string"
                 },
                 "cpu_request": {
                     "type": "string"
+                },
+                "ephemeral_storage_limit": {
+                    "type": "string",
+                    "example": "20Gi"
                 },
                 "memory_limit": {
                     "type": "string"
@@ -11384,6 +11739,10 @@
                     "description": "Branch of the clone. Default: the branch of the source.",
                     "type": "string"
                 },
+                "expires_at": {
+                    "description": "ExpiresAt is a fixed stop time of the clone (RFC 3339 with a time\nzone). Do not send it with ttl_minutes. Default: a future fixed stop\ntime of the source.",
+                    "type": "string"
+                },
                 "name": {
                     "description": "Name of the clone. Must be a DNS label (lowercase a-z, 0-9, '-', start\nand end alphanumeric, at most 50 characters). When empty, the server\npicks the first free name of \u003csource\u003e-copy, \u003csource\u003e-copy-2, ...",
                     "type": "string"
@@ -11421,6 +11780,15 @@
                         }
                     ]
                 },
+                "format": {
+                    "description": "Format is the body format: \"generic\" (the event JSON, default) or\n\"teams\" (a Microsoft Teams Adaptive Card envelope).",
+                    "type": "string",
+                    "enum": [
+                        "generic",
+                        "teams"
+                    ],
+                    "example": "generic"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -11429,6 +11797,31 @@
                 },
                 "webhook_url": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.createInstanceRequest": {
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "type": "string"
+                },
+                "cluster_id": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "description": "ExpiresAt is a fixed stop time (RFC 3339 with a time zone). It sets\nttl_minutes to 0, and a deploy keeps it. Do not send it with ttl_minutes.",
+                    "type": "string",
+                    "example": "2026-10-17T18:00:00+02:00"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "stack_definition_id": {
+                    "type": "string"
+                },
+                "ttl_minutes": {
+                    "type": "integer"
                 }
             }
         },
@@ -11464,6 +11857,64 @@
                 }
             }
         },
+        "handlers.definitionImportResponse": {
+            "type": "object",
+            "properties": {
+                "chart_count": {
+                    "description": "ChartCount is the number of charts. It is computed, not stored; the\npaged list sets it (the list does not load the charts).",
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "charts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ChartConfig"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "default_branch": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "owner_instance_id": {
+                    "description": "OwnerInstanceID is set when quick deploy created the definition for one\ninstance. Deleting that instance also deletes the definition when no\nother instance uses it. Empty for definitions that users create.",
+                    "type": "string"
+                },
+                "owner_username": {
+                    "description": "OwnerUsername is the username of the owner. It is computed, not\nstored; the API sets it in list and detail responses. Omitted when\nthe owner no longer exists (for example, after a delete).",
+                    "type": "string",
+                    "readOnly": true
+                },
+                "source_template_id": {
+                    "type": "string"
+                },
+                "source_template_version": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "handlers.extendTTLRequest": {
             "type": "object",
             "properties": {
@@ -11474,6 +11925,11 @@
                 "ttl_minutes": {
                     "description": "TTLMinutes is deprecated. Sent alone, it keeps the old behaviour: set\nthe TTL to this value and the expiry to now + TTL. Use minutes instead.",
                     "type": "integer"
+                },
+                "until": {
+                    "description": "Until sets the expiry to this time (RFC 3339 with a time zone). It must\nbe after the current expiry and not later than now plus the limit\n(MAX_INSTANCE_TTL_DAYS). Do not send it with minutes or ttl_minutes.",
+                    "type": "string",
+                    "example": "2026-10-17T18:00:00+02:00"
                 }
             }
         },
@@ -11535,6 +11991,10 @@
                         }
                     ]
                 },
+                "format": {
+                    "description": "Format is the body format of the webhook request:\nNotificationChannelFormatGeneric (the event JSON) or\nNotificationChannelFormatTeams (a Microsoft Teams Adaptive Card\nenvelope). Migration 60 adds the column; existing rows get \"generic\".",
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -11573,6 +12033,10 @@
                             "$ref": "#/definitions/models.NotificationChannelFilters"
                         }
                     ]
+                },
+                "format": {
+                    "description": "Format is the body format of the webhook request:\nNotificationChannelFormatGeneric (the event JSON) or\nNotificationChannelFormatTeams (a Microsoft Teams Adaptive Card\nenvelope). Migration 60 adds the column; existing rows get \"generic\".",
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
@@ -11671,6 +12135,11 @@
                 "cluster_id": {
                     "type": "string"
                 },
+                "expires_at": {
+                    "description": "ExpiresAt is a fixed stop time (RFC 3339 with a time zone). It sets\nttl_minutes to 0. Do not send it with ttl_minutes.",
+                    "type": "string",
+                    "example": "2026-10-17T18:00:00+02:00"
+                },
                 "instance_description": {
                     "type": "string"
                 },
@@ -11717,6 +12186,39 @@
         "handlers.setQuotaOverrideRequest": {
             "type": "object",
             "properties": {
+                "container_cpu_limit": {
+                    "type": "string",
+                    "example": "500m"
+                },
+                "container_cpu_max": {
+                    "type": "string",
+                    "example": "2"
+                },
+                "container_cpu_request": {
+                    "description": "Per-container LimitRange values and the namespace ephemeral-storage total.",
+                    "type": "string",
+                    "example": "100m"
+                },
+                "container_ephemeral_storage_limit": {
+                    "type": "string",
+                    "example": "1Gi"
+                },
+                "container_ephemeral_storage_request": {
+                    "type": "string",
+                    "example": "128Mi"
+                },
+                "container_memory_limit": {
+                    "type": "string",
+                    "example": "512Mi"
+                },
+                "container_memory_max": {
+                    "type": "string",
+                    "example": "4Gi"
+                },
+                "container_memory_request": {
+                    "type": "string",
+                    "example": "128Mi"
+                },
                 "cpu_limit": {
                     "type": "string",
                     "example": "2000m"
@@ -11724,6 +12226,10 @@
                 "cpu_request": {
                     "type": "string",
                     "example": "500m"
+                },
+                "ephemeral_storage_limit": {
+                    "type": "string",
+                    "example": "20Gi"
                 },
                 "memory_limit": {
                     "type": "string",
@@ -11740,6 +12246,35 @@
                 "storage_limit": {
                     "type": "string",
                     "example": "10Gi"
+                }
+            }
+        },
+        "handlers.templateFieldDiff": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "left": {
+                    "type": "string"
+                },
+                "right": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.templateLinkRequest": {
+            "type": "object",
+            "properties": {
+                "template_id": {
+                    "description": "TemplateID is the template to link. Empty removes the link.",
+                    "type": "string",
+                    "example": "6f1c2d3e-0000-0000-0000-000000000000"
+                },
+                "version": {
+                    "description": "Version is a published version of the template. Empty means the\nlatest published version.",
+                    "type": "string",
+                    "example": "1.2.0"
                 }
             }
         },
@@ -11781,6 +12316,14 @@
                         {
                             "$ref": "#/definitions/models.NotificationChannelFilters"
                         }
+                    ]
+                },
+                "format": {
+                    "description": "Format replaces the body format (\"generic\" or \"teams\"). Omit it to\nkeep the format.",
+                    "type": "string",
+                    "enum": [
+                        "generic",
+                        "teams"
                     ]
                 },
                 "name": {
@@ -11961,6 +12504,12 @@
                 },
                 "right": {
                     "$ref": "#/definitions/handlers.versionDiffSide"
+                },
+                "template_diffs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.templateFieldDiff"
+                    }
                 }
             }
         },
@@ -12147,6 +12696,10 @@
                 },
                 "path": {
                     "type": "string"
+                },
+                "primary": {
+                    "description": "Primary is true for an Ingress with the annotation\nPrimaryURLAnnotation = \"true\". Primary entries come first in\nNamespaceStatus.Ingresses, so clients that show one URL show it.",
+                    "type": "boolean"
                 },
                 "tls": {
                     "type": "boolean"
@@ -12524,7 +13077,7 @@
                     "type": "string"
                 },
                 "condition": {
-                    "description": "e.g. \"idle_days:7\", \"status:stopped,age_days:14\", \"stopped_days:3\", \"ttl_expired\"",
+                    "description": "e.g. \"idle_days:7\", \"status:stopped,age_days:14\", \"stopped_days:3\", \"ttl_expired\", \"status:running,expires_within_hours:12\"",
                     "type": "string"
                 },
                 "created_at": {
@@ -12641,7 +13194,7 @@
                     "type": "string"
                 },
                 "status": {
-                    "description": "\"running\", \"success\", \"error\"",
+                    "description": "\"running\", \"success\", \"error\", \"partial\" (deploy only)",
                     "type": "string"
                 },
                 "target_log_id": {
@@ -12676,6 +13229,31 @@
         "models.InstanceQuotaOverride": {
             "type": "object",
             "properties": {
+                "container_cpu_limit": {
+                    "type": "string"
+                },
+                "container_cpu_max": {
+                    "type": "string"
+                },
+                "container_cpu_request": {
+                    "description": "Per-container values for the namespace LimitRange (stack-manager-limits)\nand the namespace ephemeral-storage total. Empty means not set. See\nk8s.Client.EnsureLimitRange for the fallback defaults.",
+                    "type": "string"
+                },
+                "container_ephemeral_storage_limit": {
+                    "type": "string"
+                },
+                "container_ephemeral_storage_request": {
+                    "type": "string"
+                },
+                "container_memory_limit": {
+                    "type": "string"
+                },
+                "container_memory_max": {
+                    "type": "string"
+                },
+                "container_memory_request": {
+                    "type": "string"
+                },
                 "cpu_limit": {
                     "type": "string"
                 },
@@ -12683,6 +13261,9 @@
                     "type": "string"
                 },
                 "created_at": {
+                    "type": "string"
+                },
+                "ephemeral_storage_limit": {
                     "type": "string"
                 },
                 "id": {
@@ -12705,37 +13286,6 @@
                 },
                 "updated_at": {
                     "type": "string"
-                }
-            }
-        },
-        "models.Item": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string",
-                    "example": "2025-06-02T10:00:00Z"
-                },
-                "deleted_at": {
-                    "type": "string",
-                    "format": "date-time"
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "name": {
-                    "type": "string"
-                },
-                "price": {
-                    "type": "number"
-                },
-                "updated_at": {
-                    "type": "string",
-                    "example": "2025-06-02T10:00:00Z"
-                },
-                "version": {
-                    "description": "For optimistic locking (1 = initial; 0 = not provided)",
-                    "type": "integer"
                 }
             }
         },
@@ -12788,6 +13338,10 @@
                             "$ref": "#/definitions/models.NotificationChannelFilters"
                         }
                     ]
+                },
+                "format": {
+                    "description": "Format is the body format of the webhook request:\nNotificationChannelFormatGeneric (the event JSON) or\nNotificationChannelFormatTeams (a Microsoft Teams Adaptive Card\nenvelope). Migration 60 adds the column; existing rows get \"generic\".",
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
@@ -12902,6 +13456,31 @@
                 "cluster_id": {
                     "type": "string"
                 },
+                "container_cpu_limit": {
+                    "type": "string"
+                },
+                "container_cpu_max": {
+                    "type": "string"
+                },
+                "container_cpu_request": {
+                    "description": "Per-container values for the namespace LimitRange (stack-manager-limits)\nand the namespace ephemeral-storage total. Empty means not set. See\nk8s.Client.EnsureLimitRange for the fallback defaults.",
+                    "type": "string"
+                },
+                "container_ephemeral_storage_limit": {
+                    "type": "string"
+                },
+                "container_ephemeral_storage_request": {
+                    "type": "string"
+                },
+                "container_memory_limit": {
+                    "type": "string"
+                },
+                "container_memory_max": {
+                    "type": "string"
+                },
+                "container_memory_request": {
+                    "type": "string"
+                },
                 "cpu_limit": {
                     "type": "string"
                 },
@@ -12909,6 +13488,9 @@
                     "type": "string"
                 },
                 "created_at": {
+                    "type": "string"
+                },
+                "ephemeral_storage_limit": {
                     "type": "string"
                 },
                 "id": {
@@ -13014,6 +13596,10 @@
                 "branch": {
                     "type": "string"
                 },
+                "cleaned_at": {
+                    "description": "CleanedAt is the time the last successful clean finished. It is nil\nwhen the instance was not cleaned since its last deploy. A deploy\nclears it. Cleanup policies use it for the cleaned_days condition (a\nclean also clears LastDeployedAt, so idle_days cannot count from it).",
+                    "type": "string"
+                },
                 "cluster_id": {
                     "type": "string"
                 },
@@ -13041,7 +13627,7 @@
                     "readOnly": true
                 },
                 "following": {
-                    "description": "Following and FollowerCount are computed, not stored. Only GET\n/stack-instances/{id} sets them: following is true when the caller\nfollows the instance, follower_count is the number of followers.",
+                    "description": "Following and FollowerCount are computed, not stored. GET, PUT and\nPOST .../extend on /stack-instances/{id} set them: following is true\nwhen the caller follows the instance, follower_count is the number of\nfollowers. List responses do not set them.",
                     "type": "boolean",
                     "readOnly": true
                 },
@@ -13082,7 +13668,7 @@
                     "type": "string"
                 },
                 "values_drift": {
-                    "description": "ValuesDrift is computed, not stored. GET /stack-instances/{id} sets it\nto true when the running values come from a successful rollback and\nthe stored overrides produce different values (the next deploy undoes\nthe rollback). List responses do not compute it.",
+                    "description": "ValuesDrift is computed, not stored. GET, PUT and POST .../extend on\n/stack-instances/{id} set it to true when the running values come from\na successful rollback and the stored overrides produce different values\n(the next deploy undoes the rollback). List responses do not compute it.",
                     "type": "boolean"
                 }
             }
