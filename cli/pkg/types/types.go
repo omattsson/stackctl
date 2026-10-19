@@ -50,6 +50,90 @@ type StackInstance struct {
 	FollowerCount *int64 `json:"follower_count,omitempty" yaml:"follower_count,omitempty"`
 }
 
+// NotificationChannel is an outbound webhook channel (GET
+// /api/v1/admin/notification-channels/:id). The server never sends the
+// secret. WebhookURL can hold a token (for example the signature of a Teams
+// workflow URL): print it only on request.
+type NotificationChannel struct {
+	CreatedAt         time.Time                  `json:"created_at" yaml:"created_at"`
+	UpdatedAt         time.Time                  `json:"updated_at" yaml:"updated_at"`
+	ID                string                     `json:"id" yaml:"id"`
+	Name              string                     `json:"name" yaml:"name"`
+	WebhookURL        string                     `json:"webhook_url" yaml:"webhook_url"`
+	Format            string                     `json:"format" yaml:"format"`
+	Filters           NotificationChannelFilters `json:"filters" yaml:"filters"`
+	Enabled           bool                       `json:"enabled" yaml:"enabled"`
+	SubscriptionCount *int                       `json:"subscription_count,omitempty" yaml:"subscription_count,omitempty"`
+	// Warnings is set by create and update: filter IDs that point to no
+	// user, definition or cluster. The server saves the channel anyway.
+	Warnings []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+}
+
+// NotificationChannelFilters limits a channel to some stack instances. Each
+// set filter must match; one value of a filter is enough. Empty filters
+// match all instances.
+type NotificationChannelFilters struct {
+	InstanceNamePatterns []string `json:"instance_name_patterns,omitempty" yaml:"instance_name_patterns,omitempty"`
+	OwnerIDs             []string `json:"owner_ids,omitempty" yaml:"owner_ids,omitempty"`
+	DefinitionIDs        []string `json:"definition_ids,omitempty" yaml:"definition_ids,omitempty"`
+	ClusterIDs           []string `json:"cluster_ids,omitempty" yaml:"cluster_ids,omitempty"`
+}
+
+// CreateNotificationChannelRequest is the body of POST
+// /api/v1/admin/notification-channels.
+type CreateNotificationChannelRequest struct {
+	Name       string                      `json:"name"`
+	WebhookURL string                      `json:"webhook_url"`
+	Secret     string                      `json:"secret,omitempty"`
+	Enabled    *bool                       `json:"enabled,omitempty"`
+	Format     string                      `json:"format,omitempty"`
+	Filters    *NotificationChannelFilters `json:"filters,omitempty"`
+}
+
+// UpdateNotificationChannelRequest is the body of PUT
+// /api/v1/admin/notification-channels/:id. Only the fields sent change. A
+// Secret of "" removes the secret (unsigned requests). Filters replaces all
+// filters; an empty object removes them.
+type UpdateNotificationChannelRequest struct {
+	Name       string                      `json:"name,omitempty"`
+	WebhookURL string                      `json:"webhook_url,omitempty"`
+	Secret     *string                     `json:"secret,omitempty"`
+	Enabled    *bool                       `json:"enabled,omitempty"`
+	Format     *string                     `json:"format,omitempty"`
+	Filters    *NotificationChannelFilters `json:"filters,omitempty"`
+}
+
+// ChannelTestResult is the response of POST
+// /api/v1/admin/notification-channels/:id/test. StatusCode is 0 when the
+// webhook did not answer.
+type ChannelTestResult struct {
+	Success        bool   `json:"success" yaml:"success"`
+	Message        string `json:"message" yaml:"message"`
+	StatusCode     int    `json:"status_code" yaml:"status_code"`
+	ChannelEnabled bool   `json:"channel_enabled" yaml:"channel_enabled"`
+}
+
+// ChannelDeliveryLogs is one page of GET
+// /api/v1/admin/notification-channels/:id/delivery-logs.
+type ChannelDeliveryLogs struct {
+	Logs   []ChannelDeliveryLog `json:"logs" yaml:"logs"`
+	Total  int64                `json:"total" yaml:"total"`
+	Limit  int                  `json:"limit" yaml:"limit"`
+	Offset int                  `json:"offset" yaml:"offset"`
+}
+
+// ChannelDeliveryLog is one webhook delivery of a channel.
+type ChannelDeliveryLog struct {
+	CreatedAt    time.Time `json:"created_at" yaml:"created_at"`
+	ID           string    `json:"id" yaml:"id"`
+	ChannelID    string    `json:"channel_id" yaml:"channel_id"`
+	ChannelName  string    `json:"channel_name" yaml:"channel_name"`
+	EventType    string    `json:"event_type" yaml:"event_type"`
+	Status       string    `json:"status" yaml:"status"`
+	StatusCode   int       `json:"status_code" yaml:"status_code"`
+	ErrorMessage string    `json:"error_message,omitempty" yaml:"error_message,omitempty"`
+}
+
 // ActionList is the response of GET /api/v1/stack-instances/:id/actions:
 // the custom actions of the hooks config, without URLs or secrets.
 type ActionList struct {

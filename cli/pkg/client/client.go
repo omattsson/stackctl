@@ -650,6 +650,111 @@ func (c *Client) ListStacks(params map[string]string) (*types.ListResponse[types
 	return &resp, nil
 }
 
+// pathChannels is the base path of the notification channel routes
+// (devops or admin).
+const pathChannels = "/api/v1/admin/notification-channels"
+
+// ListNotificationChannels returns all notification channels with their
+// subscription counts.
+func (c *Client) ListNotificationChannels() ([]types.NotificationChannel, error) {
+	var channels []types.NotificationChannel
+	if err := c.Get(pathChannels, &channels); err != nil {
+		return nil, err
+	}
+	return channels, nil
+}
+
+// GetNotificationChannel returns one notification channel.
+func (c *Client) GetNotificationChannel(id string) (*types.NotificationChannel, error) {
+	var ch types.NotificationChannel
+	if err := c.Get(pathChannels+"/"+url.PathEscape(id), &ch); err != nil {
+		return nil, err
+	}
+	return &ch, nil
+}
+
+// CreateNotificationChannel creates a notification channel.
+func (c *Client) CreateNotificationChannel(req *types.CreateNotificationChannelRequest) (*types.NotificationChannel, error) {
+	var ch types.NotificationChannel
+	if err := c.Post(pathChannels, req, &ch); err != nil {
+		return nil, err
+	}
+	return &ch, nil
+}
+
+// UpdateNotificationChannel changes the fields of req on a channel.
+func (c *Client) UpdateNotificationChannel(id string, req *types.UpdateNotificationChannelRequest) (*types.NotificationChannel, error) {
+	var ch types.NotificationChannel
+	if err := c.Put(pathChannels+"/"+url.PathEscape(id), req, &ch); err != nil {
+		return nil, err
+	}
+	return &ch, nil
+}
+
+// DeleteNotificationChannel deletes a channel and its subscriptions.
+func (c *Client) DeleteNotificationChannel(id string) error {
+	return c.Delete(pathChannels + "/" + url.PathEscape(id))
+}
+
+// ListChannelEventTypes returns the event types that a channel can
+// subscribe to.
+func (c *Client) ListChannelEventTypes() ([]string, error) {
+	var resp struct {
+		EventTypes []string `json:"event_types"`
+	}
+	if err := c.Get(pathChannels+"/event-types", &resp); err != nil {
+		return nil, err
+	}
+	return resp.EventTypes, nil
+}
+
+// GetChannelSubscriptions returns the event types of a channel.
+func (c *Client) GetChannelSubscriptions(id string) ([]string, error) {
+	var resp struct {
+		EventTypes []string `json:"event_types"`
+	}
+	if err := c.Get(pathChannels+"/"+url.PathEscape(id)+"/subscriptions", &resp); err != nil {
+		return nil, err
+	}
+	return resp.EventTypes, nil
+}
+
+// SetChannelSubscriptions replaces the event types of a channel and returns
+// the stored list.
+func (c *Client) SetChannelSubscriptions(id string, eventTypes []string) ([]string, error) {
+	if eventTypes == nil {
+		eventTypes = []string{}
+	}
+	var resp struct {
+		EventTypes []string `json:"event_types"`
+	}
+	if err := c.Put(pathChannels+"/"+url.PathEscape(id)+"/subscriptions", map[string][]string{"event_types": eventTypes}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.EventTypes, nil
+}
+
+// TestNotificationChannel sends a test event to the webhook of a channel
+// (one attempt).
+func (c *Client) TestNotificationChannel(id string) (*types.ChannelTestResult, error) {
+	var res types.ChannelTestResult
+	if err := c.Post(pathChannels+"/"+url.PathEscape(id)+"/test", nil, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// ListChannelDeliveryLogs returns one page of the delivery log of a
+// channel, newest first.
+func (c *Client) ListChannelDeliveryLogs(id string, limit, offset int) (*types.ChannelDeliveryLogs, error) {
+	var page types.ChannelDeliveryLogs
+	params := map[string]string{"limit": strconv.Itoa(limit), "offset": strconv.Itoa(offset)}
+	if err := c.GetWithQuery(pathChannels+"/"+url.PathEscape(id)+"/delivery-logs", params, &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
 // ListStackActions returns the custom actions that can run on a stack
 // instance (GET /api/v1/stack-instances/:id/actions).
 func (c *Client) ListStackActions(id string) (*types.ActionList, error) {
