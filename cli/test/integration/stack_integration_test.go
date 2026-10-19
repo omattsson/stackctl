@@ -409,7 +409,8 @@ func TestStackWorkflow_CloneAndExtend(t *testing.T) {
 	c := client.New(server.URL)
 
 	// Create original
-	original, err := c.CreateStack(&types.CreateStackRequest{Name: "original-stack", TTLMinutes: 60})
+	ttl := 60
+	original, err := c.CreateStack(&types.CreateStackRequest{Name: "original-stack", TTLMinutes: &ttl})
 	require.NoError(t, err)
 
 	// Clone it

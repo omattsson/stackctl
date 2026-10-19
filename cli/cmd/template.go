@@ -209,7 +209,11 @@ version cannot be deployed.
 
 Examples:
   stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack
-  stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --branch feature/xyz --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e`,
+  stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --branch feature/xyz --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
+  stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --stop-at "2026-10-17 18:00"
+
+Without --ttl and --stop-at the stack gets the default TTL of the server.
+` + expiryFlagsHelp,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -221,15 +225,24 @@ Examples:
 		name, _ := cmd.Flags().GetString("name")
 		branch, _ := cmd.Flags().GetString("branch")
 		clusterID, _ := cmd.Flags().GetString("cluster")
+		expiry, err := readExpiryFlags(cmd)
+		if err != nil {
+			return err
+		}
 
 		req := &types.QuickDeployRequest{
-			Name:      name,
-			Branch:    branch,
-			ClusterID: clusterID,
+			Name:       name,
+			Branch:     branch,
+			ClusterID:  clusterID,
+			TTLMinutes: expiry.ttl,
+			ExpiresAt:  expiry.stopAt,
 		}
 
 		c, err := newClient()
 		if err != nil {
+			return err
+		}
+		if err := checkExpiryLimit(c, expiry); err != nil {
 			return err
 		}
 
@@ -238,7 +251,10 @@ Examples:
 			return templateReleaseError(err, c, id, args[0])
 		}
 
-		return printInstance(instance)
+		if err := printInstance(instance); err != nil {
+			return err
+		}
+		return checkStopApplied("stop-at", expiry.stopAt, instance)
 	},
 }
 
@@ -1299,6 +1315,8 @@ func init() {
 	templateQuickDeployCmd.Flags().String("name", "", "Stack instance name (required)")
 	templateQuickDeployCmd.Flags().String("branch", "", "Git branch")
 	templateQuickDeployCmd.Flags().String("cluster", "", "Target cluster ID")
+	templateQuickDeployCmd.Flags().Int("ttl", 0, "Time to live in minutes (0 means no expiry; default: the server default)")
+	templateQuickDeployCmd.Flags().String("stop-at", "", stopAtFlagUsage)
 	_ = templateQuickDeployCmd.MarkFlagRequired("name")
 
 	// template delete flags

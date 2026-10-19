@@ -74,7 +74,12 @@ func New(baseURL string) *Client {
 type APIError struct {
 	StatusCode int
 	Message    string
-	retryAfter time.Duration
+	// Detail is the "message" field of a body that also has "error" (for
+	// example the 409 of a name conflict). Message keeps "error".
+	Detail string
+	// Suggestions are the free names of a 409 name or namespace conflict.
+	Suggestions []string
+	retryAfter  time.Duration
 }
 
 func (e *APIError) Error() string {
@@ -96,9 +101,15 @@ func (e *APIError) UserFacingError() string {
 		}
 		return fmt.Sprintf("Resource not found: %s", msg)
 	case http.StatusConflict:
-		msg := sanitizeServerMessage(e.Message)
+		msg := sanitizeServerMessage(e.Detail)
+		if msg == "" {
+			msg = sanitizeServerMessage(e.Message)
+		}
 		if msg == "" {
 			msg = "unknown conflict"
+		}
+		if names := sanitizeSuggestions(e.Suggestions); len(names) > 0 {
+			msg += ". Free names: " + strings.Join(names, ", ")
 		}
 		return fmt.Sprintf("Conflict: %s", msg)
 	case http.StatusTooManyRequests:
@@ -109,6 +120,24 @@ func (e *APIError) UserFacingError() string {
 		}
 		return e.Message
 	}
+}
+
+// maxSuggestions is the number of name suggestions that a 409 message shows.
+const maxSuggestions = 5
+
+// sanitizeSuggestions returns the first maxSuggestions non-empty
+// suggestions, sanitized like server messages.
+func sanitizeSuggestions(in []string) []string {
+	var out []string
+	for _, s := range in {
+		if len(out) == maxSuggestions {
+			break
+		}
+		if t := sanitizeServerMessage(s); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // SanitizeServerText cleans up a server text (for example the warning of a
@@ -342,17 +371,23 @@ func decodeAPIError(resp *http.Response) *APIError {
 	// {"status": "...", "message": "..."} instead. Decode both
 	// shapes so the backend-provided message surfaces in the
 	// user-facing APIError.
+	// A 409 name or namespace conflict has both fields and suggestions
+	// (NamespaceConflictResponse): "error" stays in Message, "message"
+	// goes to Detail.
 	var errResp struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+		Error       string   `json:"error"`
+		Message     string   `json:"message"`
+		Suggestions []string `json:"suggestions"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 		apiErr.Message = http.StatusText(resp.StatusCode)
 		return apiErr
 	}
+	apiErr.Suggestions = errResp.Suggestions
 	switch {
 	case errResp.Error != "":
 		apiErr.Message = errResp.Error
+		apiErr.Detail = errResp.Message
 	case errResp.Message != "":
 		apiErr.Message = errResp.Message
 	default:
@@ -699,8 +734,29 @@ func (c *Client) GetDeployLogValues(instanceID, logID string) (*types.DeployLogV
 
 // CloneStack clones a stack instance and returns the new instance.
 func (c *Client) CloneStack(id string) (*types.StackInstance, error) {
+	return c.CloneStackWith(id, nil)
+}
+
+// CloneStackWith clones a stack instance with the TTL or the fixed stop
+// time of req. A nil req sends no body (the server defaults).
+func (c *Client) CloneStackWith(id string, req *types.CloneStackRequest) (*types.StackInstance, error) {
+	var body interface{}
+	if req != nil {
+		body = req
+	}
 	var instance types.StackInstance
-	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/clone", id), nil, &instance)
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/clone", id), body, &instance)
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// UpdateStack changes the name, the branch, the TTL or the fixed stop time
+// of a stack instance (PUT /api/v1/stack-instances/:id, a partial update).
+func (c *Client) UpdateStack(id string, req *types.UpdateStackRequest) (*types.StackInstance, error) {
+	var instance types.StackInstance
+	err := c.Put(fmt.Sprintf("/api/v1/stack-instances/%s", id), req, &instance)
 	if err != nil {
 		return nil, err
 	}
@@ -720,6 +776,19 @@ func (c *Client) ExtendStack(id string, minutes int) (*types.StackInstance, erro
 // server answers with a Warning header (see warnHeaders).
 func (c *Client) ResetStackTTL(id string, ttlMinutes int) (*types.StackInstance, error) {
 	return c.postExtend(id, map[string]int{"ttl_minutes": ttlMinutes})
+}
+
+// ExtendStackUntil sets the expiry of a stack instance to until (the
+// "until" body, k8s-stack-manager v0.12.0 or later). until must be after
+// the current expiry and at most now plus the TTL limit of the server.
+func (c *Client) ExtendStackUntil(id string, until time.Time) (*types.StackInstance, error) {
+	var instance types.StackInstance
+	body := map[string]string{"until": until.UTC().Format(time.RFC3339)}
+	err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/extend", id), body, &instance)
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
 }
 
 func (c *Client) postExtend(id string, body map[string]int) (*types.StackInstance, error) {
@@ -762,13 +831,51 @@ func (c *Client) InstantiateTemplate(id string, req *types.InstantiateTemplateRe
 }
 
 // QuickDeployTemplate creates and deploys a stack instance from a template in one step.
+// The server answers {"instance": {...}, "definition": {...}, "log_id": "..."};
+// a body without "instance" is read as the instance itself.
 func (c *Client) QuickDeployTemplate(id string, req *types.QuickDeployRequest) (*types.StackInstance, error) {
-	var instance types.StackInstance
-	err := c.Post(fmt.Sprintf("/api/v1/templates/%s/quick-deploy", id), req, &instance)
+	var raw json.RawMessage
+	err := c.Post(fmt.Sprintf("/api/v1/templates/%s/quick-deploy", id), req, &raw)
 	if err != nil {
 		return nil, err
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("decoding quick-deploy response: %w", err)
+	}
+	if inst, ok := fields["instance"]; ok {
+		var instance *types.StackInstance
+		if err := json.Unmarshal(inst, &instance); err != nil {
+			return nil, fmt.Errorf("decoding quick-deploy response: %w", err)
+		}
+		if instance == nil {
+			return nil, fmt.Errorf("decoding quick-deploy response: the instance is null")
+		}
+		return instance, nil
+	}
+	var instance types.StackInstance
+	if err := json.Unmarshal(raw, &instance); err != nil {
+		return nil, fmt.Errorf("decoding quick-deploy response: %w", err)
+	}
 	return &instance, nil
+}
+
+// GetUIConfig returns the public UI config of the server (GET
+// /api/v1/ui-config): the default TTL and the TTL limit.
+func (c *Client) GetUIConfig() (*types.UIConfig, error) {
+	var cfg types.UIConfig
+	if err := c.Get("/api/v1/ui-config", &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// Ping calls the public GET /api/v1/ping.
+func (c *Client) Ping() error {
+	var resp struct {
+		Message string `json:"message"`
+	}
+	return c.Get("/api/v1/ping", &resp)
 }
 
 // DeleteTemplate deletes a stack template by ID.

@@ -420,7 +420,7 @@ func TestTemplateQuickDeployCmd_Success(t *testing.T) {
 	t.Cleanup(func() {
 		templateQuickDeployCmd.Flags().Set("name", "")
 		templateQuickDeployCmd.Flags().Set("branch", "")
-		templateQuickDeployCmd.Flags().Set("cluster", "0")
+		templateQuickDeployCmd.Flags().Set("cluster", "")
 	})
 
 	err := templateQuickDeployCmd.RunE(templateQuickDeployCmd, []string{"10"})

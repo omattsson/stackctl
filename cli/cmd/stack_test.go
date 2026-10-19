@@ -369,7 +369,7 @@ func TestStackCreateCmd_Success(t *testing.T) {
 		stackCreateCmd.Flags().Set("definition", "0")
 		stackCreateCmd.Flags().Set("branch", "")
 		stackCreateCmd.Flags().Set("cluster", "0")
-		stackCreateCmd.Flags().Set("ttl", "0")
+		resetFlag(t, stackCreateCmd.Flags(), "ttl", "0")
 	})
 
 	err := stackCreateCmd.RunE(stackCreateCmd, []string{})
@@ -395,13 +395,18 @@ func TestStackCreateCmd_MissingRequiredFlags(t *testing.T) {
 
 func TestStackCreateCmd_AllFlags(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ui-config" {
+			http.NotFound(w, r) // an older server: the 30-day default applies
+			return
+		}
 		var body types.CreateStackRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "feat-stack", body.Name)
 		assert.Equal(t, "3", body.StackDefinitionID)
 		assert.Equal(t, "feature/xyz", body.Branch)
 		assert.Equal(t, "2", body.ClusterID)
-		assert.Equal(t, 120, body.TTLMinutes)
+		require.NotNil(t, body.TTLMinutes)
+		assert.Equal(t, 120, *body.TTLMinutes)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -421,7 +426,7 @@ func TestStackCreateCmd_AllFlags(t *testing.T) {
 		stackCreateCmd.Flags().Set("definition", "0")
 		stackCreateCmd.Flags().Set("branch", "")
 		stackCreateCmd.Flags().Set("cluster", "0")
-		stackCreateCmd.Flags().Set("ttl", "0")
+		resetFlag(t, stackCreateCmd.Flags(), "ttl", "0")
 	})
 
 	err := stackCreateCmd.RunE(stackCreateCmd, []string{})
@@ -836,8 +841,11 @@ type extendServer struct {
 	now         time.Time
 	legacy      bool
 	noUpdatedAt bool // omit updated_at: the command falls back to the local clock
+	maxDays     int  // max_instance_ttl_days of ui-config; 0: ui-config gives 404
 	calls       int
+	uiCalls     int
 	body        map[string]int
+	until       string // the "until" of the last POST /extend
 }
 
 const extendWarning = `299 - "ttl_minutes on /extend is deprecated and resets the expiry to now + ttl_minutes; send {\"minutes\": N} to add N minutes"`
@@ -849,14 +857,39 @@ func (es *extendServer) start(t *testing.T) *httptest.Server {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/stack-instances/42":
 			json.NewEncoder(w).Encode(types.StackInstance{Base: types.Base{ID: "42"}, TTLMinutes: 240, ExpiresAt: es.current})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ui-config":
+			es.uiCalls++
+			if es.maxDays == 0 {
+				http.NotFound(w, r)
+				return
+			}
+			json.NewEncoder(w).Encode(types.UIConfig{MaxInstanceTTLDays: es.maxDays})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/stack-instances/42/extend":
 			es.calls++
+			raw := map[string]interface{}{}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&raw))
 			es.body = map[string]int{}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&es.body))
+			es.until = ""
+			for k, v := range raw {
+				switch v := v.(type) {
+				case float64:
+					es.body[k] = int(v)
+				case string:
+					es.until = v
+				}
+			}
 			var exp time.Time
 			ttl := 240
 			minutes, hasMinutes := es.body["minutes"]
+			limitMinutes := 43200
+			if es.maxDays > 0 {
+				limitMinutes = es.maxDays * 24 * 60
+			}
 			switch {
+			case es.until != "":
+				u, err := time.Parse(time.RFC3339, es.until)
+				require.NoError(t, err)
+				exp = u
 			case es.legacy:
 				exp = es.now.Add(time.Duration(ttl) * time.Minute)
 			case hasMinutes:
@@ -865,7 +898,7 @@ func (es *extendServer) start(t *testing.T) *httptest.Server {
 					base = *es.current
 				}
 				exp = base.Add(time.Duration(minutes) * time.Minute)
-				if limit := es.now.Add(43200 * time.Minute); exp.After(limit) {
+				if limit := es.now.Add(time.Duration(limitMinutes) * time.Minute); exp.After(limit) {
 					exp = limit
 				}
 			default:
@@ -895,6 +928,7 @@ func setupExtend(t *testing.T) *bytes.Buffer {
 	t.Cleanup(func() {
 		resetFlag(t, stackExtendCmd.Flags(), "minutes", "0")
 		resetFlag(t, stackExtendCmd.Flags(), "reset-ttl", "0")
+		resetFlag(t, stackExtendCmd.Flags(), "until", "")
 		resetFlag(t, stackExtendCmd.Flags(), "yes", "false")
 		stackExtendCmd.SetErr(nil)
 		stackExtendCmd.SetIn(nil)
@@ -1074,7 +1108,7 @@ func TestCheckMinutesAdded(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			inst := &types.StackInstance{Base: types.Base{UpdatedAt: now}, ExpiresAt: tt.newExpiry}
-			err := checkMinutesAdded(tt.minutes, tt.oldExpiry, inst)
+			err := checkMinutesAdded(tt.minutes, tt.oldExpiry, inst, defaultMaxTTLDays*24*60)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -1111,7 +1145,11 @@ func TestStackExtendCmd_FlagValidation(t *testing.T) {
 		flags   map[string]string
 		wantErr string
 	}{
-		{"no flag", nil, "--minutes is required"},
+		{"no flag", nil, "--minutes or --until is required"},
+		{"until and minutes", map[string]string{"until": "2099-01-01T00:00:00Z", "minutes": "10"}, "--until and --minutes cannot be used together"},
+		{"until and reset-ttl", map[string]string{"until": "2099-01-01T00:00:00Z", "reset-ttl": "10"}, "--until and --reset-ttl cannot be used together"},
+		{"until bad time", map[string]string{"until": "tomorrow"}, `--until "tomorrow" is not a valid time`},
+		{"until in the past", map[string]string{"until": "2020-01-01T00:00:00Z"}, "--until 2020-01-01T00:00:00Z is in the past"},
 		{"zero minutes", map[string]string{"minutes": "0"}, "--minutes must be a positive integer"},
 		{"zero reset-ttl", map[string]string{"reset-ttl": "0"}, "--reset-ttl must be a positive integer"},
 		{"both flags", map[string]string{"minutes": "10", "reset-ttl": "10"}, "cannot be used together"},
@@ -1809,7 +1847,7 @@ func TestStackCreateCmd_NegativeTTL(t *testing.T) {
 	t.Cleanup(func() {
 		stackCreateCmd.Flags().Set("name", "")
 		stackCreateCmd.Flags().Set("definition", "0")
-		stackCreateCmd.Flags().Set("ttl", "0")
+		resetFlag(t, stackCreateCmd.Flags(), "ttl", "0")
 	})
 
 	err := stackCreateCmd.RunE(stackCreateCmd, []string{})

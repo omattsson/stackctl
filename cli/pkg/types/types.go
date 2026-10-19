@@ -547,7 +547,48 @@ type CreateStackRequest struct {
 	StackDefinitionID string `json:"stack_definition_id" yaml:"stack_definition_id"`
 	Branch            string `json:"branch,omitempty" yaml:"branch,omitempty"`
 	ClusterID         string `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
-	TTLMinutes        int    `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
+	// TTLMinutes nil keeps the default TTL of the server; 0 means no expiry.
+	TTLMinutes *int `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
+	// ExpiresAt is a fixed stop time (k8s-stack-manager v0.12.0 or later).
+	// The server then sets ttl_minutes to 0. Do not send it with
+	// TTLMinutes. An older server ignores it.
+	ExpiresAt *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+}
+
+// UpdateStackRequest is the request body for PUT /api/v1/stack-instances/:id.
+// The update is partial: nil fields are not sent and do not change.
+// TTLMinutes 0 clears the expiry. ExpiresAt sets a fixed stop time; do not
+// send it with TTLMinutes.
+type UpdateStackRequest struct {
+	Name       *string    `json:"name,omitempty" yaml:"name,omitempty"`
+	Branch     *string    `json:"branch,omitempty" yaml:"branch,omitempty"`
+	TTLMinutes *int       `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+}
+
+// CloneStackRequest is the optional request body for
+// POST /api/v1/stack-instances/:id/clone. Nil fields keep the server
+// defaults (the TTL or the future fixed stop time of the source).
+type CloneStackRequest struct {
+	TTLMinutes *int       `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+}
+
+// ConflictResponse is the 409 body of a name or namespace conflict
+// (NamespaceConflictResponse in k8s-stack-manager): a short error, a
+// message for the user and free name suggestions.
+type ConflictResponse struct {
+	Error       string   `json:"error" yaml:"error"`
+	Message     string   `json:"message" yaml:"message"`
+	Suggestions []string `json:"suggestions" yaml:"suggestions"`
+}
+
+// UIConfig is the response of the public GET /api/v1/ui-config. Servers
+// before k8s-stack-manager v0.12.0 do not send MaxInstanceTTLDays (0).
+type UIConfig struct {
+	Title                     string `json:"title" yaml:"title"`
+	DefaultInstanceTTLMinutes int    `json:"default_instance_ttl_minutes" yaml:"default_instance_ttl_minutes"`
+	MaxInstanceTTLDays        int    `json:"max_instance_ttl_days" yaml:"max_instance_ttl_days"`
 }
 
 // LoginRequest is the request body for POST /api/v1/auth/login.
@@ -712,10 +753,14 @@ type InstantiateTemplateRequest struct {
 }
 
 // QuickDeployRequest is the request body for POST /api/v1/templates/:id/quick-deploy.
+// TTLMinutes nil keeps the server default TTL. ExpiresAt sets a fixed
+// stop time; do not send it with TTLMinutes.
 type QuickDeployRequest struct {
-	Name      string `json:"instance_name" yaml:"instance_name"`
-	Branch    string `json:"branch,omitempty" yaml:"branch,omitempty"`
-	ClusterID string `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	Name       string     `json:"instance_name" yaml:"instance_name"`
+	Branch     string     `json:"branch,omitempty" yaml:"branch,omitempty"`
+	ClusterID  string     `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	TTLMinutes *int       `json:"ttl_minutes,omitempty" yaml:"ttl_minutes,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
 }
 
 // CreateDefinitionRequest is the request body for POST /api/v1/stack-definitions.
