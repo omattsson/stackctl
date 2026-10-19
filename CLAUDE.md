@@ -27,7 +27,9 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
     version.go                # Version info (build-time ldflags)
     login.go                  # login, logout, whoami, auth register
     token.go                  # Token helpers (save/load/delete session, fresh token for plugins)
-    stack.go                  # stack list/get/create/deploy/stop/clean/delete/status/logs/clone/extend/values/compare/history/rollback/history-values/watch
+    stack.go                  # stack list/get/create/update/deploy/stop/clean/delete/status/logs/clone/extend/values/compare/history/rollback/history-values/watch
+    ttl.go                    # --ttl/--stop-at/--until parsing, TTL limit check (GET /api/v1/ui-config, 30-day fallback), expiry text
+    server.go                 # server info (ping, ui-config; public routes, no credentials)
     template.go               # template list/get/create/update/clone/publish/unpublish/versions/instantiate/quick-deploy/delete
     definition.go             # definition list/get/create/update/delete/export/import/update-chart
     override.go               # override list/get/set/unset/delete, branch overrides, quota overrides (quota set merges with GET, --replace)

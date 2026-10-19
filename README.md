@@ -220,7 +220,13 @@ stackctl stack list --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -o json
 
 # Create and deploy
 stackctl stack create --definition example-dev --name my-app --branch feature/xyz --ttl 480
+stackctl stack create --definition example-dev --name my-app --stop-at "2026-10-17 18:00"   # fixed stop time
 stackctl stack deploy my-app
+
+# Rename, change the branch, the TTL or the stop time (only the given flags change)
+stackctl stack update my-app --name my-app-2
+stackctl stack update my-app --branch feature/abc
+stackctl stack update my-app --ttl 0   # clear the expiry
 
 # Monitor
 stackctl stack status my-app
@@ -234,9 +240,15 @@ stackctl stack delete my-app
 
 # Clone an existing instance
 stackctl stack clone my-app
+stackctl stack clone my-app --ttl 240
 
 # Add 120 minutes to the stack's expiry (never shortens it); prints the old and the new expiry
 stackctl stack extend my-app --minutes 120
+# Set the expiry to a later time
+stackctl stack extend my-app --until "2026-10-17 18:00"
+
+# Server URL, reachability, default TTL and TTL limit (no login needed)
+stackctl server info
 
 # Deployment history and rollback
 stackctl stack history my-app
@@ -250,7 +262,13 @@ stackctl stack rollback my-app --target-log <log-id>
 
 `stack list`, `stack get`, `definition list/get` and `template get` show the owner, cluster and definition names when the server sends them (`owner_username`, `cluster_name`, `definition_name`). Otherwise they show the IDs. The `stack get` table shows `Cluster` and `Definition` (before: `Cluster ID` and `Definition ID`) as "name (id)" or the ID.
 
-`stack extend --minutes N` adds N minutes to the current expiry, or to now when the stack has expired. It never makes the expiry earlier and does not change the TTL of the stack. The server caps the new expiry at 30 days from now. An older server ignores `--minutes` and resets the expiry to now + TTL (see Server version requirements). stackctl detects this: it prints the old and the new expiry, then fails (exit code 1) with "the server did not add N minutes ... upgrade k8s-stack-manager to v0.6.0 or later". 
+`stack extend --minutes N` adds N minutes to the current expiry, or to now when the stack has expired. It never makes the expiry earlier and does not change the TTL of the stack. The server caps the new expiry at the TTL limit of the server (30 days by default) from now. An older server ignores `--minutes` and resets the expiry to now + TTL (see Server version requirements). stackctl detects this: it prints the old and the new expiry, then fails (exit code 1) with "the server did not add N minutes ... upgrade k8s-stack-manager to v0.6.0 or later". 
+
+`stack extend --until TIME` sets the expiry to TIME. TIME must be after the current expiry and at most the TTL limit of the server from now.
+
+`--stop-at` (`stack create`, `clone`, `update`, `template quick-deploy`) sets a fixed stop time: the TTL becomes 0 and the stack stops at that time. `--stop-at` and `--until` accept RFC 3339 (`2026-10-17T18:00:00+02:00`) or a local time without a zone (`2026-10-17 18:00`). stackctl sends the time in UTC. `stack create --ttl 0` now sends 0 (no expiry); without `--ttl` the server applies its default TTL. `--ttl` and `--stop-at` together, a stop time in the past or a bad format are usage errors; stackctl sends no request. Before the request, stackctl also refuses a `--ttl`, a `--stop-at` or an `--until` above the TTL limit of the server (`max_instance_ttl_days` of `GET /api/v1/ui-config`; 30 days for an older server). `stack list` (column `EXPIRES`) and `stack get` show a fixed stop time as `stops at <time>`. A deploy after the stop time fails with 409: set a new stop time or a TTL with `stack update`.
+
+`stack update --name` must be a DNS label (lowercase a-z, 0-9 and `-`, at most 50 characters). The namespace does not change. When another stack on the cluster has the name, stackctl prints the server message and the free names, for example `Conflict: A stack named "my-app" already exists on this cluster (owner: alice). Free names: my-app-2, my-app-3`. `stack create`, `clone` and `template quick-deploy` print the same message for a name conflict.
 
 `--reset-ttl M` (deprecated) keeps the old behaviour: the TTL becomes M minutes and the expiry now + M minutes, which can be earlier. `--yes` has no effect and is accepted for older scripts.
 
@@ -537,6 +555,7 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 - `override`: also `list`, `unset`, `branch list|set|delete`, `quota get|set|delete`
 - `user`: `list`, `delete`, `disable`, `enable`, `reset-password`, `set-role`
 - `orphaned`: `list`, `delete`
+- `server`: `info` (server URL, ping, default TTL and TTL limit; no login needed)
 - `version`: print the stackctl version
 
 ## Server version requirements
@@ -546,6 +565,7 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 | `stack extend --minutes`, template draft and release, `template publish --version` | v0.6.0 or later |
 | Owner, cluster and definition names in output, audit action and entity type values, paged `--mine` and name queries, quota override limit check, quota warning on `stack clone` | v0.7.0 or later |
 | `--follow` and `stack watch` with an API key, `bulk delete` with clean first, `orphaned delete --confirm`, `user set-role` | v0.8.0 or later |
+| `--stop-at`, `stack extend --until`, the TTL limit of `server info` and of the local check (an older server ignores `--stop-at` and `--until`: stackctl shows the result and exits with code 1; it uses 30 days as the limit) | v0.12.0 or later |
 
 ## Output Formats
 

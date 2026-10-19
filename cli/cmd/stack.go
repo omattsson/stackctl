@@ -356,7 +356,7 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(resp)
 		default:
-			headers := []string{"ID", "NAME", "STATUS", "OWNER", "BRANCH", "CLUSTER", "DEPLOYED AT"}
+			headers := []string{"ID", "NAME", "STATUS", "OWNER", "BRANCH", "CLUSTER", "DEPLOYED AT", "EXPIRES"}
 			rows := make([][]string, len(resp.Data))
 			for i, s := range resp.Data {
 				cluster := s.ClusterName
@@ -371,6 +371,7 @@ Examples:
 					s.Branch,
 					cluster,
 					formatTime(s.DeployedAt),
+					expiryText(s.TTLMinutes, s.ExpiresAt),
 				}
 			}
 			return printer.PrintTable(headers, rows)
@@ -448,20 +449,26 @@ The --definition flag accepts either a definition name or ID.
 Examples:
   stackctl stack create --name my-stack --definition example-dev
   stackctl stack create --name my-stack --definition e9af3b10-4633-436b-a131-975a3b598e3e
-  stackctl stack create --name my-stack --definition example-dev --branch feature/xyz --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --ttl 120`,
+  stackctl stack create --name my-stack --definition example-dev --branch feature/xyz --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --ttl 120
+  stackctl stack create --name my-stack --definition example-dev --stop-at "2026-10-17 18:00"
+
+` + expiryFlagsHelp,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, _ := cmd.Flags().GetString("name")
 		defNameOrID, _ := cmd.Flags().GetString("definition")
 		branch, _ := cmd.Flags().GetString("branch")
 		clusterID, _ := cmd.Flags().GetString("cluster")
-		ttl, _ := cmd.Flags().GetInt("ttl")
-		if ttl < 0 {
-			return fmt.Errorf("--ttl must be a non-negative integer (0 means no TTL)")
+		expiry, err := readExpiryFlags(cmd)
+		if err != nil {
+			return err
 		}
 
 		c, err := newClient()
 		if err != nil {
+			return err
+		}
+		if err := checkExpiryLimit(c, expiry); err != nil {
 			return err
 		}
 
@@ -475,7 +482,8 @@ Examples:
 			StackDefinitionID: defID,
 			Branch:            branch,
 			ClusterID:         clusterID,
-			TTLMinutes:        ttl,
+			TTLMinutes:        expiry.ttl,
+			ExpiresAt:         expiry.stopAt,
 		}
 
 		created, err := c.CreateStack(req)
@@ -483,7 +491,83 @@ Examples:
 			return err
 		}
 
-		return printInstance(created)
+		if err := printInstance(created); err != nil {
+			return err
+		}
+		return checkStopApplied("stop-at", expiry.stopAt, created)
+	},
+}
+
+var stackUpdateCmd = &cobra.Command{
+	Use:   "update <name|id>",
+	Short: "Rename a stack instance, or change its branch, TTL or stop time",
+	Long: `Change the name, the branch, the TTL or the fixed stop time of a stack
+instance (a partial update: the command sends only the flags you give).
+
+--name renames the stack. The name must be a DNS label (lowercase a-z, 0-9
+and '-', start and end with a letter or digit, at most 50 characters). The
+namespace does not change. When the server refuses the name (another stack
+on the cluster has it), the command prints the message and the free names.
+
+--ttl sets a new TTL from now. --ttl 0 clears the expiry. --stop-at sets a
+fixed stop time.
+
+A new branch applies at the next deploy.
+
+Examples:
+  stackctl stack update my-stack --name my-stack-2
+  stackctl stack update my-stack --branch feature/xyz
+  stackctl stack update my-stack --ttl 0
+  stackctl stack update my-stack --stop-at 2026-10-17T18:00:00+02:00
+
+` + expiryFlagsHelp,
+	Args:         cobra.ExactArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		expiry, err := readExpiryFlags(cmd)
+		if err != nil {
+			return err
+		}
+		req := &types.UpdateStackRequest{TTLMinutes: expiry.ttl, ExpiresAt: expiry.stopAt}
+		if cmd.Flags().Changed("name") {
+			name, _ := cmd.Flags().GetString("name")
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("--name cannot be empty")
+			}
+			req.Name = &name
+		}
+		if cmd.Flags().Changed("branch") {
+			branch, _ := cmd.Flags().GetString("branch")
+			if strings.TrimSpace(branch) == "" {
+				return fmt.Errorf("--branch cannot be empty")
+			}
+			req.Branch = &branch
+		}
+		if req.Name == nil && req.Branch == nil && req.TTLMinutes == nil && req.ExpiresAt == nil {
+			return fmt.Errorf("nothing to update: set --name, --branch, --ttl or --stop-at")
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+
+		id, err := resolveStackID(c, args[0])
+		if err != nil {
+			return err
+		}
+		if err := checkExpiryLimit(c, expiry); err != nil {
+			return err
+		}
+
+		updated, err := c.UpdateStack(id, req)
+		if err != nil {
+			return err
+		}
+		if err := printInstance(updated); err != nil {
+			return err
+		}
+		return checkStopApplied("stop-at", expiry.stopAt, updated)
 	},
 }
 
@@ -887,12 +971,24 @@ quota (admin and devops can copy a higher override). When the server does
 not copy the quota override, the command writes its warning to stderr
 (k8s-stack-manager v0.7.0 or later).
 
+Without --ttl and --stop-at the clone gets the TTL of the source, or its
+fixed stop time when that is in the future.
+
 Examples:
   stackctl stack clone my-stack
-  stackctl stack clone my-stack -q`,
+  stackctl stack clone my-stack --ttl 240
+  stackctl stack clone my-stack --stop-at "2026-10-17 18:00"
+  stackctl stack clone my-stack -q
+
+` + expiryFlagsHelp,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		expiry, err := readExpiryFlags(cmd)
+		if err != nil {
+			return err
+		}
+
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -902,8 +998,15 @@ Examples:
 		if err != nil {
 			return err
 		}
+		if err := checkExpiryLimit(c, expiry); err != nil {
+			return err
+		}
 
-		instance, err := c.CloneStack(id)
+		var req *types.CloneStackRequest
+		if expiry.ttl != nil || expiry.stopAt != nil {
+			req = &types.CloneStackRequest{TTLMinutes: expiry.ttl, ExpiresAt: expiry.stopAt}
+		}
+		instance, err := c.CloneStackWith(id, req)
 		if err != nil {
 			return err
 		}
@@ -911,23 +1014,29 @@ Examples:
 
 		if printer.Quiet {
 			fmt.Fprintln(printer.Writer, instance.ID)
-			return nil
+		} else {
+			printer.PrintMessage("Cloned stack %s → new stack %s", id, instance.ID)
 		}
-
-		printer.PrintMessage("Cloned stack %s → new stack %s", id, instance.ID)
-		return nil
+		return checkStopApplied("stop-at", expiry.stopAt, instance)
 	},
 }
 
 var stackExtendCmd = &cobra.Command{
 	Use:   "extend <name|id>",
-	Short: "Add N minutes to the expiry of a stack instance",
-	Long: `Add N minutes to the stack's expiry (never shortens it).
+	Short: "Add N minutes to the expiry of a stack instance, or extend it until a time",
+	Long: `Add N minutes to the stack's expiry (never shortens it), or set the expiry
+to a later time.
 
 --minutes N adds N minutes to the current expiry of the stack, or to now
 when the stack has already expired. The server never makes the expiry
 earlier, does not change the TTL of the stack, and caps the new expiry at
-30 days from now. The output shows the old and the new expiry.
+the TTL limit of the server (30 days by default) from now. The output
+shows the old and the new expiry.
+
+--until TIME sets the expiry to TIME (` + stopAtHelp + `).
+TIME must be after the current expiry and at most the TTL limit of the
+server from now. It works for a TTL and for a fixed stop time and does not
+change the TTL. It needs k8s-stack-manager v0.12.0 or later.
 
 --reset-ttl M is deprecated. It uses the old behaviour of the API: the TTL
 of the stack becomes M minutes and the expiry becomes now + M minutes. This
@@ -938,7 +1047,8 @@ which the command writes to stderr.
 
 Examples:
   stackctl stack extend my-stack --minutes 60
-  stackctl stack extend my-stack --minutes 120 -o json`,
+  stackctl stack extend my-stack --minutes 120 -o json
+  stackctl stack extend my-stack --until "2026-10-17 18:00"`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -946,11 +1056,26 @@ Examples:
 		resetTTL, _ := cmd.Flags().GetInt("reset-ttl")
 		useMinutes := cmd.Flags().Changed("minutes")
 		useReset := cmd.Flags().Changed("reset-ttl")
+		useUntil := cmd.Flags().Changed("until")
+		var until time.Time
+		if useUntil {
+			raw, _ := cmd.Flags().GetString("until")
+			var err error
+			if until, err = parseStopAt("until", raw); err != nil {
+				return err
+			}
+		}
 		switch {
+		case useUntil && useMinutes:
+			return fmt.Errorf("--until and --minutes cannot be used together")
+		case useUntil && useReset:
+			return fmt.Errorf("--until and --reset-ttl cannot be used together")
 		case useMinutes && useReset:
 			return fmt.Errorf("--minutes and --reset-ttl cannot be used together")
-		case !useMinutes && !useReset:
-			return fmt.Errorf("--minutes is required")
+		case !useMinutes && !useReset && !useUntil:
+			return fmt.Errorf("--minutes or --until is required")
+		case useUntil && !until.After(nowFunc()):
+			return fmt.Errorf("--until %s is in the past", until.Format(time.RFC3339))
 		case useMinutes && minutes <= 0:
 			return fmt.Errorf("--minutes must be a positive integer")
 		case useReset && resetTTL <= 0:
@@ -974,6 +1099,26 @@ Examples:
 		}
 		oldExpiry := current.ExpiresAt
 
+		if useUntil {
+			if oldExpiry != nil && !until.After(*oldExpiry) {
+				return fmt.Errorf("--until %s is not after the current expiry %s; stack extend never makes the expiry earlier",
+					until.Format(time.RFC3339), formatTime(oldExpiry))
+			}
+			if maxMinutes, ok := serverMaxTTLMinutes(c); ok {
+				if err := checkStopLimit("until", until, maxMinutes); err != nil {
+					return err
+				}
+			}
+			updated, err := c.ExtendStackUntil(id, until)
+			if err != nil {
+				return err
+			}
+			if err := printExtendUntilResult(id, updated, oldExpiry); err != nil {
+				return err
+			}
+			return checkStopApplied("until", &until, updated)
+		}
+
 		var updated *types.StackInstance
 		if useReset {
 			updated, err = c.ResetStackTTL(id, resetTTL)
@@ -987,9 +1132,17 @@ Examples:
 		// A server without support for "minutes" (before v0.6.0) ignores
 		// the field and resets the expiry to now + TTL. Detect that after
 		// the output, so the result is still shown, and exit non-zero.
+		// The 30-day default cap applies first; only when that check fails,
+		// the command reads the TTL limit of the server (a lower limit caps
+		// the expiry earlier) and checks again.
 		var notAdded error
 		if !useReset {
-			notAdded = checkMinutesAdded(minutes, oldExpiry, updated)
+			notAdded = checkMinutesAdded(minutes, oldExpiry, updated, defaultMaxTTLDays*24*60)
+			if notAdded != nil {
+				if maxMinutes, ok := serverMaxTTLMinutes(c); ok && maxMinutes != defaultMaxTTLDays*24*60 {
+					notAdded = checkMinutesAdded(minutes, oldExpiry, updated, maxMinutes)
+				}
+			}
 		}
 
 		if err := printExtendResult(id, updated, oldExpiry, useReset, minutes, resetTTL); err != nil {
@@ -1023,20 +1176,36 @@ func printExtendResult(id string, updated *types.StackInstance, oldExpiry *time.
 	}
 }
 
+// printExtendUntilResult prints the result of stack extend --until.
+func printExtendUntilResult(id string, updated *types.StackInstance, oldExpiry *time.Time) error {
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, id)
+		return nil
+	}
+
+	switch printer.Format {
+	case output.FormatJSON:
+		return printer.PrintJSON(updated)
+	case output.FormatYAML:
+		return printer.PrintYAML(updated)
+	default:
+		printer.PrintMessage("Extended stack %s", id)
+		printer.PrintMessage("Old expiry: %s", formatTime(oldExpiry))
+		printer.PrintMessage("New expiry: %s", formatTime(updated.ExpiresAt))
+		return nil
+	}
+}
+
 // extendTolerance covers the time between the GET of the old expiry and
 // the extend call, and rounding on the server.
 const extendTolerance = 2 * time.Minute
 
-// maxExtendMinutes is the cap of the server: the new expiry is at most
-// now + 30 days.
-const maxExtendMinutes = 43200
-
 // checkMinutesAdded returns an error when the server did not add minutes
 // to the expiry: the new expiry is earlier than max(old expiry, server
-// time) + minutes (minus extendTolerance) and is not at the 30-day cap. The
-// server time is updated_at of the response (the server sets it on extend),
-// else the local clock.
-func checkMinutesAdded(minutes int, oldExpiry *time.Time, updated *types.StackInstance) error {
+// time) + minutes (minus extendTolerance) and is not at the cap of the
+// server (now + capMinutes). The server time is updated_at of the response
+// (the server sets it on extend), else the local clock.
+func checkMinutesAdded(minutes int, oldExpiry *time.Time, updated *types.StackInstance, capMinutes int) error {
 	serverNow := updated.UpdatedAt
 	if serverNow.IsZero() {
 		serverNow = nowFunc()
@@ -1046,7 +1215,7 @@ func checkMinutesAdded(minutes int, oldExpiry *time.Time, updated *types.StackIn
 		base = *oldExpiry
 	}
 	expected := base.Add(time.Duration(minutes) * time.Minute)
-	capAt := serverNow.Add(maxExtendMinutes * time.Minute)
+	capAt := serverNow.Add(time.Duration(capMinutes) * time.Minute)
 
 	newExpiry := updated.ExpiresAt
 	if newExpiry != nil && (!newExpiry.Before(expected.Add(-extendTolerance)) || !newExpiry.Before(capAt.Add(-extendTolerance))) {
@@ -1584,7 +1753,18 @@ func init() {
 	stackCreateCmd.Flags().String("definition", "", "Stack definition name or ID (required)")
 	stackCreateCmd.Flags().String("branch", "", "Git branch")
 	stackCreateCmd.Flags().String("cluster", "", "Target cluster ID")
-	stackCreateCmd.Flags().Int("ttl", 0, "Time to live in minutes")
+	stackCreateCmd.Flags().Int("ttl", 0, "Time to live in minutes (0 means no expiry; default: the server default)")
+	stackCreateCmd.Flags().String("stop-at", "", stopAtFlagUsage)
+
+	// stack clone flags
+	stackCloneCmd.Flags().Int("ttl", 0, "Time to live of the clone in minutes (0 means no expiry; default: the TTL of the source)")
+	stackCloneCmd.Flags().String("stop-at", "", stopAtFlagUsage)
+
+	// stack update flags
+	stackUpdateCmd.Flags().String("name", "", "New name (a DNS label: lowercase a-z, 0-9 and '-', at most 50 characters)")
+	stackUpdateCmd.Flags().String("branch", "", "New branch of the stack")
+	stackUpdateCmd.Flags().Int("ttl", 0, "New TTL in minutes from now (0 clears the expiry)")
+	stackUpdateCmd.Flags().String("stop-at", "", stopAtFlagUsage)
 	_ = stackCreateCmd.MarkFlagRequired("name")
 	_ = stackCreateCmd.MarkFlagRequired("definition")
 
@@ -1610,6 +1790,7 @@ func init() {
 
 	// stack extend flags
 	stackExtendCmd.Flags().Int("minutes", 0, "Add N minutes to the stack's expiry (never shortens it)")
+	stackExtendCmd.Flags().String("until", "", "Set the expiry to this time: "+stopAtHelp)
 	stackExtendCmd.Flags().Int("reset-ttl", 0, "Deprecated: set the TTL to M minutes and the expiry to now + M (can shorten the expiry)")
 	// --yes had a confirmation to skip in older versions; it has no effect now.
 	stackExtendCmd.Flags().BoolP("yes", "y", false, "No effect; kept for compatibility with older scripts")
@@ -1631,6 +1812,7 @@ func init() {
 	stackCmd.AddCommand(stackListCmd)
 	stackCmd.AddCommand(stackGetCmd)
 	stackCmd.AddCommand(stackCreateCmd)
+	stackCmd.AddCommand(stackUpdateCmd)
 	stackCmd.AddCommand(stackDeployCmd)
 	stackCmd.AddCommand(stackStopCmd)
 	stackCmd.AddCommand(stackCleanCmd)
@@ -1998,8 +2180,8 @@ func printInstanceWithURLs(instance *types.StackInstance, urls []string) error {
 			{Key: "Namespace", Value: instance.Namespace},
 			{Key: "Cluster", Value: displayNameWithID(instance.ClusterName, clusterID)},
 			{Key: "Definition", Value: displayNameWithID(instance.DefinitionName, instance.StackDefinitionID)},
-			{Key: "TTL", Value: strconv.Itoa(instance.TTLMinutes) + " minutes"},
-			{Key: "Expires At", Value: formatTime(instance.ExpiresAt)},
+			{Key: "TTL", Value: ttlText(instance.TTLMinutes, instance.ExpiresAt)},
+			{Key: "Expires At", Value: expiryText(instance.TTLMinutes, instance.ExpiresAt)},
 			{Key: "Deployed At", Value: formatTime(instance.DeployedAt)},
 			{Key: "Created At", Value: instance.CreatedAt.Format(time.RFC3339)},
 		}
