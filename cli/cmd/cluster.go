@@ -186,7 +186,7 @@ Examples:
 var clusterSharedValuesCmd = &cobra.Command{
 	Use:   "shared-values",
 	Short: "Manage cluster-level shared Helm values",
-	Long:  "List, create, and delete shared Helm values that apply to all deployments on a cluster.",
+	Long:  "List, create, update and delete shared Helm values that apply to all deployments on a cluster.",
 }
 
 var clusterSharedValuesListCmd = &cobra.Command{
@@ -255,8 +255,10 @@ Examples:
 
 var clusterSharedValuesSetCmd = &cobra.Command{
 	Use:   "set <cluster-id>",
-	Short: "Create or update shared values for a cluster",
-	Long: `Create or update shared Helm values for a cluster.
+	Short: "Create a shared values entry for a cluster",
+	Long: `Create a shared Helm values entry for a cluster. Each call creates a new
+entry, also when the name exists. To change an entry, use
+'stackctl cluster shared-values update'.
 
 Values are provided via --file (JSON or YAML) and/or --set key=value flags,
 following the same syntax as 'override set'.
@@ -340,6 +342,140 @@ Examples:
 			return printer.PrintYAML(sv)
 		default:
 			printer.PrintMessage("Set shared values %q for cluster %s", sv.Name, id)
+			return nil
+		}
+	},
+}
+
+var clusterSharedValuesUpdateCmd = &cobra.Command{
+	Use:   "update <cluster-id> <shared-values>",
+	Short: "Update a shared values entry of a cluster",
+	Long: `Update a shared values entry of a cluster (admin). <shared-values> is the
+ID or the name of the entry. The ID stays the same. The merge order follows
+the priority, then the name.
+
+--file replaces the values with the file (JSON or YAML). --set changes
+single keys of the values (after --file when both are given), with the
+same syntax as 'override set'. --name, --description and --priority
+replace these fields. The other fields keep their values: the command
+reads the entry first and sends the full record. The read and the write
+are not atomic: a change by another user between them is overwritten.
+
+--set writes the stored values again as YAML. Comments, the key order,
+anchors and a second YAML document are then not kept; the command writes a
+note to stderr when this changes the text. --name, --description and
+--priority alone do not change the values text.
+
+Examples:
+  stackctl cluster shared-values update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e local-dev-defaults --set persistence.storageClass=fast
+  stackctl cluster shared-values update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e local-dev-defaults --file values.yaml
+  stackctl cluster shared-values update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e 6e7f8a9b-0c1d-4e2f-8a3b-4c5d6e7f8a9b --priority 20`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		clusterID, err := parseID(args[0])
+		if err != nil {
+			return err
+		}
+		file, _ := cmd.Flags().GetString("file")
+		setFlags, _ := cmd.Flags().GetStringArray("set")
+		changed := file != "" || len(setFlags) > 0
+		for _, f := range []string{"name", "description", "priority"} {
+			changed = changed || cmd.Flags().Changed(f)
+		}
+		if !changed {
+			return fmt.Errorf("nothing to update: set --name, --description, --priority, --file or --set")
+		}
+		if err := checkNoPathTraversal(file); err != nil {
+			return err
+		}
+		sets, err := parseSetFlags(setFlags)
+		if err != nil {
+			return err
+		}
+
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		list, err := c.ListSharedValues(clusterID)
+		if err != nil {
+			return err
+		}
+		var current *types.SharedValues
+		for i := range list {
+			if strings.EqualFold(list[i].ID, args[1]) || list[i].Name == args[1] {
+				if current != nil {
+					return fmt.Errorf("more than one shared values entry is named %q: use the ID", args[1])
+				}
+				current = &list[i]
+			}
+		}
+		if current == nil {
+			return fmt.Errorf("shared values %q not found on cluster %s", args[1], clusterID)
+		}
+
+		req := &types.UpdateSharedValuesRequest{
+			Name: current.Name, Description: current.Description, Values: current.Values, Priority: current.Priority,
+		}
+		if cmd.Flags().Changed("name") {
+			req.Name, _ = cmd.Flags().GetString("name")
+		}
+		if cmd.Flags().Changed("description") {
+			req.Description, _ = cmd.Flags().GetString("description")
+		}
+		if cmd.Flags().Changed("priority") {
+			req.Priority, _ = cmd.Flags().GetInt("priority")
+		}
+		if file != "" || len(sets) > 0 {
+			values := map[string]interface{}{}
+			source := []byte(current.Values)
+			if file != "" {
+				file = filepath.Clean(file)
+				if source, err = os.ReadFile(file); err != nil {
+					return readFileErr(file, err)
+				}
+			}
+			if strings.TrimSpace(string(source)) != "" {
+				if values, err = parseValuesDocument(source); err != nil {
+					if file != "" {
+						return fmt.Errorf("invalid JSON/YAML in file %s: %w", file, err)
+					}
+					return fmt.Errorf("the stored values of %q are not a YAML mapping (%v): use --file to replace them", current.Name, err)
+				}
+			}
+			if file == "" {
+				// Tell the user when the YAML round trip changes the stored
+				// text (comments, key order, anchors, more documents).
+				if same, err := yaml.Marshal(values); err == nil && strings.TrimSpace(string(same)) != strings.TrimSpace(current.Values) {
+					fmt.Fprintln(cmd.ErrOrStderr(), "Note: --set writes the stored values again as YAML; comments, the key order and anchors are not kept.")
+				}
+			}
+			for _, kv := range sets {
+				setNestedPath(values, kv.path, kv.value)
+			}
+			out, err := yaml.Marshal(values)
+			if err != nil {
+				return fmt.Errorf("serializing values to YAML: %w", err)
+			}
+			req.Values = string(out)
+		}
+
+		sv, err := c.UpdateSharedValues(clusterID, current.ID, req)
+		if err != nil {
+			return err
+		}
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, sv.ID)
+			return nil
+		}
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(sv)
+		case output.FormatYAML:
+			return printer.PrintYAML(sv)
+		default:
+			printer.PrintMessage("Updated shared values %q (%s) on cluster %s", sv.Name, sv.ID, clusterID)
 			return nil
 		}
 	},
@@ -1172,6 +1308,12 @@ func init() {
 	clusterSharedValuesSetCmd.Flags().Int("priority", 0, "Merge priority (higher = applied later)")
 	_ = clusterSharedValuesSetCmd.MarkFlagRequired("name")
 
+	clusterSharedValuesUpdateCmd.Flags().String("name", "", "New name")
+	clusterSharedValuesUpdateCmd.Flags().String("description", "", "New description")
+	clusterSharedValuesUpdateCmd.Flags().String("file", "", "JSON or YAML file that replaces the values")
+	clusterSharedValuesUpdateCmd.Flags().StringArray("set", nil, "Change a value (key=value, dots for nested keys, \\. for a literal dot), repeatable")
+	clusterSharedValuesUpdateCmd.Flags().Int("priority", 0, "New merge priority (higher = applied later)")
+
 	// shared-values delete flags
 	clusterSharedValuesDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)
 	clusterSharedValuesDeleteCmd.Flags().Bool("dry-run", false, "Show what would happen without executing")
@@ -1198,6 +1340,7 @@ func init() {
 	// Wire up shared-values subcommands
 	clusterSharedValuesCmd.AddCommand(clusterSharedValuesListCmd)
 	clusterSharedValuesCmd.AddCommand(clusterSharedValuesSetCmd)
+	clusterSharedValuesCmd.AddCommand(clusterSharedValuesUpdateCmd)
 	clusterSharedValuesCmd.AddCommand(clusterSharedValuesDeleteCmd)
 
 	// cluster quota set flags

@@ -18,6 +18,7 @@ authenticated user.
   list   — show all favorites (default table; --quiet prints entity IDs)
   add    — favorite an entity by --type/--id (idempotent server-side)
   remove — un-favorite an entity by --type/--id (idempotent server-side)
+  check  — show whether an entity is a favorite (yes or no)
 
 The "entity type" must be one of: definition, instance, template.
 Favorites are scoped to the calling user; no admin gate.`,
@@ -34,7 +35,48 @@ var (
 	favoriteAddID      string
 	favoriteRemoveType string
 	favoriteRemoveID   string
+	favoriteCheckType  string
+	favoriteCheckID    string
 )
+
+var favoriteCheckCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Show whether an entity is a favorite",
+	Long: `Show whether an entity (--type and --id) is one of your favorites. The
+command prints "yes" or "no" (also with -q). -o json and -o yaml print
+{"is_favorite": true|false}. The exit code is 0 in both cases.
+
+Examples:
+  stackctl favorite check --type instance --id 550e8400-e29b-41d4-a716-446655440000
+  stackctl favorite check --type template --id 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f -o json`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateFavoriteType(favoriteCheckType); err != nil {
+			return err
+		}
+		id, err := parseID(favoriteCheckID)
+		if err != nil {
+			return err
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		fav, err := c.CheckFavorite(favoriteCheckType, id)
+		if err != nil {
+			return err
+		}
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(map[string]bool{"is_favorite": fav})
+		case output.FormatYAML:
+			return printer.PrintYAML(map[string]bool{"is_favorite": fav})
+		default:
+			fmt.Fprintln(printer.Writer, yesNo(fav))
+			return nil
+		}
+	},
+}
 
 // favoriteEntityTypes mirrors the backend allowlist
 // (backend/internal/models/user_favorite.go validFavoriteEntityTypes).
@@ -201,6 +243,11 @@ func init() {
 	favoriteCmd.AddCommand(favoriteListCmd)
 	favoriteCmd.AddCommand(favoriteAddCmd)
 	favoriteCmd.AddCommand(favoriteRemoveCmd)
+
+	favoriteCheckCmd.Flags().StringVar(&favoriteCheckType, "type", "", "Entity type (definition, instance, template) — required")
+	favoriteCheckCmd.Flags().StringVar(&favoriteCheckID, "id", "", "Entity ID — required")
+	_ = favoriteCheckCmd.MarkFlagRequired("id")
+	favoriteCmd.AddCommand(favoriteCheckCmd)
 	rootCmd.AddCommand(favoriteCmd)
 }
 
@@ -212,6 +259,8 @@ func ResetFavoriteFlagsForTest() {
 	favoriteAddID = ""
 	favoriteRemoveType = ""
 	favoriteRemoveID = ""
+	favoriteCheckType = ""
+	favoriteCheckID = ""
 }
 
 // Internal alias for cmd-package test files.

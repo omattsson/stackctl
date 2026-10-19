@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -162,10 +163,26 @@ blocks the access token and revokes the refresh token. When the server
 cannot be reached, stackctl prints a warning and still removes the local
 token.
 
-Example:
-  stackctl logout`,
+--all first ends every session of your user on the server (POST
+/api/v1/auth/logout-all: the server revokes all refresh tokens of the
+user), for example after a lost laptop. Sessions on other machines then end
+when their access token expires. When this call fails, the command stops
+with an error and keeps the local token, so you can try again. --all uses
+the login session of the context; without a session it uses the API key
+and ends the sessions of the user of the key. The key itself stays valid
+(use 'stackctl apikey revoke').
+
+Examples:
+  stackctl logout
+  stackctl logout --all`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if all, _ := cmd.Flags().GetBool("all"); all {
+			if err := logoutAllSessions(); err != nil {
+				return err
+			}
+			printer.PrintMessage("Ended all sessions of your user on the server")
+		}
 		if err := logoutSession(cmd.ErrOrStderr()); err != nil {
 			return err
 		}
@@ -385,6 +402,40 @@ func bestEffortLogout(apiURL, token, refreshToken string) {
 	_ = c.Logout(refreshToken)
 }
 
+// logoutAllSessions calls logout-all for the user of the login session of
+// the context, or for the user of the API key when there is no session. An
+// expired access token gets one renewal and one more try.
+func logoutAllSessions() error {
+	c, err := newClient()
+	if err != nil {
+		return err
+	}
+	if c.APIKey != "" {
+		// newClient prefers the API key; the session user is the one to log
+		// out when a token file exists.
+		if token, _, _ := loadToken(); token != "" {
+			c.APIKey = ""
+			c.Token = token
+			if store := tokenStore(); store != nil {
+				c.Tokens = store
+			}
+		}
+	}
+	if c.APIKey == "" && c.Token == "" {
+		return fmt.Errorf("not logged in: run 'stackctl login' first, or set an API key")
+	}
+	err = c.LogoutAll()
+	if isStatus(err, http.StatusUnauthorized) {
+		if renewed, rerr := c.RenewSession(); rerr == nil && renewed {
+			err = c.LogoutAll()
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("ending all sessions on the server: %w", err)
+	}
+	return nil
+}
+
 // logoutSession ends the stored session on the server and removes the
 // local token. It holds the token lock, so no other stackctl process renews
 // the session at the same time. A server error is written to warn as a
@@ -540,6 +591,7 @@ func init() {
 	authCmd.AddCommand(authRegisterCmd)
 
 	rootCmd.AddCommand(loginCmd)
+	logoutCmd.Flags().Bool("all", false, "End every session of your user on the server (all devices) first")
 	rootCmd.AddCommand(logoutCmd)
 	rootCmd.AddCommand(whoamiCmd)
 	rootCmd.AddCommand(authCmd)

@@ -1456,6 +1456,16 @@ func (c *Client) DeleteValueOverride(instanceID, chartID string) error {
 	return c.Delete(fmt.Sprintf(pathOverride, instanceID, chartID))
 }
 
+// GetBranchOverride returns the branch override of one chart of a stack
+// instance. A chart without an override gives a 404 "override not found".
+func (c *Client) GetBranchOverride(instanceID, chartID string) (*types.BranchOverride, error) {
+	var o types.BranchOverride
+	if err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/branches/%s", instanceID, chartID), &o); err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
 // ListBranchOverrides returns all branch overrides for a stack instance.
 func (c *Client) ListBranchOverrides(instanceID string) ([]types.BranchOverride, error) {
 	var overrides []types.BranchOverride
@@ -1787,6 +1797,36 @@ func (c *Client) SetSharedValues(clusterID string, req *types.SetSharedValuesReq
 		return nil, err
 	}
 	return &sv, nil
+}
+
+// UpdateSharedValues replaces a shared values entry of a cluster (admin).
+func (c *Client) UpdateSharedValues(clusterID, sharedValuesID string, req *types.UpdateSharedValuesRequest) (*types.SharedValues, error) {
+	var sv types.SharedValues
+	if err := c.Put(fmt.Sprintf(pathSharedValuesID, clusterID, sharedValuesID), req, &sv); err != nil {
+		return nil, err
+	}
+	return &sv, nil
+}
+
+// GetDashboard returns the landing page overview (GET /api/v1/dashboard).
+func (c *Client) GetDashboard() (*types.Dashboard, error) {
+	var d types.Dashboard
+	if err := c.Get("/api/v1/dashboard", &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// CheckFavorite reports whether an entity is a favorite of the caller.
+func (c *Client) CheckFavorite(entityType, entityID string) (bool, error) {
+	var resp struct {
+		IsFavorite bool `json:"is_favorite"`
+	}
+	params := map[string]string{"entity_type": entityType, "entity_id": entityID}
+	if err := c.GetWithQuery("/api/v1/favorites/check", params, &resp); err != nil {
+		return false, err
+	}
+	return resp.IsFavorite, nil
 }
 
 // DeleteSharedValues deletes shared values from a cluster.

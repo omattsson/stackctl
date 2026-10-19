@@ -1406,10 +1406,80 @@ type SetQuotaOverrideRequest struct {
 // SharedValues represents cluster-level shared Helm values.
 type SharedValues struct {
 	Base
-	ClusterID string `json:"cluster_id" yaml:"cluster_id"`
-	Name      string `json:"name" yaml:"name"`
-	Values    string `json:"values" yaml:"values"`
-	Priority  int    `json:"priority" yaml:"priority"`
+	ClusterID   string `json:"cluster_id" yaml:"cluster_id"`
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Values      string `json:"values" yaml:"values"`
+	Priority    int    `json:"priority" yaml:"priority"`
+}
+
+// UpdateSharedValuesRequest is the body of PUT
+// /api/v1/clusters/:id/shared-values/:valueId. The server replaces every
+// field, so the caller sends the full record.
+type UpdateSharedValuesRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Values      string `json:"values"`
+	Priority    int    `json:"priority"`
+}
+
+// Dashboard is the response of GET /api/v1/dashboard. It covers the
+// stacks of all users. For the role user, Clusters has only the ID and the
+// name of each cluster (no health data).
+type Dashboard struct {
+	Clusters          []DashboardCluster    `json:"clusters" yaml:"clusters"`
+	RecentDeployments []DashboardDeployment `json:"recent_deployments" yaml:"recent_deployments"`
+	ExpiringSoon      []DashboardExpiring   `json:"expiring_soon" yaml:"expiring_soon"`
+	FailingInstances  []DashboardFailing    `json:"failing_instances" yaml:"failing_instances"`
+}
+
+// DashboardCluster is the health of one cluster on the dashboard.
+type DashboardCluster struct {
+	ID                string `json:"id" yaml:"id"`
+	Name              string `json:"name" yaml:"name"`
+	HealthStatus      string `json:"health_status" yaml:"health_status"`
+	NodeCount         *int   `json:"node_count,omitempty" yaml:"node_count,omitempty"`
+	ReadyNodeCount    *int   `json:"ready_node_count,omitempty" yaml:"ready_node_count,omitempty"`
+	TotalCPU          string `json:"total_cpu,omitempty" yaml:"total_cpu,omitempty"`
+	TotalMemory       string `json:"total_memory,omitempty" yaml:"total_memory,omitempty"`
+	AllocatableCPU    string `json:"allocatable_cpu,omitempty" yaml:"allocatable_cpu,omitempty"`
+	AllocatableMemory string `json:"allocatable_memory,omitempty" yaml:"allocatable_memory,omitempty"`
+	NamespaceCount    *int   `json:"namespace_count,omitempty" yaml:"namespace_count,omitempty"`
+}
+
+// DashboardDeployment is one recent deploy, stop, clean or rollback.
+type DashboardDeployment struct {
+	ID              string     `json:"id" yaml:"id"`
+	StackInstanceID string     `json:"stack_instance_id" yaml:"stack_instance_id"`
+	InstanceName    string     `json:"instance_name" yaml:"instance_name"`
+	Action          string     `json:"action" yaml:"action"`
+	Status          string     `json:"status" yaml:"status"`
+	StartedAt       time.Time  `json:"started_at" yaml:"started_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty" yaml:"completed_at,omitempty"`
+	OwnerUsername   string     `json:"owner_username,omitempty" yaml:"owner_username,omitempty"`
+}
+
+// DashboardExpiring is a stack that expires soon.
+type DashboardExpiring struct {
+	ID         string     `json:"id" yaml:"id"`
+	Name       string     `json:"name" yaml:"name"`
+	Namespace  string     `json:"namespace" yaml:"namespace"`
+	OwnerID    string     `json:"owner_id" yaml:"owner_id"`
+	Status     string     `json:"status" yaml:"status"`
+	ExpiresAt  *time.Time `json:"expires_at" yaml:"expires_at"`
+	TTLMinutes int        `json:"ttl_minutes" yaml:"ttl_minutes"`
+	ClusterID  string     `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+}
+
+// DashboardFailing is a stack with status error or partial.
+type DashboardFailing struct {
+	ID           string    `json:"id" yaml:"id"`
+	Name         string    `json:"name" yaml:"name"`
+	Namespace    string    `json:"namespace" yaml:"namespace"`
+	Status       string    `json:"status" yaml:"status"`
+	ErrorMessage string    `json:"error_message" yaml:"error_message"`
+	ClusterID    string    `json:"cluster_id,omitempty" yaml:"cluster_id,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at" yaml:"updated_at"`
 }
 
 // SetSharedValuesRequest is the request body for creating/updating shared values.

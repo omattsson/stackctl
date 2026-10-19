@@ -25,7 +25,7 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
     root.go                   # Root cobra command, global flags, config loading, flag > env > config (resolveAPIURL, resolveAPIKey)
     config.go                 # config set/get/list/use-context/current-context/delete-context
     version.go                # Version info (build-time ldflags)
-    login.go                  # login, logout, whoami, auth register
+    login.go                  # login, logout (--all: logout-all first), whoami, auth register
     token.go                  # Token helpers (save/load/delete session, fresh token for plugins)
     stack.go                  # stack list/get/create/update/deploy/stop/clean/delete/status/logs/clone/extend/values/compare/history/rollback/history-values/watch
     stack_inspect.go          # stack preview/pods/recent (deploy-preview, live pods and events, recent)
@@ -36,15 +36,16 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
     template.go               # template list/get/create/update/clone/publish/unpublish/versions/instantiate/quick-deploy/delete
     definition.go             # definition list/get/create/update/delete/export/import/update-chart
     chart_changes.go          # definition add-chart/remove-chart/check-upgrade/upgrade/link-template, template add-chart/remove-chart
-    override.go               # override list/get/set/unset/delete, branch overrides, quota overrides (quota set merges with GET, --replace)
+    override.go               # override list/get/set/unset/delete, branch overrides (list/get/set/delete), quota overrides (quota set merges with GET, --replace)
     bulk.go                   # bulk deploy/stop/clean/delete, bulk template publish/unpublish/delete (--ids flag or positional args)
     git.go                    # git providers/branches/validate
-    cluster.go                # cluster list/get/create/update/delete/set-default/test-connection/health/nodes/namespaces/utilization, quota get/set/delete, shared-values list/set/delete
+    cluster.go                # cluster list/get/create/update/delete/set-default/test-connection/health/nodes/namespaces/utilization, quota get/set/delete, shared-values list/set/update/delete (update: GET list, merge, PUT the full record)
     analytics.go              # analytics overview/templates/users
     apikey.go                 # apikey list/create/revoke
     audit.go                  # audit log list/export
     cleanup_policy.go         # cleanup-policy list/get/create/update/delete/run
-    favorite.go               # favorite list/add/remove
+    favorite.go               # favorite list/add/remove/check
+    dashboard.go              # dashboard (GET /api/v1/dashboard: failing, expiring, recent deployments, clusters)
     notification.go           # notification list/count/read/read-all/prefs
     notification_channel.go   # notification channel list/get/create/update/delete/events/subscriptions/subscribe/test/logs (webhook URL masked unless --show-url)
     orphaned.go               # orphaned list/delete
@@ -187,6 +188,10 @@ All API calls go to `/api/v1/*`. Key route groups:
 - `/api/v1/users` — list/delete/disable/enable/password (admin). `PUT /:id/role` `{"role"}` (k8s-stack-manager v0.8.0+, `user set-role <user> <role>`, user by ID or username via `resolveUserID`): response `id`, `old_role`, `new_role`, `changed`; 403 own role / caller not admin, 409 SSO user / last admin, 400 invalid role; a plain 404 (no route) maps to the v0.8.0 upgrade hint (`setRoleError`)
 - `/ws` — the server closes a socket with code 1008 and reason `session revoked` or `token expired`. `Client.Watch` returns a `WatchStream`; `Err()` gives a `*WSClosedError` ("Connection closed by the server: <reason>. Log in again."). `stack watch` exits non-zero on it; for `token expired` it calls `Client.RenewSession` (forced renewal, false without refresh token) and reconnects, at most once per 30 s (`stackWatchMinReconnect`), then with `--id` GETs each pending instance (`watchCatchUp`) so a terminal status in the gap counts. Ctrl-C during renewal or dial exits 0. Another connection loss: `--id` with pending instances exits non-zero ("connection lost before all instances reached a terminal status"), else a stderr note and exit 0. `StreamDeploymentLogs` returns the same `WSClosedError`; `--follow` (`followLogsCtx`, op deploy/stop/clean/rollback, "" for `stack logs -f`) uses the same `renewAfterClose`; it reads the instance after the first connect (the server sets deploying/stopping/cleaning before the 202; not for `logs -f`) and after each reconnect (`StreamOptions.AfterSubscribe`). When it cannot follow to the end it says that the operation continues on the server and points to `stack watch --id` / `stack status` (never "run again"); errors name the operation ("rollback failed (status error): ..."). Terminal statuses live in `client.IsTerminalStatus` (running, stopped, draft, error, partial, failed) and `client.IsFailedStatus` (error, partial, failed → exit 1)
 - `/api/v1/admin/orphaned-namespaces` — `orphaned list [--details]`; `DELETE /:ns?confirm=<ns>` is needed for a namespace without the label managed-by=k8s-stack-manager (409 without it; `orphaned delete --confirm`). `test/contract/path_contract_test.go` checks every `/api/v1` literal of `pkg/client` and `cmd` against the vendored swagger
+- `POST /api/v1/auth/logout-all` — `logout --all`: uses the session token of the context when a token file exists (also when an API key is set), else the API key; a 401 gets one forced `RenewSession` and one retry. On failure the command stops and keeps the token file; on success the normal logout follows.
+- `GET /api/v1/dashboard` — `dashboard`: covers all users; `failing_instances` has status error only, `expiring_soon` the next hour. For the role `user`, `clusters` has ID and name only (no health): the table hides clusters without `health_status`.
+- `GET /api/v1/favorites/check?entity_type=&entity_id=` — `favorite check` prints yes or no (exit 0).
+- `PUT /api/v1/clusters/:id/shared-values/:valueId` replaces the full record (no GET for one entry): `shared-values update` reads the list, merges and sends name, description, values and priority. `--set` re-marshals the stored YAML (comments and key order are lost; a stderr note says so).
 - `/api/v1/admin/notification-channels` (devops or admin) — `notification channel ...`. The responses carry the full `webhook_url` (it can hold a token): every output mode masks it to scheme and host (`maskWebhookURL`) unless `--show-url`. The server never returns the secret; the CLI reads it from `--secret-env NAME` or `--secret-stdin` only. The URL can also come from `--url-env NAME`; error texts never contain the URL. `PUT /:id` changes only the fields sent (`secret: ""` removes the secret; `filters` replaces all filters, `{}` removes them). `PUT /:id/subscriptions` replaces all event types (400 for an unknown one). `POST /:id/test` answers 200 with `success`; the command exits 1 when it is false. Create and update return `warnings` (unknown filter IDs) → stderr.
 - `/api/v1/notifications/preferences` — `notification prefs set` warns for an event type not in `notificationEventTypes` (`notifier.AllEventTypes()` of k8s-stack-manager); v0.8.0+ servers return 400
 - `/api/v1/stack-definitions` — CRUD + export/import

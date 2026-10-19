@@ -588,6 +588,57 @@ Examples:
 	},
 }
 
+var overrideBranchGetCmd = &cobra.Command{
+	Use:   "get <name|id> <chart>",
+	Short: "Show the branch override of a chart",
+	Long: `Show the branch override of one chart in a stack instance.
+
+<chart> is a chart name or a chart ID of the stack's definition. A chart
+without an override gives an error (exit code 1); the chart then uses the
+branch of the stack.
+
+Examples:
+  stackctl override branch get my-stack my-chart
+  stackctl override branch get my-stack my-chart -o json`,
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		instanceID, err := resolveStackID(c, args[0])
+		if err != nil {
+			return err
+		}
+		chartID, err := resolveChartID(c, instanceID, args[1])
+		if err != nil {
+			return err
+		}
+		override, err := c.GetBranchOverride(instanceID, chartID)
+		if err != nil {
+			return overrideError(err, "branch", args[1], args[0])
+		}
+		if printer.Quiet {
+			fmt.Fprintln(printer.Writer, override.ChartConfigID)
+			return nil
+		}
+		switch printer.Format {
+		case output.FormatJSON:
+			return printer.PrintJSON(override)
+		case output.FormatYAML:
+			return printer.PrintYAML(override)
+		default:
+			return printer.PrintSingle(override, []output.KeyValue{
+				{Key: "Chart ID", Value: override.ChartConfigID},
+				{Key: "Instance ID", Value: override.StackInstanceID},
+				{Key: "Branch", Value: override.Branch},
+				{Key: "Updated At", Value: override.UpdatedAt.Format("2006-01-02T15:04:05Z07:00")},
+			})
+		}
+	},
+}
+
 var overrideBranchSetCmd = &cobra.Command{
 	Use:   "set <name|id> <chart> <branch>",
 	Short: "Set a branch override for a chart",
@@ -1006,6 +1057,7 @@ func init() {
 
 	// Wire up branch subcommands
 	overrideBranchCmd.AddCommand(overrideBranchListCmd)
+	overrideBranchCmd.AddCommand(overrideBranchGetCmd)
 	overrideBranchCmd.AddCommand(overrideBranchSetCmd)
 	overrideBranchCmd.AddCommand(overrideBranchDeleteCmd)
 
