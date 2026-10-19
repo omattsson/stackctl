@@ -13,6 +13,7 @@ import (
 	"github.com/omattsson/stackctl/cli/pkg/config"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -45,8 +46,10 @@ Get started:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Initialize printer with Cobra's configured output writer
-		printer = output.NewPrinter(flagOutput, flagQuiet, flagNoColor)
+		// Initialize printer with Cobra's configured output writer. Colors
+		// only go to a terminal: not with --no-color, NO_COLOR
+		// (https://no-color.org) or a stdout that is a pipe or a file.
+		printer = output.NewPrinter(flagOutput, flagQuiet, flagNoColor || noColorEnv() || !isTerminalWriter(cmd.OutOrStdout()))
 		printer.Writer = cmd.OutOrStdout()
 
 		// Skip config loading for commands that should work without a config file
@@ -259,6 +262,17 @@ type configError struct {
 
 func (e *configError) Error() string {
 	return e.msg
+}
+
+// noColorEnv reports whether NO_COLOR is set to a non-empty value.
+func noColorEnv() bool {
+	return os.Getenv("NO_COLOR") != ""
+}
+
+// isTerminalWriter reports whether w is a terminal.
+func isTerminalWriter(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
 // confirmAction prompts the user for confirmation unless --yes is set.

@@ -1017,10 +1017,12 @@ Examples:
 		}
 		printServerWarning(cmd, instance.Warning)
 
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, instance.ID)
-		} else {
+		// Table: a short message. Quiet, JSON, YAML and custom formats:
+		// the instance, as stack create prints it.
+		if printer.Format == output.FormatTable && !printer.Quiet {
 			printer.PrintMessage("Cloned stack %s → new stack %s", id, instance.ID)
+		} else if err := printInstance(instance); err != nil {
+			return err
 		}
 		return checkStopApplied("stop-at", expiry.stopAt, instance)
 	},

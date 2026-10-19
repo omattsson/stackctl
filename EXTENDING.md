@@ -121,7 +121,7 @@ that the user exported in the parent shell is kept.
 | `STACKCTL_INSECURE` | `--insecure` flag, parent shell, or current context `insecure: true` | `1` to skip TLS verification. stackctl exports `0` when the user sets `--insecure=false`. |
 | `STACKCTL_QUIET` | `--quiet` flag | `1` when the user requested quiet output (`0` for `--quiet=false`) |
 | `STACKCTL_OUTPUT` | `--output` flag | `table` / `json` / `yaml` / a registered custom format |
-| `STACKCTL_NO_COLOR` | `--no-color` flag | `1` when the user disabled colored output (`0` for `--no-color=false`) |
+| `STACKCTL_NO_COLOR` | `--no-color` flag, or a non-empty `NO_COLOR` | `1` when the user disabled colored output (`0` for `--no-color=false`). stackctl itself also prints no colors when its stdout is not a terminal; a plugin checks its own stdout the same way. |
 | `NO_COLOR` | `--no-color` flag, or parent shell | `1` with `--no-color` ([no-color.org](https://no-color.org) convention for the tools that the plugin runs) |
 | `STACKCTL_DEBUG` | `--debug` flag | `1` when the user requested HTTP debug output (`0` for `--debug=false`) |
 | `STACKCTL_CONFIG_DIR` | parent shell, or the config directory that stackctl uses | Directory of `config.yaml` and `tokens/`. A plugin that runs `stackctl` again uses the same files |

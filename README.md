@@ -658,7 +658,7 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 Most commands support multiple output formats via the `--output` flag:
 
 ```bash
-# Table (default) — human-readable with colored status badges
+# Table (default) — human-readable with colored status badges (colors only on a terminal)
 stackctl stack list
 
 # JSON — machine-readable, full API response
@@ -679,7 +679,7 @@ stackctl stack list -q
 |------|-------|-------------|
 | `--output` | `-o` | Output format: `table`, `json`, `yaml` (default `table`) |
 | `--quiet` | `-q` | Output only IDs (one per line) |
-| `--no-color` | | Disable colored output |
+| `--no-color` | | Disable colored output. stackctl also prints no colors when `NO_COLOR` is set or when stdout is not a terminal (a pipe or a file). |
 | `--api-url` | | Override API server URL |
 | `--api-key` | | Override API key |
 | `--insecure` | | Skip TLS certificate verification |

@@ -545,13 +545,18 @@ func printChartConfig(ch *types.ChartConfig) error {
 	case output.FormatYAML:
 		return printer.PrintYAML(ch)
 	default:
+		// The server sends no "name" or "release_name" for a chart: the
+		// table shows the fields that it sends.
 		fields := []output.KeyValue{
 			{Key: "ID", Value: ch.ID},
-			{Key: "Name", Value: ch.Name},
 			{Key: "Chart", Value: ch.ChartName},
-			{Key: "Repository", Value: ch.RepoURL},
-			{Key: "Version", Value: ch.ChartVersion},
-			{Key: "Release Name", Value: ch.ReleaseName},
+			{Key: "Repository", Value: valueOrDash(ch.RepoURL)},
+			{Key: "Chart Path", Value: valueOrDash(ch.ChartPath)},
+			{Key: "Version", Value: valueOrDash(ch.ChartVersion)},
+			{Key: "Deploy Order", Value: strconv.Itoa(ch.DeployOrder)},
+		}
+		if ch.Required {
+			fields = append(fields, output.KeyValue{Key: "Required", Value: "yes"})
 		}
 		return printer.PrintSingle(ch, fields)
 	}

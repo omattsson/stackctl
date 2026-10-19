@@ -27,7 +27,7 @@ type Base struct {
 // quota override that is not copied). "stack get" sets Warning to
 // ValuesDriftWarning when ValuesDrift is true and the server sends no text.
 type StackInstance struct {
-	Base
+	Base              `yaml:",inline"`
 	Name              string     `json:"name" yaml:"name"`
 	StackDefinitionID string     `json:"stack_definition_id" yaml:"stack_definition_id"`
 	DefinitionName    string     `json:"definition_name,omitempty" yaml:"definition_name,omitempty"`
@@ -231,7 +231,7 @@ const ValuesDriftWarning = "The stored overrides differ from the running values.
 
 // StackDefinition represents a stack definition with its chart configurations.
 type StackDefinition struct {
-	Base
+	Base          `yaml:",inline"`
 	Name          string        `json:"name" yaml:"name"`
 	Description   string        `json:"description,omitempty" yaml:"description,omitempty"`
 	DefaultBranch string        `json:"default_branch" yaml:"default_branch"`
@@ -282,7 +282,7 @@ type TemplateLinkRequest struct {
 // template has no release) and HasUnpublishedChanges. Older servers do not
 // send these fields; HasUnpublishedChanges is then nil.
 type StackTemplate struct {
-	Base
+	Base                  `yaml:",inline"`
 	Name                  string        `json:"name" yaml:"name"`
 	Description           string        `json:"description,omitempty" yaml:"description,omitempty"`
 	Category              string        `json:"category,omitempty" yaml:"category,omitempty"`
@@ -311,7 +311,7 @@ type PublishTemplateRequest struct {
 // when the working copy equals the latest release (no new version). Older
 // servers return only the template; SnapshotCreated is then nil.
 type PublishTemplateResponse struct {
-	StackTemplate
+	StackTemplate   `yaml:",inline"`
 	SnapshotCreated *bool `json:"snapshot_created,omitempty" yaml:"snapshot_created,omitempty"`
 }
 
@@ -320,7 +320,7 @@ type PublishTemplateResponse struct {
 // charts) and models.TemplateChartConfig (template charts) — LockedValues and
 // Required are populated only on template-chart responses.
 type ChartConfig struct {
-	Base
+	Base              `yaml:",inline"`
 	StackDefinitionID string `json:"stack_definition_id,omitempty" yaml:"stack_definition_id,omitempty"`
 	Name              string `json:"name" yaml:"name"`
 	RepoURL           string `json:"repository_url" yaml:"repository_url"`
@@ -413,7 +413,7 @@ type UpdateClusterRequest struct {
 //   - ServiceAccount — when true, this is a non-interactive identity used
 //     by CI/automation; only admins can create these.
 type User struct {
-	Base
+	Base           `yaml:",inline"`
 	Username       string  `json:"username" yaml:"username"`
 	DisplayName    string  `json:"display_name,omitempty" yaml:"display_name,omitempty"`
 	Email          string  `json:"email,omitempty" yaml:"email,omitempty"`
@@ -1219,7 +1219,7 @@ type NamespaceResourceUsage struct {
 //   - PodLimit — 0 means "no pod-count limit"; positive integers cap namespace
 //     pod count.
 type ClusterQuota struct {
-	Base
+	Base          `yaml:",inline"`
 	ClusterID     string `json:"cluster_id" yaml:"cluster_id"`
 	CPURequest    string `json:"cpu_request,omitempty" yaml:"cpu_request,omitempty"`
 	CPULimit      string `json:"cpu_limit,omitempty" yaml:"cpu_limit,omitempty"`
@@ -1405,7 +1405,7 @@ type SetQuotaOverrideRequest struct {
 
 // SharedValues represents cluster-level shared Helm values.
 type SharedValues struct {
-	Base
+	Base        `yaml:",inline"`
 	ClusterID   string `json:"cluster_id" yaml:"cluster_id"`
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
@@ -1658,8 +1658,8 @@ func (v TemplateVersion) CreatedByName() string {
 
 // TemplateVersionDetail is the full version response including the parsed snapshot.
 type TemplateVersionDetail struct {
-	TemplateVersion
-	Snapshot TemplateSnapshot `json:"snapshot" yaml:"snapshot"`
+	TemplateVersion `yaml:",inline"`
+	Snapshot        TemplateSnapshot `json:"snapshot" yaml:"snapshot"`
 }
 
 // TemplateSnapshot is the state of a template captured at publish time.
@@ -1741,7 +1741,7 @@ const TemplateVersionWorkingCopy = "working"
 //   - LastRunAt — nil until the policy has been executed (manually or by the
 //     scheduler) at least once.
 type CleanupPolicy struct {
-	Base
+	Base      `yaml:",inline"`
 	Name      string     `json:"name" yaml:"name"`
 	ClusterID string     `json:"cluster_id" yaml:"cluster_id"`
 	Action    string     `json:"action" yaml:"action"`

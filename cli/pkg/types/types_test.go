@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestStackInstance_JSONRoundTrip(t *testing.T) {
@@ -306,4 +307,48 @@ func TestUpdateTemplateRequest_JSON(t *testing.T) {
 	data, err := json.Marshal(UpdateTemplateRequest{Name: "web", Version: "1.1.0", DefaultBranch: "main"})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"name":"web","version":"1.1.0","default_branch":"main"}`, string(data))
+}
+
+// TestYAML_EmbeddedStructsAreInline: -o yaml must put the fields of an
+// embedded struct (Base, StackTemplate, TemplateVersion) at the top level,
+// as JSON does, not under "base:".
+func TestYAML_EmbeddedStructsAreInline(t *testing.T) {
+	t.Parallel()
+	base := Base{ID: "id-1"}
+	tests := []struct {
+		name string
+		v    any
+	}{
+		{"StackInstance", StackInstance{Base: base, Name: "s"}},
+		{"StackDefinition", StackDefinition{Base: base}},
+		{"StackTemplate", StackTemplate{Base: base}},
+		{"PublishTemplateResponse", PublishTemplateResponse{StackTemplate: StackTemplate{Base: base}}},
+		{"ChartConfig", ChartConfig{Base: base}},
+		{"User", User{Base: base}},
+		{"ClusterQuota", ClusterQuota{Base: base}},
+		{"SharedValues", SharedValues{Base: base}},
+		{"TemplateVersionDetail", TemplateVersionDetail{TemplateVersion: TemplateVersion{ID: "id-1"}}},
+		{"CleanupPolicy", CleanupPolicy{Base: base}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			out, err := yaml.Marshal(tt.v)
+			require.NoError(t, err)
+			var m map[string]any
+			require.NoError(t, yaml.Unmarshal(out, &m))
+			assert.Equal(t, "id-1", m["id"], "id is a top-level key:\n%s", out)
+			for _, nested := range []string{"base", "stacktemplate", "templateversion"} {
+				assert.NotContains(t, m, nested)
+			}
+
+			// JSON keeps the same top-level id.
+			data, err := json.Marshal(tt.v)
+			require.NoError(t, err)
+			var j map[string]any
+			require.NoError(t, json.Unmarshal(data, &j))
+			assert.Equal(t, "id-1", j["id"])
+		})
+	}
 }

@@ -432,6 +432,26 @@ func TestPluginEnv_NoColorAndConfigDir(t *testing.T) {
 	assert.Equal(t, "1", v)
 }
 
+// TestPluginEnv_NoColorFromEnv: a non-empty NO_COLOR also sets
+// STACKCTL_NO_COLOR, because stackctl itself then prints no colors.
+func TestPluginEnv_NoColorFromEnv(t *testing.T) {
+	t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
+	t.Setenv("STACKCTL_NO_COLOR", "")
+	require.NoError(t, os.Unsetenv("STACKCTL_NO_COLOR"))
+	t.Setenv("NO_COLOR", "1")
+
+	root := &cobra.Command{Use: "stackctl"}
+	root.PersistentFlags().Bool("no-color", false, "")
+
+	v, _ := envValue(pluginEnv(root), "STACKCTL_NO_COLOR")
+	assert.Equal(t, "1", v)
+
+	// An explicit --no-color=false wins over NO_COLOR.
+	require.NoError(t, root.PersistentFlags().Set("no-color", "false"))
+	v, _ = envValue(pluginEnv(root), "STACKCTL_NO_COLOR")
+	assert.Equal(t, "0", v)
+}
+
 func TestPluginEnv_ConfigDirFromDefault(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("STACKCTL_CONFIG_DIR", "")
