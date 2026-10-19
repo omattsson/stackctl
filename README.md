@@ -238,6 +238,11 @@ stackctl stack recent                 # your 5 most recently updated stacks
 stackctl stack preview my-app
 stackctl stack preview my-app --chart backend > backend-values.yaml
 
+# Custom actions of the hooks config (for example a database refresh)
+stackctl stack action list my-app
+stackctl stack action run my-app refresh-db --param market=dk --yes --wait
+stackctl stack action log my-app refresh-db <job-id> --follow
+
 # Get the in-app notifications of a stack (not the --follow flag, which streams a log)
 stackctl stack follow my-app
 stackctl stack unfollow my-app
@@ -279,6 +284,22 @@ stackctl stack rollback my-app --target-log <log-id>
 `--stop-at` (`stack create`, `clone`, `update`, `template quick-deploy`) sets a fixed stop time: the TTL becomes 0 and the stack stops at that time. `--stop-at` and `--until` accept RFC 3339 (`2026-10-17T18:00:00+02:00`) or a local time without a zone (`2026-10-17 18:00`). stackctl sends the time in UTC. `stack create --ttl 0` now sends 0 (no expiry); without `--ttl` the server applies its default TTL. `--ttl` and `--stop-at` together, a stop time in the past or a bad format are usage errors; stackctl sends no request. Before the request, stackctl also refuses a `--ttl`, a `--stop-at` or an `--until` above the TTL limit of the server (`max_instance_ttl_days` of `GET /api/v1/ui-config`; 30 days for an older server). `stack list` (column `EXPIRES`) and `stack get` show a fixed stop time as `stops at <time>`. A deploy after the stop time fails with 409: set a new stop time or a TTL with `stack update`.
 
 `stack get` shows `Following` and `Followers` (k8s-stack-manager v0.8.0 or later). `stack preview -q` prints the names of the charts whose values differ from the last deploy. `stack preview` writes the values-drift warning to stderr, so the YAML on stdout stays valid.
+
+`stack action run`:
+
+- Checks the declared parameters before the request: a `bool` takes `true` or `false`, an `enum` takes one of its options, and a required parameter needs a value.
+- Gives a declared parameter without `--param` its default. Undeclared parameters go to the subscriber as strings.
+- Asks for confirmation when the action has a confirmation text. `--yes` skips the question.
+- Exits with code 1 when the subscriber answers with status 400 or higher.
+
+`--wait` (and `stack action log --follow`) follows the job log of an asynchronous action:
+
+- It writes the job ID to stderr first. The job continues on the server when the command stops.
+- It polls every 3 s and prints the new log text.
+- On 429, 502, 503, 504 and network errors it writes a note to stderr and waits longer: `Retry-After` (at most 5 minutes), else a doubling delay up to 30 s.
+- It stops with exit code 1 on a failed final status (a status other than `succeeded`, `success`, `completed`, `done`, `ok` and similar), on other errors (for example 401, 403 or 404), and after `--timeout` (default 60m).
+- With `-o json|yaml`, the log text goes to stderr and the result has `job_status`.
+- In log text, a line feed and a tab stay. A carriage return and a bidi control are removed. Other control characters (for example ESC) become a space.
 
 `stack update --name` must be a DNS label (lowercase a-z, 0-9 and `-`, at most 50 characters). The namespace does not change. When another stack on the cluster has the name, stackctl prints the server message and the free names, for example `Conflict: A stack named "my-app" already exists on this cluster (owner: alice). Free names: my-app-2, my-app-3`. `stack create`, `clone` and `template quick-deploy` print the same message for a name conflict.
 
@@ -652,7 +673,7 @@ cli/
   cmd/                    # Cobra commands, one file per command group
     root.go  resolve.go  paging.go  plugins.go  browser.go  token.go  values.go
     config.go  login.go  version.go  completion.go  server.go
-    stack.go  stack_inspect.go  stack_followers.go  ttl.go
+    stack.go  stack_inspect.go  stack_followers.go  stack_action.go  ttl.go
     template.go  definition.go  override.go  bulk.go
     cluster.go  git.go  orphaned.go  user.go  apikey.go  audit.go
     analytics.go  cleanup_policy.go  favorite.go  notification.go

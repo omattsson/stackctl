@@ -156,6 +156,10 @@ func isSessionPath(path string) bool {
 // another process replaces the file on Windows) is not an error: the request
 // continues, and a 401 starts a renewal that reads the file under the lock.
 func (c *Client) renewIfExpiring() error {
+	// Read the current token before the file. In the other order, another
+	// goroutine of this client can renew between the two reads: the file
+	// is then old, the token new, and renew(new) sends a second refresh.
+	current := c.currentToken()
 	st, err := c.loadSession()
 	if err != nil {
 		c.debugf("✗ reading token file: %v\n", err)
@@ -165,7 +169,6 @@ func (c *Client) renewIfExpiring() error {
 		return nil // nothing to renew
 	}
 
-	current := c.currentToken()
 	if !expiresWithin(st.ExpiresAt, RenewMargin) {
 		// Another process can have renewed the session since this client
 		// loaded its token.

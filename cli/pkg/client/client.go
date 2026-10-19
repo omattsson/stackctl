@@ -86,6 +86,11 @@ func (e *APIError) Error() string {
 	return e.UserFacingError()
 }
 
+// RetryAfter returns the Retry-After of the response (0 when not set).
+func (e *APIError) RetryAfter() time.Duration {
+	return e.retryAfter
+}
+
 // UserFacingError returns a user-friendly error message based on the status code.
 // When the server provides a message, it is appended for context.
 func (e *APIError) UserFacingError() string {
@@ -144,6 +149,27 @@ func sanitizeSuggestions(in []string) []string {
 // response body) for safe display on a terminal, like server error messages.
 func SanitizeServerText(msg string) string {
 	return sanitizeServerMessage(msg)
+}
+
+// SanitizeLogText makes multi-line log text from a server or a webhook
+// safe for a terminal. It keeps line feeds and tabs, removes carriage
+// returns and bidi controls, and replaces other control characters (C0,
+// DEL, C1, for example ESC) with a space. It does not trim or shorten.
+func SanitizeLogText(text string) string {
+	var b strings.Builder
+	b.Grow(len(text))
+	for _, r := range text {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r == '\r' || isBidiControl(r):
+		case unicode.IsControl(r):
+			b.WriteByte(' ')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // sanitizeServerMessage cleans up a server error message for safe display.
@@ -622,6 +648,42 @@ func (c *Client) ListStacks(params map[string]string) (*types.ListResponse[types
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// ListStackActions returns the custom actions that can run on a stack
+// instance (GET /api/v1/stack-instances/:id/actions).
+func (c *Client) ListStackActions(id string) (*types.ActionList, error) {
+	var list types.ActionList
+	if err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/actions", id), &list); err != nil {
+		return nil, err
+	}
+	return &list, nil
+}
+
+// RunStackAction runs a custom action on a stack instance. The server
+// checks the declared parameters. A 200 answer can carry a subscriber error
+// (ActionResult.StatusCode >= 400).
+func (c *Client) RunStackAction(id, name string, params map[string]any) (*types.ActionResult, error) {
+	body := map[string]any{}
+	if len(params) > 0 {
+		body["parameters"] = params
+	}
+	var res types.ActionResult
+	if err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/actions/%s", id, url.PathEscape(name)), body, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// GetActionJobLog returns the job log of an action from offset (GET
+// /api/v1/stack-instances/:id/actions/:name/jobs/:job_id/log).
+func (c *Client) GetActionJobLog(id, name, jobID string, offset int64) (*types.ActionJobLog, error) {
+	var chunk types.ActionJobLog
+	path := fmt.Sprintf("/api/v1/stack-instances/%s/actions/%s/jobs/%s/log", id, url.PathEscape(name), url.PathEscape(jobID))
+	if err := c.GetWithQuery(path, map[string]string{"offset": strconv.FormatInt(offset, 10)}, &chunk); err != nil {
+		return nil, err
+	}
+	return &chunk, nil
 }
 
 // FollowStack makes the caller follow a stack instance (idempotent).
