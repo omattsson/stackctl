@@ -44,6 +44,36 @@ type StackInstance struct {
 	ErrorMessage      string     `json:"error_message,omitempty" yaml:"error_message,omitempty"`
 	ValuesDrift       bool       `json:"values_drift,omitempty" yaml:"values_drift,omitempty"`
 	Warning           string     `json:"warning,omitempty" yaml:"warning,omitempty"`
+	// Following and FollowerCount come only from GET
+	// /api/v1/stack-instances/:id (nil on other responses and older servers).
+	Following     *bool  `json:"following,omitempty" yaml:"following,omitempty"`
+	FollowerCount *int64 `json:"follower_count,omitempty" yaml:"follower_count,omitempty"`
+}
+
+// FollowState is the response of POST and DELETE
+// /api/v1/stack-instances/:id/follow.
+type FollowState struct {
+	Following     bool  `json:"following" yaml:"following"`
+	FollowerCount int64 `json:"follower_count" yaml:"follower_count"`
+}
+
+// DeployPreview is the response of GET
+// /api/v1/stack-instances/:id/deploy-preview: the values of the last deploy
+// and the values that the next deploy uses, for each chart.
+type DeployPreview struct {
+	InstanceID   string               `json:"instance_id" yaml:"instance_id"`
+	InstanceName string               `json:"instance_name" yaml:"instance_name"`
+	Charts       []ChartDeployPreview `json:"charts" yaml:"charts"`
+	ValuesDrift  bool                 `json:"values_drift" yaml:"values_drift"`
+	Warning      string               `json:"warning,omitempty" yaml:"warning,omitempty"`
+}
+
+// ChartDeployPreview is the preview of one chart. The values are YAML text.
+type ChartDeployPreview struct {
+	ChartName      string `json:"chart_name" yaml:"chart_name"`
+	PreviousValues string `json:"previous_values" yaml:"previous_values"`
+	PendingValues  string `json:"pending_values" yaml:"pending_values"`
+	HasChanges     bool   `json:"has_changes" yaml:"has_changes"`
 }
 
 // ValuesDriftWarning is a copy of the server constant msgValuesDrift

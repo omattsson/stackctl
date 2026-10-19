@@ -28,6 +28,8 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
     login.go                  # login, logout, whoami, auth register
     token.go                  # Token helpers (save/load/delete session, fresh token for plugins)
     stack.go                  # stack list/get/create/update/deploy/stop/clean/delete/status/logs/clone/extend/values/compare/history/rollback/history-values/watch
+    stack_inspect.go          # stack preview/pods/recent (deploy-preview, live pods and events, recent)
+    stack_followers.go        # stack follow/unfollow (in-app notifications; not the --follow log flag)
     ttl.go                    # --ttl/--stop-at/--until parsing, TTL limit check (GET /api/v1/ui-config, 30-day fallback), expiry text
     server.go                 # server info (ping, ui-config; public routes, no credentials)
     template.go               # template list/get/create/update/clone/publish/unpublish/versions/instantiate/quick-deploy/delete

@@ -22,7 +22,7 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 | `config` | set, get, list, use-context, current-context, delete-context | config.go |
 | `login`/`logout`/`whoami` | top-level; supports password + OIDC loopback flow | login.go |
 | `auth` | register | login.go |
-| `stack` | list, get, create, update, deploy, stop, clean, delete, status, logs, clone, extend, values, compare, history, rollback, history-values, watch | stack.go (TTL and stop-time helpers: ttl.go) |
+| `stack` | list, get, create, update, deploy, stop, clean, delete, status, logs, clone, extend, values, compare, history, rollback, history-values, watch, preview, pods, recent, follow, unfollow | stack.go; preview/pods/recent: stack_inspect.go; follow/unfollow: stack_followers.go; TTL and stop-time helpers: ttl.go |
 | `template` | list, get, create, update, delete, clone, instantiate, quick-deploy, publish, unpublish, update-chart, versions (list, get, diff) | template.go |
 | `definition` | list, get, create, update, delete, export, import, update-chart | definition.go |
 | `override` | list, get, set, unset, delete, branch (list/set/delete), quota (get/set/delete) | override.go |

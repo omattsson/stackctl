@@ -230,7 +230,17 @@ stackctl stack update my-app --ttl 0   # clear the expiry
 
 # Monitor
 stackctl stack status my-app
+stackctl stack pods my-app            # live pods, container reasons (CrashLoopBackOff) and Warning events
 stackctl stack logs my-app
+stackctl stack recent                 # your 5 most recently updated stacks
+
+# Helm values that the next deploy uses (YAML on stdout, warnings on stderr)
+stackctl stack preview my-app
+stackctl stack preview my-app --chart backend > backend-values.yaml
+
+# Get the in-app notifications of a stack (not the --follow flag, which streams a log)
+stackctl stack follow my-app
+stackctl stack unfollow my-app
 stackctl stack watch --id 6a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d   # watch uses --id, not a name argument
 
 # Lifecycle
@@ -267,6 +277,8 @@ stackctl stack rollback my-app --target-log <log-id>
 `stack extend --until TIME` sets the expiry to TIME. TIME must be after the current expiry and at most the TTL limit of the server from now.
 
 `--stop-at` (`stack create`, `clone`, `update`, `template quick-deploy`) sets a fixed stop time: the TTL becomes 0 and the stack stops at that time. `--stop-at` and `--until` accept RFC 3339 (`2026-10-17T18:00:00+02:00`) or a local time without a zone (`2026-10-17 18:00`). stackctl sends the time in UTC. `stack create --ttl 0` now sends 0 (no expiry); without `--ttl` the server applies its default TTL. `--ttl` and `--stop-at` together, a stop time in the past or a bad format are usage errors; stackctl sends no request. Before the request, stackctl also refuses a `--ttl`, a `--stop-at` or an `--until` above the TTL limit of the server (`max_instance_ttl_days` of `GET /api/v1/ui-config`; 30 days for an older server). `stack list` (column `EXPIRES`) and `stack get` show a fixed stop time as `stops at <time>`. A deploy after the stop time fails with 409: set a new stop time or a TTL with `stack update`.
+
+`stack get` shows `Following` and `Followers` (k8s-stack-manager v0.8.0 or later). `stack preview -q` prints the names of the charts whose values differ from the last deploy. `stack preview` writes the values-drift warning to stderr, so the YAML on stdout stays valid.
 
 `stack update --name` must be a DNS label (lowercase a-z, 0-9 and `-`, at most 50 characters). The namespace does not change. When another stack on the cluster has the name, stackctl prints the server message and the free names, for example `Conflict: A stack named "my-app" already exists on this cluster (owner: alice). Free names: my-app-2, my-app-3`. `stack create`, `clone` and `template quick-deploy` print the same message for a name conflict.
 
@@ -639,8 +651,9 @@ cli/
   Makefile                # build, build-all, test, lint, coverage, install
   cmd/                    # Cobra commands, one file per command group
     root.go  resolve.go  paging.go  plugins.go  browser.go  token.go  values.go
-    config.go  login.go  version.go  completion.go
-    stack.go  template.go  definition.go  override.go  bulk.go
+    config.go  login.go  version.go  completion.go  server.go
+    stack.go  stack_inspect.go  stack_followers.go  ttl.go
+    template.go  definition.go  override.go  bulk.go
     cluster.go  git.go  orphaned.go  user.go  apikey.go  audit.go
     analytics.go  cleanup_policy.go  favorite.go  notification.go
     testdata/             # golden files
