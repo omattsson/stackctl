@@ -367,6 +367,13 @@ func (c *Client) Logout(refreshToken string) error {
 	return resp.Body.Close()
 }
 
+// LogoutAll ends every session of the caller: POST /api/v1/auth/logout-all
+// revokes all refresh tokens of the user. It uses the API key or the
+// current access token, and never renews (an auth endpoint).
+func (c *Client) LogoutAll() error {
+	return c.Post(pathLogoutAll, nil, nil)
+}
+
 // sendSession sends a request without a body to a session endpoint with an
 // optional bearer token and an optional refresh token cookie. It never
 // renews and never retries.

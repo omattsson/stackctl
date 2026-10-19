@@ -174,6 +174,7 @@ Set `STACKCTL_USERNAME` and `STACKCTL_PASSWORD`, or use the flags `--username` a
 STACKCTL_USERNAME=alice STACKCTL_PASSWORD=... stackctl login
 stackctl whoami    # show the current user
 stackctl logout    # end the session and remove the token file
+stackctl logout --all   # end every session of your user (all devices), for example after a lost laptop
 ```
 
 `stackctl auth register` creates a user. Its flags are `--username`, `--display-name`, `--role`, `--service-account` and `--password-stdin`. Only an admin can set `--role` and `--service-account`.
@@ -192,7 +193,7 @@ The server rotates the refresh token on each renewal. stackctl holds a lock on `
 
 An SSO login (`stackctl login --sso`) gets a token without a refresh token. By default, the server sets its life time to 24 hours (`JWT_EXPIRATION`). stackctl does not renew it. API keys have no session.
 
-`stackctl logout` sends the access token and the refresh token to the server, which ends the session, and then removes the token file. If the server cannot be reached, stackctl prints a warning and still removes the file.
+`stackctl logout` sends the access token and the refresh token to the server, which ends the session, and then removes the token file. If the server cannot be reached, stackctl prints a warning and still removes the file. `stackctl logout --all` first asks the server to revoke all refresh tokens of your user (the user of the login session, else of the API key); when that call fails, the command stops and keeps the token file, so you can try again.
 
 ### Precedence
 
@@ -443,6 +444,7 @@ stackctl override delete my-app my-chart
 
 # Per-chart branch overrides
 stackctl override branch set my-app my-chart feature/hotfix
+stackctl override branch get my-app my-chart      # exit code 1 when the chart has no branch override
 
 # Quota overrides
 stackctl override quota get my-app
@@ -609,6 +611,9 @@ stackctl cluster get 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
 stackctl cluster shared-values list 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
 stackctl cluster shared-values set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --name "local-dev-defaults" --file values.yaml
 stackctl cluster shared-values set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --name "local-dev-defaults" --set persistence.storageClass=local-path --priority 10
+# Update an entry (ID or name): the ID and the merge order stay; --set changes single keys, --file replaces the values
+stackctl cluster shared-values update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e local-dev-defaults --set persistence.storageClass=fast
+stackctl cluster shared-values update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e local-dev-defaults --priority 20
 stackctl cluster shared-values delete 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e 6e7f8a9b-0c1d-4e2f-8a3b-4c5d6e7f8a9b
 ```
 
@@ -626,12 +631,13 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 - `apikey`: `list`, `create`, `revoke`
 - `analytics`: `overview`, `templates`, `users`
 - `cleanup-policy`: `list`, `get`, `create`, `update`, `delete`, `run`
-- `favorite` (aliases `favorites`, `fav`): `list`, `add`, `remove`
+- `favorite` (aliases `favorites`, `fav`): `list`, `add`, `remove`, `check` (prints `yes` or `no`)
+- `dashboard`: failing stacks (status error), stacks that expire within the next hour, recent deployments and (devops and admin) cluster health. It covers the stacks of all users. `-q` prints the IDs of the failing and expiring stacks
 - `notification` (alias `notifications`): `list`, `count`, `read`, `read-all`, `prefs get`, `prefs set`, `channel ...` (see Notification Channels)
-- `cluster`: `list`, `get`, `create`, `update`, `delete`, `set-default`, `test-connection`, `health`, `nodes`, `namespaces`, `utilization`, `quota get|set|delete`, `shared-values list|set|delete`
+- `cluster`: `list`, `get`, `create`, `update`, `delete`, `set-default`, `test-connection`, `health`, `nodes`, `namespaces`, `utilization`, `quota get|set|delete`, `shared-values list|set|update|delete`
 - `git`: `providers`, `branches`, `validate`
 - `template`: also `clone`, `unpublish`, `versions list|get|diff`
-- `override`: also `list`, `unset`, `branch list|set|delete`, `quota get|set|delete`
+- `override`: also `list`, `unset`, `branch list|get|set|delete`, `quota get|set|delete`
 - `user`: `list`, `delete`, `disable`, `enable`, `reset-password`, `set-role`
 - `orphaned`: `list`, `delete`
 - `server`: `info` (server URL, ping, default TTL and TTL limit; no login needed)
@@ -723,7 +729,7 @@ cli/
     stack.go  stack_inspect.go  stack_followers.go  stack_action.go  ttl.go
     template.go  definition.go  override.go  bulk.go
     cluster.go  git.go  orphaned.go  user.go  apikey.go  audit.go
-    analytics.go  cleanup_policy.go  favorite.go  notification.go  notification_channel.go  chart_changes.go
+    analytics.go  cleanup_policy.go  favorite.go  notification.go  notification_channel.go  chart_changes.go  dashboard.go
     testdata/             # golden files
   pkg/
     client/               # HTTP client, auth renewal, WebSocket

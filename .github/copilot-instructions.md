@@ -20,20 +20,21 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 | Group | Subcommands | File |
 |-------|------------|------|
 | `config` | set, get, list, use-context, current-context, delete-context | config.go |
-| `login`/`logout`/`whoami` | top-level; supports password + OIDC loopback flow | login.go |
+| `login`/`logout`/`whoami` | top-level; supports password + OIDC loopback flow; `logout --all` ends every session of the user | login.go |
 | `auth` | register | login.go |
 | `stack` | list, get, create, update, deploy, stop, clean, delete, status, logs, clone, extend, values, compare, history, rollback, history-values, watch, preview, pods, recent, follow, unfollow, action (list, run, log) | stack.go; preview/pods/recent: stack_inspect.go; follow/unfollow: stack_followers.go; action: stack_action.go; TTL and stop-time helpers: ttl.go |
 | `template` | list, get, create, update, delete, clone, instantiate, quick-deploy, publish, unpublish, update-chart, add-chart, remove-chart, versions (list, get, diff) | template.go; add-chart/remove-chart: chart_changes.go |
 | `definition` | list, get, create, update, delete, export, import, update-chart, add-chart, remove-chart, check-upgrade, upgrade, link-template | definition.go; add-chart/remove-chart/check-upgrade/upgrade/link-template: chart_changes.go |
-| `override` | list, get, set, unset, delete, branch (list/set/delete), quota (get/set/delete) | override.go |
+| `override` | list, get, set, unset, delete, branch (list/get/set/delete), quota (get/set/delete) | override.go |
 | `bulk` | deploy, stop, clean, delete, template (publish, unpublish, delete) | bulk.go |
 | `git` | providers, branches, validate | git.go |
-| `cluster` | list, get, create, update, delete, set-default, test-connection, health, nodes, namespaces, utilization, quota (get/set/delete), shared-values (list/set/delete) | cluster.go |
+| `cluster` | list, get, create, update, delete, set-default, test-connection, health, nodes, namespaces, utilization, quota (get/set/delete), shared-values (list/set/update/delete) | cluster.go |
 | `analytics` | overview, templates, users | analytics.go |
 | `apikey` | list, create, revoke | apikey.go |
 | `audit` | log, list, export | audit.go |
 | `cleanup-policy` | list, get, create, update, delete, run | cleanup_policy.go |
-| `favorite` | list, add, remove | favorite.go |
+| `favorite` | list, add, remove, check | favorite.go |
+| `dashboard` | top-level | dashboard.go |
 | `notification` | list, count, read, read-all, prefs (get/set), channel (list, get, create, update, delete, events, subscriptions, subscribe, test, logs) | notification.go; channel: notification_channel.go |
 | `user` | list, delete, disable, enable, reset-password, set-role | user.go |
 | `orphaned` | list, delete — namespaces with the stack-manager label but no DB record | orphaned.go |
