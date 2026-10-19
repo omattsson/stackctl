@@ -551,6 +551,35 @@ stackctl user set-role alice devops
 - a change when you are no longer an enabled admin (403);
 - removing the admin role from the last enabled admin (409).
 
+### Notification Channels
+
+Outbound webhooks for stack events. Needs the devops or admin role. The commands take a channel name or ID.
+
+```bash
+# The event types, then a channel for failed deploys of PR stacks, in Teams format
+stackctl notification channel events
+# --url-env reads the URL from an environment variable: it stays out of the shell history
+stackctl notification channel create --name pr-alerts --url-env TEAMS_WORKFLOW_URL --format teams \
+  --filter-name 'pr-*' --event deployment.failed
+
+# Sign the requests (X-StackManager-Signature): the secret comes from an environment variable or stdin
+STACKCTL_CHANNEL_SECRET=... stackctl notification channel update pr-alerts --secret-env STACKCTL_CHANNEL_SECRET
+
+stackctl notification channel list
+stackctl notification channel subscribe pr-alerts --event deployment.failed --event deployment.success
+stackctl notification channel test pr-alerts
+stackctl notification channel logs pr-alerts --limit 50
+stackctl notification channel update pr-alerts --disable
+stackctl notification channel delete pr-alerts
+```
+
+- The webhook URL can hold a token (for example the signature of a Teams workflow URL). The commands show only the scheme and the host, also with `-o json` and `-o yaml`. `--show-url` shows the full URL. Give the URL with `--url-env NAME` to keep it out of the shell history and the process list.
+- The secret is never a flag value: use `--secret-env NAME` or `--secret-stdin` (hidden input on a terminal). The server does not return it. `update --clear-secret` removes it.
+- `create --event` checks the event types before the channel is created. When the subscription still fails, the channel exists: the error gives the `subscribe` command.
+- `update` changes only the given flags. A `--filter-*` flag replaces all filters; `--clear-filters` removes them. `subscribe` replaces all subscriptions; `--none` removes them.
+- `create` and `update` write the server warnings to stderr, for example a filter ID that does not exist.
+- `test` exits with code 1 when the webhook does not accept the test event.
+
 ### Scripting Examples
 
 ```bash
@@ -598,7 +627,7 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 - `analytics`: `overview`, `templates`, `users`
 - `cleanup-policy`: `list`, `get`, `create`, `update`, `delete`, `run`
 - `favorite` (aliases `favorites`, `fav`): `list`, `add`, `remove`
-- `notification` (alias `notifications`): `list`, `count`, `read`, `read-all`, `prefs get`, `prefs set`
+- `notification` (alias `notifications`): `list`, `count`, `read`, `read-all`, `prefs get`, `prefs set`, `channel ...` (see Notification Channels)
 - `cluster`: `list`, `get`, `create`, `update`, `delete`, `set-default`, `test-connection`, `health`, `nodes`, `namespaces`, `utilization`, `quota get|set|delete`, `shared-values list|set|delete`
 - `git`: `providers`, `branches`, `validate`
 - `template`: also `clone`, `unpublish`, `versions list|get|diff`
@@ -694,7 +723,7 @@ cli/
     stack.go  stack_inspect.go  stack_followers.go  stack_action.go  ttl.go
     template.go  definition.go  override.go  bulk.go
     cluster.go  git.go  orphaned.go  user.go  apikey.go  audit.go
-    analytics.go  cleanup_policy.go  favorite.go  notification.go
+    analytics.go  cleanup_policy.go  favorite.go  notification.go  notification_channel.go  chart_changes.go
     testdata/             # golden files
   pkg/
     client/               # HTTP client, auth renewal, WebSocket

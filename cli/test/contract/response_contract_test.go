@@ -44,6 +44,32 @@ func TestResponseSchemas_MatchBackend(t *testing.T) {
 		{name: "PodEvent", goType: types.PodEvent{}, swaggerDef: "k8s.PodEvent"},
 		{name: "GitBranch", goType: types.GitBranch{}, swaggerDef: "gitprovider.Branch"},
 		{name: "Cluster", goType: types.Cluster{}, swaggerDef: "models.Cluster"},
+		{name: "UIConfig", goType: types.UIConfig{}, swaggerDef: "handlers.UIConfigResponse"},
+		{name: "FollowState", goType: types.FollowState{}, swaggerDef: "handlers.followStateResponse"},
+		{name: "DeployPreview", goType: types.DeployPreview{}, swaggerDef: "handlers.DeployPreviewResponse"},
+		{name: "ChartDeployPreview", goType: types.ChartDeployPreview{}, swaggerDef: "handlers.ChartDeployPreview"},
+		{name: "ActionList", goType: types.ActionList{}, swaggerDef: "handlers.actionListResponse"},
+		{name: "ActionJobLog", goType: types.ActionJobLog{}, swaggerDef: "handlers.actionJobLogResponse"},
+		{name: "UpgradeCheck", goType: types.UpgradeCheck{}, swaggerDef: "handlers.upgradeCheckResponse"},
+		{name: "UpgradeChanges", goType: types.UpgradeChanges{}, swaggerDef: "handlers.upgradeChanges"},
+		{name: "TemplateLinkRequest", goType: types.TemplateLinkRequest{}, swaggerDef: "handlers.templateLinkRequest"},
+		// filters is a $ref in the schema (no type); the
+		// NotificationChannelFilters case checks its fields.
+		{name: "CreateNotificationChannelRequest", goType: types.CreateNotificationChannelRequest{}, swaggerDef: "handlers.createChannelRequest", excludeGoTags: []string{"filters"}},
+		{name: "UpdateNotificationChannelRequest", goType: types.UpdateNotificationChannelRequest{}, swaggerDef: "handlers.updateChannelRequest", excludeGoTags: []string{"filters"}},
+		{name: "NotificationChannelFilters", goType: types.NotificationChannelFilters{}, swaggerDef: "models.NotificationChannelFilters"},
+		{
+			name:       "NotificationChannel",
+			goType:     types.NotificationChannel{},
+			swaggerDef: "models.NotificationChannel",
+			// subscription_count comes only with the list
+			// (handlers.notificationChannelWithCount); warnings only with
+			// create and update (handlers.notificationChannelResponse).
+			// filters is a $ref (see above).
+			excludeGoTags: []string{"subscription_count", "warnings", "filters"},
+		},
+		// The delivery log route documents a generic map, so the schema has
+		// no definition for ChannelDeliveryLog.
 		{
 			name:       "StackInstance",
 			goType:     types.StackInstance{},

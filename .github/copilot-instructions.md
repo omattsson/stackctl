@@ -34,7 +34,7 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 | `audit` | log, list, export | audit.go |
 | `cleanup-policy` | list, get, create, update, delete, run | cleanup_policy.go |
 | `favorite` | list, add, remove | favorite.go |
-| `notification` | list, count, read, read-all, prefs (get/set) | notification.go |
+| `notification` | list, count, read, read-all, prefs (get/set), channel (list, get, create, update, delete, events, subscriptions, subscribe, test, logs) | notification.go; channel: notification_channel.go |
 | `user` | list, delete, disable, enable, reset-password, set-role | user.go |
 | `orphaned` | list, delete — namespaces with the stack-manager label but no DB record | orphaned.go |
 | `completion` | bash, zsh, fish, powershell | completion.go |
