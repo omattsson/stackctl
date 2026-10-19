@@ -65,7 +65,7 @@ func TestGetStackPodsAndRecent(t *testing.T) {
 
 func TestSanitizeLogText(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "a\tb\nc [2J d\n", SanitizeLogText("a\tb\r\nc\x1b[2J d‮\n"))
+	assert.Equal(t, "a\tb\nc [2J d\n", SanitizeLogText("a\tb\r\nc\x1b[2J d\u202e\n"))
 }
 
 func TestRunStackActionAndJobLog(t *testing.T) {
