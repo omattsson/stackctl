@@ -62,3 +62,41 @@ func TestGetStackPodsAndRecent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, items, 2)
 }
+
+func TestSanitizeLogText(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "a\tb\nc [2J d\n", SanitizeLogText("a\tb\r\nc\x1b[2J d‮\n"))
+}
+
+func TestRunStackActionAndJobLog(t *testing.T) {
+	t.Parallel()
+	var gotBody, gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		gotBody, gotPath, gotQuery = string(data), r.URL.EscapedPath(), r.URL.RawQuery
+		if r.Method == http.MethodPost {
+			_, _ = io.WriteString(w, `{"action":"a b","status_code":202,"job_id":"j1","result":{"x":1}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"log":"hi","next_offset":2,"done":true,"status":"succeeded"}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL)
+
+	res, err := c.RunStackAction("42", "a b", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "/api/v1/stack-instances/42/actions/a%20b", gotPath)
+	assert.JSONEq(t, `{}`, gotBody, "no parameters: an empty object")
+	assert.Equal(t, "j1", res.JobID)
+	assert.Equal(t, map[string]any{"x": float64(1)}, res.Result)
+
+	_, err = c.RunStackAction("42", "a", map[string]any{"k": true})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"parameters":{"k":true}}`, gotBody)
+
+	chunk, err := c.GetActionJobLog("42", "a", "j.1", 7)
+	require.NoError(t, err)
+	assert.Equal(t, "/api/v1/stack-instances/42/actions/a/jobs/j.1/log", gotPath)
+	assert.Equal(t, "offset=7", gotQuery)
+	assert.True(t, chunk.Done)
+}

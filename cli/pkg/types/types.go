@@ -50,6 +50,68 @@ type StackInstance struct {
 	FollowerCount *int64 `json:"follower_count,omitempty" yaml:"follower_count,omitempty"`
 }
 
+// ActionList is the response of GET /api/v1/stack-instances/:id/actions:
+// the custom actions of the hooks config, without URLs or secrets.
+type ActionList struct {
+	InstanceID string       `json:"instance_id" yaml:"instance_id"`
+	Actions    []ActionInfo `json:"actions" yaml:"actions"`
+	CanInvoke  bool         `json:"can_invoke" yaml:"can_invoke"`
+}
+
+// ActionInfo is one custom action with its UI metadata.
+type ActionInfo struct {
+	Name        string            `json:"name" yaml:"name"`
+	Label       string            `json:"label" yaml:"label"`
+	Description string            `json:"description,omitempty" yaml:"description,omitempty"`
+	Confirm     string            `json:"confirm,omitempty" yaml:"confirm,omitempty"`
+	Parameters  []ActionParameter `json:"parameters" yaml:"parameters"`
+	HasJobLog   bool              `json:"has_job_log" yaml:"has_job_log"`
+	CanInvoke   bool              `json:"can_invoke" yaml:"can_invoke"`
+}
+
+// ActionParameter is one declared parameter of an action. Type is
+// "string", "bool" or "enum".
+type ActionParameter struct {
+	Default     any      `json:"default,omitempty" yaml:"default,omitempty"`
+	Name        string   `json:"name" yaml:"name"`
+	Label       string   `json:"label" yaml:"label"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+	Type        string   `json:"type" yaml:"type"`
+	Options     []string `json:"options,omitempty" yaml:"options,omitempty"`
+	Required    bool     `json:"required" yaml:"required"`
+}
+
+// ActionResult is the envelope of POST /api/v1/stack-instances/:id/actions/:name.
+// The server answers 200 also when the subscriber answered with an error:
+// StatusCode is the status of the subscriber, and Message its reason for a
+// status of 400 or higher. JobID is set for an asynchronous action with a
+// job log.
+type ActionResult struct {
+	Action     string `json:"action" yaml:"action"`
+	InstanceID string `json:"instance_id" yaml:"instance_id"`
+	StatusCode int    `json:"status_code" yaml:"status_code"`
+	Result     any    `json:"result" yaml:"result"`
+	JobID      string `json:"job_id,omitempty" yaml:"job_id,omitempty"`
+	Message    string `json:"message,omitempty" yaml:"message,omitempty"`
+	// JobStatus is not sent by the server. "stack action run --wait" sets
+	// it to the final status of the job.
+	JobStatus string `json:"job_status,omitempty" yaml:"job_status,omitempty"`
+}
+
+// ActionJobLog is one chunk of a job log (GET
+// /api/v1/stack-instances/:id/actions/:name/jobs/:job_id/log).
+type ActionJobLog struct {
+	Action     string `json:"action" yaml:"action"`
+	InstanceID string `json:"instance_id" yaml:"instance_id"`
+	JobID      string `json:"job_id" yaml:"job_id"`
+	Status     string `json:"status" yaml:"status"`
+	Log        string `json:"log" yaml:"log"`
+	Offset     int64  `json:"offset" yaml:"offset"`
+	NextOffset int64  `json:"next_offset" yaml:"next_offset"`
+	Done       bool   `json:"done" yaml:"done"`
+	Truncated  bool   `json:"truncated" yaml:"truncated"`
+}
+
 // FollowState is the response of POST and DELETE
 // /api/v1/stack-instances/:id/follow.
 type FollowState struct {

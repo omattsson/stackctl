@@ -100,6 +100,12 @@ func resetCmdFlags(t *testing.T, cmd *cobra.Command, names ...string) {
 	}
 	reset := func() {
 		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			// Set appends to a slice or array flag: replace its value.
+			if sv, ok := f.Value.(pflag.SliceValue); ok {
+				require.NoError(t, sv.Replace(nil))
+				f.Changed = false
+				return
+			}
 			resetFlag(t, cmd.Flags(), f.Name, f.DefValue)
 		})
 	}
