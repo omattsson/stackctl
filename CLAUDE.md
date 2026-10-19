@@ -101,7 +101,8 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
 **Global flags**: `--output`/`-o table|json|yaml`, `--quiet`/`-q`, `--api-url`, `--api-key`, `--no-color`, `--insecure`, `--debug` (or `STACKCTL_DEBUG=1`; logs HTTP requests and responses to stderr)
 
 **Output modes**:
-- `table` (default): human-readable with colored status badges
+- `table` (default): human-readable with colored status badges. Colors go only to a terminal: `--no-color`, `NO_COLOR` (non-empty) or a stdout that is not a terminal turn them off (`root.go`: `noColorEnv`, `isTerminalWriter`).
+- Embedded structs in `pkg/types` (`Base`, `StackTemplate`, `TemplateVersion`) carry `yaml:",inline"`, so `-o yaml` has the same top-level keys as `-o json`. Add the tag to every new embedded struct.
 - `json`: machine-readable, full API response
 - `yaml`: machine-readable, full API response
 - `--quiet`: IDs only, one per line (pipeable to `xargs`)

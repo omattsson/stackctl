@@ -177,6 +177,9 @@ func pluginEnv(cmd *cobra.Command) []string {
 				env = setEnv(env, "NO_COLOR", "1")
 			}
 		}
+	} else if noColorEnv() {
+		// NO_COLOR also turns off the colors of stackctl itself.
+		env = setEnv(env, "STACKCTL_NO_COLOR", "1")
 	}
 	if !hasEnv(env, "STACKCTL_CONFIG_DIR") {
 		// The directory stackctl itself uses, so a plugin that reads the

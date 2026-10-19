@@ -84,7 +84,7 @@ When reviewing PRs for this project, check:
 ### Global Flags
 - `--output`, `-o` — table (default), json, yaml
 - `--quiet`, `-q` — IDs only, one per line
-- `--no-color` — disable colored output
+- `--no-color` — disable colored output (also off with `NO_COLOR` or when stdout is not a terminal)
 - `--api-url` — override API server URL
 - `--api-key` — override API key
 - `--insecure` — skip TLS verification (prints warning)
