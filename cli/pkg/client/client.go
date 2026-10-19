@@ -1149,6 +1149,67 @@ func (c *Client) UpdateTemplateChart(templateID, chartID string, req *types.Upda
 	return &chart, nil
 }
 
+// AddDefinitionChart adds a chart to a stack definition (POST
+// /api/v1/stack-definitions/:id/charts; devops or admin).
+func (c *Client) AddDefinitionChart(defID string, req *types.UpdateChartConfigRequest) (*types.ChartConfig, error) {
+	var chart types.ChartConfig
+	if err := c.Post(fmt.Sprintf("/api/v1/stack-definitions/%s/charts", defID), req, &chart); err != nil {
+		return nil, err
+	}
+	return &chart, nil
+}
+
+// DeleteDefinitionChart removes a chart from a stack definition (devops or
+// admin).
+func (c *Client) DeleteDefinitionChart(defID, chartID string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/stack-definitions/%s/charts/%s", defID, chartID))
+}
+
+// CheckDefinitionUpgrade reports whether the source template of a
+// definition has a newer published version.
+func (c *Client) CheckDefinitionUpgrade(defID string) (*types.UpgradeCheck, error) {
+	var check types.UpgradeCheck
+	if err := c.Get(fmt.Sprintf("/api/v1/stack-definitions/%s/check-upgrade", defID), &check); err != nil {
+		return nil, err
+	}
+	return &check, nil
+}
+
+// UpgradeDefinition upgrades a definition to the latest published version
+// of its source template and returns the definition with its charts.
+func (c *Client) UpgradeDefinition(defID string) (*types.StackDefinition, error) {
+	var def types.StackDefinition
+	if err := c.Post(fmt.Sprintf("/api/v1/stack-definitions/%s/upgrade", defID), nil, &def); err != nil {
+		return nil, err
+	}
+	return &def, nil
+}
+
+// SetDefinitionTemplateLink links a definition to a template version, or
+// removes the link when req.TemplateID is empty (devops or admin).
+func (c *Client) SetDefinitionTemplateLink(defID string, req *types.TemplateLinkRequest) (*types.StackDefinition, error) {
+	var def types.StackDefinition
+	if err := c.Put(fmt.Sprintf("/api/v1/stack-definitions/%s/template-link", defID), req, &def); err != nil {
+		return nil, err
+	}
+	return &def, nil
+}
+
+// AddTemplateChart adds a chart to the working copy of a template (POST
+// /api/v1/templates/:id/charts; template owner or admin).
+func (c *Client) AddTemplateChart(templateID string, req *types.UpdateTemplateChartRequest) (*types.ChartConfig, error) {
+	var chart types.ChartConfig
+	if err := c.Post(fmt.Sprintf("/api/v1/templates/%s/charts", templateID), req, &chart); err != nil {
+		return nil, err
+	}
+	return &chart, nil
+}
+
+// DeleteTemplateChart removes a chart from the working copy of a template.
+func (c *Client) DeleteTemplateChart(templateID, chartID string) error {
+	return c.Delete(fmt.Sprintf("/api/v1/templates/%s/charts/%s", templateID, chartID))
+}
+
 // GetDefinitionChart returns a single chart config within a definition.
 func (c *Client) GetDefinitionChart(defID, chartID string) (*types.ChartConfig, error) {
 	var chart types.ChartConfig
