@@ -73,13 +73,16 @@ func makeIDs(n int) []string {
 // resetListFlags resets the shared list flags of cmd when the test ends.
 func resetListFlags(t *testing.T, cmd *cobra.Command) {
 	t.Helper()
-	t.Cleanup(func() {
+	// Reset before the test too: another test can leave a flag Changed.
+	reset := func() {
 		if cmd.Flags().Lookup("mine") != nil {
 			resetFlag(t, cmd.Flags(), "mine", "false")
 		}
 		resetFlag(t, cmd.Flags(), "page", "0")
 		resetFlag(t, cmd.Flags(), flagPageSize, "0")
-	})
+	}
+	reset()
+	t.Cleanup(reset)
 }
 
 func TestListCmds_FooterWhenMoreItems(t *testing.T) {

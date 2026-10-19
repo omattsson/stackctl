@@ -624,6 +624,56 @@ func (c *Client) ListStacks(params map[string]string) (*types.ListResponse[types
 	return &resp, nil
 }
 
+// FollowStack makes the caller follow a stack instance (idempotent).
+func (c *Client) FollowStack(id string) (*types.FollowState, error) {
+	var state types.FollowState
+	if err := c.Post(fmt.Sprintf("/api/v1/stack-instances/%s/follow", id), nil, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// UnfollowStack stops the caller from following a stack instance
+// (idempotent).
+func (c *Client) UnfollowStack(id string) (*types.FollowState, error) {
+	var state types.FollowState
+	if err := c.doJSON(http.MethodDelete, fmt.Sprintf("/api/v1/stack-instances/%s/follow", id), nil, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// GetDeployPreview returns the merged values that the next deploy of a
+// stack instance uses, for each chart, without a deploy.
+func (c *Client) GetDeployPreview(id string) (*types.DeployPreview, error) {
+	var preview types.DeployPreview
+	if err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/deploy-preview", id), &preview); err != nil {
+		return nil, err
+	}
+	return &preview, nil
+}
+
+// GetStackPods returns the live pod status of a stack namespace, with the
+// namespace events (GET /api/v1/stack-instances/:id/pods). Unlike
+// GetStackStatus, the server reads the cluster directly.
+func (c *Client) GetStackPods(id string) (*types.InstanceStatus, error) {
+	var status types.InstanceStatus
+	if err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/pods", id), &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+// ListRecentStacks returns the 5 most recently updated stack instances of
+// the caller (GET /api/v1/stack-instances/recent).
+func (c *Client) ListRecentStacks() ([]types.StackInstance, error) {
+	var instances []types.StackInstance
+	if err := c.Get("/api/v1/stack-instances/recent", &instances); err != nil {
+		return nil, err
+	}
+	return instances, nil
+}
+
 // GetStack returns a single stack instance by ID.
 func (c *Client) GetStack(id string) (*types.StackInstance, error) {
 	var instance types.StackInstance

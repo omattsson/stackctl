@@ -356,27 +356,32 @@ Examples:
 		case output.FormatYAML:
 			return printer.PrintYAML(resp)
 		default:
-			headers := []string{"ID", "NAME", "STATUS", "OWNER", "BRANCH", "CLUSTER", "DEPLOYED AT", "EXPIRES"}
-			rows := make([][]string, len(resp.Data))
-			for i, s := range resp.Data {
-				cluster := s.ClusterName
-				if cluster == "" && s.ClusterID != nil {
-					cluster = *s.ClusterID
-				}
-				rows[i] = []string{
-					s.ID,
-					s.Name,
-					printer.StatusColor(s.Status),
-					displayName(s.OwnerUsername, s.Owner),
-					s.Branch,
-					cluster,
-					formatTime(s.DeployedAt),
-					expiryText(s.TTLMinutes, s.ExpiresAt),
-				}
-			}
-			return printer.PrintTable(headers, rows)
+			return printStackTable(resp.Data)
 		}
 	},
+}
+
+// printStackTable prints stack instances as the table of "stack list".
+func printStackTable(items []types.StackInstance) error {
+	headers := []string{"ID", "NAME", "STATUS", "OWNER", "BRANCH", "CLUSTER", "DEPLOYED AT", "EXPIRES"}
+	rows := make([][]string, len(items))
+	for i, s := range items {
+		cluster := s.ClusterName
+		if cluster == "" && s.ClusterID != nil {
+			cluster = *s.ClusterID
+		}
+		rows[i] = []string{
+			s.ID,
+			s.Name,
+			printer.StatusColor(s.Status),
+			displayName(s.OwnerUsername, s.Owner),
+			s.Branch,
+			cluster,
+			formatTime(s.DeployedAt),
+			expiryText(s.TTLMinutes, s.ExpiresAt),
+		}
+	}
+	return printer.PrintTable(headers, rows)
 }
 
 var stackGetCmd = &cobra.Command{
@@ -2180,11 +2185,19 @@ func printInstanceWithURLs(instance *types.StackInstance, urls []string) error {
 			{Key: "Namespace", Value: instance.Namespace},
 			{Key: "Cluster", Value: displayNameWithID(instance.ClusterName, clusterID)},
 			{Key: "Definition", Value: displayNameWithID(instance.DefinitionName, instance.StackDefinitionID)},
+		}
+		if instance.Following != nil {
+			fields = append(fields, output.KeyValue{Key: "Following", Value: yesNo(*instance.Following)})
+		}
+		if instance.FollowerCount != nil {
+			fields = append(fields, output.KeyValue{Key: "Followers", Value: strconv.FormatInt(*instance.FollowerCount, 10)})
+		}
+		fields = append(fields, []output.KeyValue{
 			{Key: "TTL", Value: ttlText(instance.TTLMinutes, instance.ExpiresAt)},
 			{Key: "Expires At", Value: expiryText(instance.TTLMinutes, instance.ExpiresAt)},
 			{Key: "Deployed At", Value: formatTime(instance.DeployedAt)},
 			{Key: "Created At", Value: instance.CreatedAt.Format(time.RFC3339)},
-		}
+		}...)
 		if instance.ErrorMessage != "" {
 			fields = append(fields, output.KeyValue{Key: "Error", Value: instance.ErrorMessage})
 		}

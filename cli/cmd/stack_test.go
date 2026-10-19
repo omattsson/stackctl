@@ -1760,8 +1760,8 @@ func TestStackListCmd_PageAndPageSize(t *testing.T) {
 	stackListCmd.Flags().Set("page", "2")
 	stackListCmd.Flags().Set("page-size", "10")
 	t.Cleanup(func() {
-		stackListCmd.Flags().Set("page", "0")
-		stackListCmd.Flags().Set("page-size", "0")
+		resetFlag(t, stackListCmd.Flags(), "page", "0")
+		resetFlag(t, stackListCmd.Flags(), "page-size", "0")
 	})
 
 	err := stackListCmd.RunE(stackListCmd, []string{})
