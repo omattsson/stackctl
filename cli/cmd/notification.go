@@ -110,7 +110,8 @@ Examples:
 			if err := printer.PrintTable(headers, rows); err != nil {
 				return err
 			}
-			printer.PrintMessage("(%d unread of %d total)", page.UnreadCount, page.Total)
+			printer.PrintMessage("(%s unread of %s total)",
+				cappedCount(page.UnreadCount, page.UnreadCountCapped), cappedCount(page.Total, page.TotalCapped))
 			return nil
 		}
 	},
@@ -122,29 +123,38 @@ var notificationCountCmd = &cobra.Command{
 	Long: `Print the unread notification count for the authenticated user.
 
 In table mode (default) the output is a single integer suitable for shell
-scripting; -o json wraps it in {"unread_count": N} matching the server
-response shape.
+scripting; -o json prints the server response,
+{"unread_count": N, "unread_count_capped": false}.
+
+The server counts at most 1000 unread notifications. Above that, the
+count is 1000, unread_count_capped is true and table mode also writes a
+note to stderr.
 
 Examples:
   stackctl notification count          # 7
-  stackctl notification count -o json  # {"unread_count":7}`,
+  stackctl notification count -o json  # {"unread_count":7,"unread_count_capped":false}`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		count, err := c.CountUnreadNotifications()
+		resp, err := c.UnreadNotificationCount()
 		if err != nil {
 			return err
 		}
 		switch printer.Format {
 		case output.FormatJSON:
-			return printer.PrintJSON(types.UnreadCountResponse{UnreadCount: count})
+			return printer.PrintJSON(resp)
 		case output.FormatYAML:
-			return printer.PrintYAML(types.UnreadCountResponse{UnreadCount: count})
+			return printer.PrintYAML(resp)
 		default:
-			fmt.Fprintln(printer.Writer, count)
+			// stdout stays a bare integer for scripts; the cap goes to stderr.
+			fmt.Fprintln(printer.Writer, resp.UnreadCount)
+			if resp.UnreadCountCapped {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Note: more than %d notifications are unread; the server stops counting at %d.\n",
+					resp.UnreadCount, resp.UnreadCount)
+			}
 			return nil
 		}
 	},
@@ -462,3 +472,12 @@ func ResetNotificationFlagsForTest() {
 }
 
 func resetNotificationFlagsForTest() { ResetNotificationFlagsForTest() }
+
+// cappedCount formats a notification count of the server: "1000+" when the
+// server stopped counting (capped), else the number.
+func cappedCount(n int64, capped bool) string {
+	if capped {
+		return strconv.FormatInt(n, 10) + "+"
+	}
+	return strconv.FormatInt(n, 10)
+}
