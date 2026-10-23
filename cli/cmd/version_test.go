@@ -14,7 +14,16 @@ import (
 
 // Version tests mutate package-level globals, so they cannot run in parallel.
 
+// restoreVersionInfo restores the build globals and the client User-Agent
+// version when t ends. Every test that changes the build globals calls it.
+func restoreVersionInfo(t *testing.T) {
+	t.Helper()
+	prevVersion, prevCommit, prevDate := buildVersion, buildCommit, buildDate
+	t.Cleanup(func() { SetVersionInfo(prevVersion, prevCommit, prevDate) })
+}
+
 func TestVersionCmd_Table(t *testing.T) {
+	restoreVersionInfo(t)
 	buildVersion = "1.2.3"
 	buildCommit = "abc123"
 	buildDate = "2025-01-01"
@@ -35,6 +44,7 @@ func TestVersionCmd_Table(t *testing.T) {
 }
 
 func TestVersionCmd_JSON(t *testing.T) {
+	restoreVersionInfo(t)
 	buildVersion = "2.0.0"
 	buildCommit = "def456"
 	buildDate = "2025-06-15"
@@ -56,8 +66,7 @@ func TestVersionCmd_JSON(t *testing.T) {
 }
 
 func TestSetVersionInfo(t *testing.T) {
-	prevVersion, prevCommit, prevDate := buildVersion, buildCommit, buildDate
-	t.Cleanup(func() { SetVersionInfo(prevVersion, prevCommit, prevDate) })
+	restoreVersionInfo(t)
 
 	SetVersionInfo("3.0.0", "xyz789", "2025-12-25")
 	assert.Equal(t, "3.0.0", buildVersion)
@@ -66,8 +75,7 @@ func TestSetVersionInfo(t *testing.T) {
 }
 
 func TestSetVersionInfo_SetsUserAgent(t *testing.T) {
-	prevVersion, prevCommit, prevDate := buildVersion, buildCommit, buildDate
-	t.Cleanup(func() { SetVersionInfo(prevVersion, prevCommit, prevDate) })
+	restoreVersionInfo(t)
 
 	SetVersionInfo("3.1.4", "abc", "2026-01-01")
 	assert.Equal(t, "3.1.4", buildVersion)

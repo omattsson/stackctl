@@ -46,8 +46,8 @@ func TestFormatUserAgent(t *testing.T) {
 // run in parallel: Go runs the parallel tests after it, and it restores the
 // version before it returns.
 func TestUserAgent_Requests(t *testing.T) {
-	prev, _ := version.Load().(string)
-	t.Cleanup(func() { SetVersion(prev) })
+	prev := currentUserAgent.Load()
+	t.Cleanup(func() { currentUserAgent.Store(prev) })
 
 	SetVersion("")
 	assert.Equal(t, wantUserAgent("dev"), UserAgent(), "no version means dev")
@@ -59,9 +59,9 @@ func TestUserAgent_Requests(t *testing.T) {
 	tests := []struct {
 		name string
 		// run sends the request to the server URL.
-		run func(t *testing.T, c *Client) error
+		run func(c *Client) error
 		// handler answers the request (nil: 200 with an empty JSON object).
-		handler func(w http.ResponseWriter, r *http.Request)
+		handler func(t *testing.T, w http.ResponseWriter, r *http.Request)
 		// wantCalls is the number of requests that must carry the header.
 		wantCalls int
 		// setup sets the credentials (nil: Token "jwt-1").
@@ -69,24 +69,24 @@ func TestUserAgent_Requests(t *testing.T) {
 	}{
 		{
 			name:      "API request",
-			run:       func(_ *testing.T, c *Client) error { return c.Get("/api/v1/stack-instances", nil) },
+			run:       func(c *Client) error { return c.Get("/api/v1/stack-instances", nil) },
 			wantCalls: 1,
 		},
 		{
 			name:      "session request",
-			run:       func(_ *testing.T, c *Client) error { return c.Logout("r1") },
+			run:       func(c *Client) error { return c.Logout("r1") },
 			wantCalls: 1,
 		},
 		{
 			name: "WebSocket upgrade",
-			run: func(_ *testing.T, c *Client) error {
+			run: func(c *Client) error {
 				conn, err := c.dialWS(context.Background(), "/ws", nil)
 				if err == nil {
 					conn.Close()
 				}
 				return err
 			},
-			handler: func(w http.ResponseWriter, r *http.Request) {
+			handler: func(_ *testing.T, w http.ResponseWriter, r *http.Request) {
 				conn, err := upgrader.Upgrade(w, r, nil)
 				if err == nil {
 					conn.Close()
@@ -96,14 +96,14 @@ func TestUserAgent_Requests(t *testing.T) {
 		},
 		{
 			name: "WebSocket query-param fallback after 401",
-			run: func(_ *testing.T, c *Client) error {
+			run: func(c *Client) error {
 				conn, err := c.dialWS(context.Background(), "/ws", nil)
 				if err == nil {
 					conn.Close()
 				}
 				return err
 			},
-			handler: func(w http.ResponseWriter, r *http.Request) {
+			handler: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				if r.URL.Query().Get("token") == "" {
 					assert.Equal(t, "Bearer jwt-1", r.Header.Get("Authorization"), "first dial uses the header")
 					w.WriteHeader(http.StatusUnauthorized)
@@ -121,14 +121,14 @@ func TestUserAgent_Requests(t *testing.T) {
 		{
 			name:  "WebSocket upgrade with API key",
 			setup: func(c *Client) { c.APIKey = "key-1" },
-			run: func(_ *testing.T, c *Client) error {
+			run: func(c *Client) error {
 				conn, err := c.dialWS(context.Background(), "/ws", nil)
 				if err == nil {
 					conn.Close()
 				}
 				return err
 			},
-			handler: func(w http.ResponseWriter, r *http.Request) {
+			handler: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "key-1", r.Header.Get("X-API-Key"))
 				assert.Empty(t, r.Header.Get("Authorization"))
 				conn, err := upgrader.Upgrade(w, r, nil)
@@ -141,14 +141,14 @@ func TestUserAgent_Requests(t *testing.T) {
 		{
 			name:  "WebSocket API key refused, JWT fallback",
 			setup: func(c *Client) { c.APIKey = "key-1"; c.Token = "jwt-1" },
-			run: func(_ *testing.T, c *Client) error {
+			run: func(c *Client) error {
 				conn, err := c.dialWS(context.Background(), "/ws", nil)
 				if err == nil {
 					conn.Close()
 				}
 				return err
 			},
-			handler: func(w http.ResponseWriter, r *http.Request) {
+			handler: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				if r.URL.Query().Get("token") == "" {
 					assert.Equal(t, "key-1", r.Header.Get("X-API-Key"), "first dial uses the API key")
 					assert.Empty(t, r.Header.Get("Authorization"))
@@ -174,7 +174,7 @@ func TestUserAgent_Requests(t *testing.T) {
 					calls.Add(1)
 				}
 				if tt.handler != nil {
-					tt.handler(w, r)
+					tt.handler(t, w, r)
 					return
 				}
 				writeJSON(w, http.StatusOK, map[string]string{})
@@ -187,8 +187,11 @@ func TestUserAgent_Requests(t *testing.T) {
 			} else {
 				c.Token = "jwt-1"
 			}
-			require.NoError(t, tt.run(t, c))
-			srv.Close() // wait for the handlers before reading calls
+			require.NoError(t, tt.run(c))
+			// Close waits for the HTTP handlers, but not for a handler after
+			// a WebSocket Upgrade (hijacked connection): do not assert in a
+			// handler after Upgrade. calls is counted before the handler.
+			srv.Close()
 			assert.Equal(t, int32(tt.wantCalls), calls.Load())
 		})
 	}

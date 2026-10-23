@@ -8,21 +8,28 @@ import (
 	"sync/atomic"
 )
 
-// version is the stackctl version in the User-Agent header. main sets it
-// once at startup through cmd.SetVersionInfo and SetVersion.
-var version atomic.Value // string
+// currentUserAgent is the User-Agent header value of every request.
+// SetVersion builds it once; every request only loads it. main sets it at
+// startup through cmd.SetVersionInfo; nil means "dev".
+var currentUserAgent atomic.Pointer[string]
+
+// devUserAgent is the User-Agent when SetVersion was never called.
+var devUserAgent = formatUserAgent("")
 
 // SetVersion sets the stackctl version that every request reports in its
 // User-Agent header. An empty version means "dev".
 func SetVersion(v string) {
-	version.Store(v)
+	ua := formatUserAgent(v)
+	currentUserAgent.Store(&ua)
 }
 
 // UserAgent returns the User-Agent header value of every request:
 // "stackctl/<version> (<os>/<arch>)".
 func UserAgent() string {
-	v, _ := version.Load().(string)
-	return formatUserAgent(v)
+	if ua := currentUserAgent.Load(); ua != nil {
+		return *ua
+	}
+	return devUserAgent
 }
 
 // formatUserAgent builds the header value. Every byte of v that is not an
