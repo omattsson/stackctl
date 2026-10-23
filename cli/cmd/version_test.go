@@ -3,8 +3,10 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"runtime"
 	"testing"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,8 +56,20 @@ func TestVersionCmd_JSON(t *testing.T) {
 }
 
 func TestSetVersionInfo(t *testing.T) {
+	prevVersion, prevCommit, prevDate := buildVersion, buildCommit, buildDate
+	t.Cleanup(func() { SetVersionInfo(prevVersion, prevCommit, prevDate) })
+
 	SetVersionInfo("3.0.0", "xyz789", "2025-12-25")
 	assert.Equal(t, "3.0.0", buildVersion)
 	assert.Equal(t, "xyz789", buildCommit)
 	assert.Equal(t, "2025-12-25", buildDate)
+}
+
+func TestSetVersionInfo_SetsUserAgent(t *testing.T) {
+	prevVersion, prevCommit, prevDate := buildVersion, buildCommit, buildDate
+	t.Cleanup(func() { SetVersionInfo(prevVersion, prevCommit, prevDate) })
+
+	SetVersionInfo("3.1.4", "abc", "2026-01-01")
+	assert.Equal(t, "3.1.4", buildVersion)
+	assert.Equal(t, "stackctl/3.1.4 ("+runtime.GOOS+"/"+runtime.GOARCH+")", client.UserAgent())
 }

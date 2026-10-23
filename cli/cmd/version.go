@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,7 @@ func SetVersionInfo(version, commit, date string) {
 	buildVersion = version
 	buildCommit = commit
 	buildDate = date
+	client.SetVersion(version)
 }
 
 var versionCmd = &cobra.Command{

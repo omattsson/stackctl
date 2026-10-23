@@ -325,6 +325,8 @@ With `--id`, a connection that ends for another reason before every listed insta
 
 stackctl writes any `Warning` header from the API (for example a deprecation notice) to stderr as `Warning: <text>`, for every command.
 
+Every request, also the WebSocket upgrade, sends `User-Agent: stackctl/<version> (<os>/<arch>)`, for example `stackctl/1.4.0 (linux/amd64)`. The version is the one of `stackctl version`.
+
 ### Templates
 
 ```bash

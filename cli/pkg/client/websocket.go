@@ -266,6 +266,7 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 	}
 
 	header := http.Header{}
+	setUserAgent(header)
 	if c.APIKey != "" {
 		header.Set("X-API-Key", c.APIKey)
 	} else if token != "" {
@@ -293,7 +294,10 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 	// transparently switches to the JWT path (documented precedence).
 	if resp != nil && resp.StatusCode == http.StatusUnauthorized && token != "" {
 		fallbackURL := appendQueryToken(wsURL, token)
-		conn2, resp2, err2 := dialer.DialContext(ctx, fallbackURL, nil)
+		// The fallback carries the token in the URL only, never in a header.
+		fallbackHeader := http.Header{}
+		setUserAgent(fallbackHeader)
+		conn2, resp2, err2 := dialer.DialContext(ctx, fallbackURL, fallbackHeader)
 		if err2 != nil {
 			if hsErr := handshakeError(resp2, err2, false); hsErr != nil {
 				return nil, hsErr
