@@ -662,10 +662,17 @@ type Notification struct {
 // Mirrors backend models.PaginatedNotifications.
 //
 // Field declaration order is alphabetical by json tag (see Notification).
+//
+// The server caps both counts (k8s-stack-manager #654): Total is exact up to
+// offset + 1000 and UnreadCount up to 1000. Above that, the count is the cap
+// and TotalCapped or UnreadCountCapped is true (at least one more exists).
+// An older server sends neither flag (false).
 type PaginatedNotifications struct {
-	Notifications []Notification `json:"notifications" yaml:"notifications"`
-	Total         int64          `json:"total" yaml:"total"`
-	UnreadCount   int64          `json:"unread_count" yaml:"unread_count"`
+	Notifications     []Notification `json:"notifications" yaml:"notifications"`
+	Total             int64          `json:"total" yaml:"total"`
+	TotalCapped       bool           `json:"total_capped" yaml:"total_capped"`
+	UnreadCount       int64          `json:"unread_count" yaml:"unread_count"`
+	UnreadCountCapped bool           `json:"unread_count_capped" yaml:"unread_count_capped"`
 }
 
 // NotificationPreference is one row in the notification-preference payload
@@ -694,11 +701,13 @@ type NotificationPreference struct {
 	UserID    string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
 }
 
-// UnreadCountResponse is the success-path response of GET /api/v1/notifications/count.
-// The endpoint returns a single key {"unread_count": N} rather than a wrapped
-// object — modelled as a struct so JSON/YAML decode cleanly.
+// UnreadCountResponse is the success-path response of GET /api/v1/notifications/count:
+// {"unread_count": N, "unread_count_capped": false}. The server counts at most
+// 1000 unread notifications (k8s-stack-manager #654); above that UnreadCount
+// is 1000 and UnreadCountCapped is true. An older server sends no flag (false).
 type UnreadCountResponse struct {
-	UnreadCount int64 `json:"unread_count" yaml:"unread_count"`
+	UnreadCount       int64 `json:"unread_count" yaml:"unread_count"`
+	UnreadCountCapped bool  `json:"unread_count_capped" yaml:"unread_count_capped"`
 }
 
 // Favorite is one row in the authenticated user's favorites collection.

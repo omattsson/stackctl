@@ -2208,15 +2208,28 @@ func (c *Client) ListNotifications(p NotificationListParams) (*types.PaginatedNo
 	return &resp, nil
 }
 
-// CountUnreadNotifications returns the unread count for badge display.
+// CountUnreadNotifications returns the unread count for badge display. The
+// server caps it at 1000; use UnreadNotificationCount to see whether it did.
 //
 // @see GET /api/v1/notifications/count
 func (c *Client) CountUnreadNotifications() (int64, error) {
-	var resp types.UnreadCountResponse
-	if err := c.Get("/api/v1/notifications/count", &resp); err != nil {
+	resp, err := c.UnreadNotificationCount()
+	if err != nil {
 		return 0, err
 	}
 	return resp.UnreadCount, nil
+}
+
+// UnreadNotificationCount returns the unread count and whether the server
+// capped it (UnreadCountCapped: more than UnreadCount are unread).
+//
+// @see GET /api/v1/notifications/count
+func (c *Client) UnreadNotificationCount() (*types.UnreadCountResponse, error) {
+	var resp types.UnreadCountResponse
+	if err := c.Get("/api/v1/notifications/count", &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // MarkNotificationAsRead marks a single notification as read. The backend

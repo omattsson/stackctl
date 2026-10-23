@@ -3426,6 +3426,35 @@ func TestCountUnreadNotifications_Success(t *testing.T) {
 	assert.Equal(t, int64(42), got)
 }
 
+func TestUnreadNotificationCount(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		want types.UnreadCountResponse
+	}{
+		{name: "exact", body: `{"unread_count":42,"unread_count_capped":false}`, want: types.UnreadCountResponse{UnreadCount: 42}},
+		{name: "capped", body: `{"unread_count":1000,"unread_count_capped":true}`, want: types.UnreadCountResponse{UnreadCount: 1000, UnreadCountCapped: true}},
+		{name: "older server without the flag", body: `{"unread_count":5}`, want: types.UnreadCountResponse{UnreadCount: 5}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/api/v1/notifications/count", r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			got, err := New(server.URL).UnreadNotificationCount()
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, *got)
+		})
+	}
+}
+
 func TestMarkNotificationAsRead_Success(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

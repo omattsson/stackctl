@@ -221,6 +221,141 @@ func TestNotificationCountCmd_QuietOutput(t *testing.T) {
 	assert.Equal(t, "7", strings.TrimSpace(buf.String()))
 }
 
+// TestNotificationListCmd_CappedFooter checks the table footer with the
+// capped counts of the server (k8s-stack-manager #654).
+func TestNotificationListCmd_CappedFooter(t *testing.T) {
+	tests := []struct {
+		name string
+		page types.PaginatedNotifications
+		want string
+	}{
+		{name: "exact", page: types.PaginatedNotifications{Total: 2, UnreadCount: 1}, want: "(1 unread of 2 total)"},
+		{name: "total capped", page: types.PaginatedNotifications{Total: 1000, TotalCapped: true, UnreadCount: 3}, want: "(3 unread of 1000+ total)"},
+		{name: "both capped", page: types.PaginatedNotifications{Total: 1000, TotalCapped: true, UnreadCount: 1000, UnreadCountCapped: true}, want: "(1000+ unread of 1000+ total)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page := tt.page
+			page.Notifications = sampleNotifications()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(page)
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			resetNotificationFlagsForTest()
+			defer resetNotificationFlagsForTest()
+			require.NoError(t, notificationListCmd.RunE(notificationListCmd, []string{}))
+			assert.Contains(t, buf.String(), tt.want)
+		})
+	}
+}
+
+// TestNotificationCountCmd_Capped checks that a capped count keeps stdout a
+// bare integer and writes a note to stderr; -o json keeps the flag.
+func TestNotificationCountCmd_Capped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"unread_count":1000,"unread_count_capped":true}`))
+	}))
+	defer server.Close()
+
+	t.Run("table", func(t *testing.T) {
+		buf := setupStackTestCmd(t, server.URL)
+		var stderr bytes.Buffer
+		notificationCountCmd.SetErr(&stderr)
+		t.Cleanup(func() { notificationCountCmd.SetErr(nil) })
+
+		require.NoError(t, notificationCountCmd.RunE(notificationCountCmd, []string{}))
+		assert.Equal(t, "1000", strings.TrimSpace(buf.String()))
+		assert.Contains(t, stderr.String(), "more than 1000 notifications are unread")
+	})
+
+	t.Run("json", func(t *testing.T) {
+		buf := setupStackTestCmd(t, server.URL)
+		printer.Format = output.FormatJSON
+		require.NoError(t, notificationCountCmd.RunE(notificationCountCmd, []string{}))
+
+		var got types.UnreadCountResponse
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+		assert.Equal(t, types.UnreadCountResponse{UnreadCount: 1000, UnreadCountCapped: true}, got)
+	})
+
+	t.Run("yaml", func(t *testing.T) {
+		buf := setupStackTestCmd(t, server.URL)
+		printer.Format = output.FormatYAML
+		require.NoError(t, notificationCountCmd.RunE(notificationCountCmd, []string{}))
+		assert.Contains(t, buf.String(), "unread_count: 1000")
+		assert.Contains(t, buf.String(), "unread_count_capped: true")
+	})
+
+	t.Run("quiet", func(t *testing.T) {
+		buf := setupStackTestCmd(t, server.URL)
+		printer.Quiet = true
+		var stderr bytes.Buffer
+		notificationCountCmd.SetErr(&stderr)
+		t.Cleanup(func() { notificationCountCmd.SetErr(nil) })
+
+		require.NoError(t, notificationCountCmd.RunE(notificationCountCmd, []string{}))
+		assert.Equal(t, "1000", strings.TrimSpace(buf.String()), "stdout stays a bare integer")
+		assert.Contains(t, stderr.String(), "more than 1000")
+	})
+}
+
+// TestNotificationListCmd_JSONCarriesCapFlags checks that -o json passes the
+// cap flags through, and gives false for an older server without them.
+func TestNotificationListCmd_JSONCarriesCapFlags(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantTotal  bool
+		wantUnread bool
+	}{
+		{name: "capped", body: `{"notifications":[],"total":1000,"total_capped":true,"unread_count":1000,"unread_count_capped":true}`, wantTotal: true, wantUnread: true},
+		{name: "older server", body: `{"notifications":[],"total":2,"unread_count":1}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			resetNotificationFlagsForTest()
+			defer resetNotificationFlagsForTest()
+			printer.Format = output.FormatJSON
+			require.NoError(t, notificationListCmd.RunE(notificationListCmd, []string{}))
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+			assert.Equal(t, tt.wantTotal, got["total_capped"])
+			assert.Equal(t, tt.wantUnread, got["unread_count_capped"])
+		})
+	}
+}
+
+// TestNotificationCountCmd_NotCappedNoNote checks that an exact count writes
+// nothing to stderr.
+func TestNotificationCountCmd_NotCappedNoNote(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"unread_count":7}`))
+	}))
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	var stderr bytes.Buffer
+	notificationCountCmd.SetErr(&stderr)
+	t.Cleanup(func() { notificationCountCmd.SetErr(nil) })
+
+	require.NoError(t, notificationCountCmd.RunE(notificationCountCmd, []string{}))
+	assert.Equal(t, "7", strings.TrimSpace(buf.String()))
+	assert.Empty(t, stderr.String())
+}
+
 // ---------- notification read ----------
 
 func TestNotificationReadCmd_Success(t *testing.T) {
