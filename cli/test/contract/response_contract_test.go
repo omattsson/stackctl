@@ -65,6 +65,11 @@ func TestResponseSchemas_MatchBackend(t *testing.T) {
 		{name: "CreateNotificationChannelRequest", goType: types.CreateNotificationChannelRequest{}, swaggerDef: "handlers.createChannelRequest", excludeGoTags: []string{"filters"}},
 		{name: "UpdateNotificationChannelRequest", goType: types.UpdateNotificationChannelRequest{}, swaggerDef: "handlers.updateChannelRequest", excludeGoTags: []string{"filters"}},
 		{name: "NotificationChannelFilters", goType: types.NotificationChannelFilters{}, swaggerDef: "models.NotificationChannelFilters"},
+		// The capped counts of k8s-stack-manager #654. notifications is an
+		// array of $ref items; the Notification case checks their fields.
+		{name: "Notification", goType: types.Notification{}, swaggerDef: "models.Notification"},
+		{name: "PaginatedNotifications", goType: types.PaginatedNotifications{}, swaggerDef: "models.PaginatedNotifications"},
+		{name: "UnreadCountResponse", goType: types.UnreadCountResponse{}, swaggerDef: "models.UnreadNotificationCount"},
 		{
 			name:       "NotificationChannel",
 			goType:     types.NotificationChannel{},

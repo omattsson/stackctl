@@ -1372,7 +1372,7 @@
         },
         "/api/v1/auth/login": {
             "post": {
-                "description": "Authenticate with username and password, returns a JWT access token and sets a refresh token cookie",
+                "description": "Authenticate with username and password, returns a JWT access token and sets a refresh token cookie. Without the correct password the answer is always 401 \"Invalid username or password\". A disabled account (403) or the SSO-only restriction (403) is shown only after a correct password.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1418,13 +1418,40 @@
                                 "type": "string"
                             }
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             }
         },
         "/api/v1/auth/logout": {
             "post": {
-                "description": "Revokes the current refresh token and blocklists the access token",
+                "description": "Revokes the session of the refresh token cookie (all refresh tokens of its family), blocklists the access token and closes its WebSockets. When the refresh token lookup or the revoke fails, the cookie is still cleared and the access token blocked, but the answer is 500.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1447,6 +1474,15 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2135,7 +2171,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Removes a cluster registration. Blocked if any stack instances reference this cluster.",
+                "description": "Removes a cluster registration. Blocked (409) if any stack instances reference this cluster. For the default cluster, instances without a cluster ID block it too: they run on the default cluster.",
                 "produces": [
                     "application/json"
                 ],
@@ -3555,7 +3591,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "List the authenticated user's notifications with optional filters and pagination",
+                "description": "List the authenticated user's notifications (newest first) with optional filters and pagination. The total counts at most offset + 1000 notifications: it is exact unless total_capped is true; then total is offset + 1000 and at least total + 1 notifications match. unread_count is always exact.",
                 "produces": [
                     "application/json"
                 ],
@@ -3627,7 +3663,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the unread notification count for badge display",
+                "description": "Returns the unread notification count for badge display. The count is exact unless unread_count_capped is true; then it is 1000, and at least 1001 notifications are unread.",
                 "produces": [
                     "application/json"
                 ],
@@ -3639,10 +3675,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "integer"
-                            }
+                            "$ref": "#/definitions/models.UnreadNotificationCount"
                         }
                     },
                     "401": {
@@ -4582,7 +4615,7 @@
         },
         "/api/v1/stack-definitions/{id}/check-upgrade": {
             "get": {
-                "description": "Check if the latest published snapshot of the source template has another version than the definition's current version. An unpublished template, or one without a snapshot, gives upgrade_available=false.\nchart_diffs has the shape of the version diff chart_diffs: left = the definition charts now (locked values from the current source version snapshot), right = the latest snapshot. change_type \"removed\" means the chart is only in the definition; the upgrade keeps it.",
+                "description": "Check if the latest published snapshot of the source template has another version than the definition's current version. An unpublished template, or one without a snapshot, gives upgrade_available=false.\nchart_diffs has the shape of the version diff chart_diffs: left = the definition charts now (locked values from the current source version snapshot), right = the charts as the upgrade writes them (default values, repository URL, deploy order, and chart version, chart path, source repository and build pipeline when the snapshot has them), with the locked values and required flags of the latest snapshot. change_type \"removed\" means the chart is only in the definition; the upgrade keeps it. changes lists the same charts by change_type, so both always agree.\nWithout an upgrade, reason says why: no_source_template (the definition has no source template), no_published_version (the template is not published or has no snapshot) or up_to_date (current_version is the latest_version).",
                 "consumes": [
                     "application/json"
                 ],
@@ -4997,7 +5030,7 @@
                 }
             },
             "post": {
-                "description": "Create a new stack instance from a definition.\nExpiry: ttl_minutes counts from the deploy (omitted: DEFAULT_INSTANCE_TTL_MINUTES; 0: no expiry). expires_at (RFC 3339 with a time zone) is a fixed stop time instead: ttl_minutes becomes 0, and a deploy keeps the stop time. expires_at must be in the future and not later than now + MAX_INSTANCE_TTL_DAYS (default 30). A TTL above that limit, or expires_at together with ttl_minutes, gives 400.",
+                "description": "Create a new stack instance from a definition.\nThe owner and the subscribed notification channels get the notification instance.created, with the caller as the trigger.\nExpiry: ttl_minutes counts from the deploy (omitted: DEFAULT_INSTANCE_TTL_MINUTES; 0: no expiry). expires_at (RFC 3339 with a time zone) is a fixed stop time instead: ttl_minutes becomes 0, and a deploy keeps the stop time. expires_at must be in the future and not later than now + MAX_INSTANCE_TTL_DAYS (default 30). A TTL above that limit, or expires_at together with ttl_minutes, gives 400.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5063,7 +5096,7 @@
                         }
                     },
                     "409": {
-                        "description": "Namespace already exists, or the name is taken on the cluster (UNIQUE_INSTANCE_NAMES)",
+                        "description": "Namespace already exists, the name is taken on the cluster (UNIQUE_INSTANCE_NAMES), or the per-user instance limit of the cluster is reached ({error})",
                         "schema": {
                             "$ref": "#/definitions/handlers.NamespaceConflictResponse"
                         }
@@ -5657,6 +5690,86 @@
                 }
             }
         },
+        "/api/v1/stack-instances/{id}/action-runs": {
+            "get": {
+                "description": "Returns the stored custom action runs of the instance, newest first, with cursor paging (no total). Any authenticated user who can view the instance gets the list (the rule of the action list). parameters holds the declared parameters only; a sensitive parameter shows [redacted]. status_code 0 means that no answer came (the subscriber was unreachable, or the client closed the request). message is the refusal reason of the subscriber (a sensitive value sent with the call shows [redacted]) or a fixed text. started_by is omitted when the user no longer exists. action_label is the current label of the action, else its name. has_job_log is true when the run has a job_id and the action still has a log_path. can_view_logs is true for the owner, an admin and a devops user: only they may read a job log. Without a repository the list is empty.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-instances"
+                ],
+                "summary": "List the action runs of a stack instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Rows per page (default 20; a value above 100 counts as 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque cursor from next_cursor of the previous page",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.actionRunListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid limit or cursor parameter",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Instance not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/stack-instances/{id}/actions": {
             "get": {
                 "description": "Returns the registered actions with their UI metadata (label, description, confirmation text, parameter schema) and a can_invoke flag. Any authenticated user who can view the instance gets the list; can_invoke is true for the owner, an admin and a devops user. The response never contains the subscriber URL, secret or headers. Without an action registry the list is empty.",
@@ -5736,7 +5849,7 @@
         },
         "/api/v1/stack-instances/{id}/actions/{name}": {
             "post": {
-                "description": "Dispatches to the action subscriber webhook and wraps its response in an envelope containing action, instance_id, status_code, and result fields. The subscriber's JSON body is nested under the result key. Returns 200 even for non-2xx subscriber responses — check status_code to distinguish. For an answer with status 400 or higher the envelope also has message: the subscriber's reason from a JSON string body or from the message, error, detail or reason field (one line, at most 500 characters, URLs replaced by [url]). A text/plain body of such an answer becomes a JSON string result; another non-JSON body gives a null result. A non-JSON body with a status below 400 gives 502. When the action declares parameters, they are checked (type, required, enum options) before the call; undeclared parameters pass through. When the action has a log_path, the subscriber answered 2xx and the result has a valid job_id, the envelope also has job_id: poll GET /stack-instances/{id}/actions/{name}/jobs/{job_id}/log for the job log.",
+                "description": "Dispatches to the action subscriber webhook and wraps its response in an envelope containing action, instance_id, status_code, and result fields. The subscriber's JSON body is nested under the result key. Returns 200 even for non-2xx subscriber responses — check status_code to distinguish. For an answer with status 400 or higher the envelope also has message: the subscriber's reason from a JSON string body or from the message, error, detail or reason field (one line, at most 500 characters, URLs replaced by [url]). A text/plain body of such an answer becomes a JSON string result; another non-JSON body gives a null result. A non-JSON body with a status below 400 gives 502. When the action declares parameters, they are checked (type, required, enum options) before the call; undeclared parameters pass through. When the action has a log_path, the subscriber answered 2xx and the result has a valid job_id, the envelope also has job_id: poll GET /stack-instances/{id}/actions/{name}/jobs/{job_id}/log for the job log. Each call that reaches the subscriber (also an unreachable subscriber or a non-JSON body) stores one action run (GET /stack-instances/{id}/action-runs) with the caller, the declared parameters only (a sensitive parameter as [redacted]), the status code, the message and the job_id. The envelope has run_id when the run was stored; a failed write never fails the call.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5788,6 +5901,15 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "403": {
                         "description": "Caller is not the owner, an admin or a devops user",
                         "schema": {
@@ -5799,6 +5921,15 @@
                     },
                     "404": {
                         "description": "Instance not found or action not registered",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5829,7 +5960,7 @@
         },
         "/api/v1/stack-instances/{id}/actions/{name}/jobs/{job_id}/log": {
             "get": {
-                "description": "Fetches the job log of an asynchronous action from the action subscriber, from the byte offset to the end (at most 256 KiB per call). The action config must have a log_path. Poll with next_offset until done is true. Only the instance owner, an admin or a devops user may read the job log (the same rule as invoke). The backend signs the subscriber request like an invoke call and never returns the subscriber URL.",
+                "description": "Fetches the job log of an asynchronous action from the action subscriber, from the byte offset to the end (at most 256 KiB per call). The action config must have a log_path. Poll with next_offset until done is true. The first poll that returns done stores the final job status and the finish time on the action run of the job (GET /stack-instances/{id}/action-runs); later polls change nothing. Only the instance owner, an admin or a devops user may read the job log (the same rule as invoke). The backend signs the subscriber request like an invoke call and never returns the subscriber URL.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6339,7 +6470,7 @@
         },
         "/api/v1/stack-instances/{id}/clone": {
             "post": {
-                "description": "Create a new draft stack instance as a copy of an existing one. The clone belongs to the caller and uses the cluster and definition of the source.\nIt copies the TTL (unless ttl_minutes or expires_at is given; a future fixed stop time of the source is copied too), the value overrides and the branch overrides. It copies the instance quota override only when the caller owns the source or is admin or devops; for an owner without the admin or devops role only when the override stays within the cluster quota. When it is not copied for that reason (or the cluster quota lookup fails), the response has a warning and the clone uses the cluster quota.\nThe body is optional. Without a name, the server picks the first free name of \u003csource\u003e-copy, \u003csource\u003e-copy-2, ... (the namespace stack-\u003cname\u003e-\u003cowner\u003e must be free). A given name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).",
+                "description": "Create a new draft stack instance as a copy of an existing one. The clone belongs to the caller and uses the cluster and definition of the source.\nIt copies the TTL (unless ttl_minutes or expires_at is given; a future fixed stop time of the source is copied too), the value overrides and the branch overrides. It copies the instance quota override only when the caller owns the source or is admin or devops; for an owner without the admin or devops role only when the override stays within the cluster quota. When it is not copied for that reason (or the cluster quota lookup fails), the response has a warning and the clone uses the cluster quota.\nThe body is optional. Without a name, the server picks the first free name of \u003csource\u003e-copy, \u003csource\u003e-copy-2, ... (the namespace stack-\u003cname\u003e-\u003cowner\u003e must be free). A given name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).\nThe owner and the subscribed notification channels get the notification instance.created, with the caller as the trigger.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6411,7 +6542,7 @@
                         }
                     },
                     "409": {
-                        "description": "Namespace already exists (given name), the name is taken on the cluster (UNIQUE_INSTANCE_NAMES), or no free generated name",
+                        "description": "Namespace already exists (given name), the name is taken on the cluster (UNIQUE_INSTANCE_NAMES), no free generated name, the per-user instance limit of the cluster is reached, or the cluster of the source instance no longer exists ({error})",
                         "schema": {
                             "$ref": "#/definitions/handlers.NamespaceConflictResponse"
                         }
@@ -6498,7 +6629,12 @@
         },
         "/api/v1/stack-instances/{id}/deploy-log": {
             "get": {
-                "description": "Get deployment log history for a stack instance. Supports cursor-based pagination for efficient large dataset traversal.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get deployment log history for a stack instance, newest first. Supports cursor-based pagination for efficient large dataset traversal.\nThe default view (full) returns all fields of each log. The summary view returns the row columns only (no output, values_snapshot or chart_versions) and, without a cursor, highlights (running log, current deploy, latest failure; computed over all logs of the instance, the filters do not apply).\nThe offset path returns total and, when more rows follow, next_cursor. The cursor path returns total: -1.\nWhen the highlights cannot be read, the response has no highlights (the list is still returned).",
                 "produces": [
                     "application/json"
                 ],
@@ -6516,7 +6652,7 @@
                     },
                     {
                         "type": "integer",
-                        "description": "Page size (default 50)",
+                        "description": "Page size (default 50, maximum 100; a larger value gives 100)",
                         "name": "limit",
                         "in": "query"
                     },
@@ -6530,6 +6666,28 @@
                         "type": "string",
                         "description": "Cursor from previous page for cursor-based pagination (overrides offset)",
                         "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "full",
+                            "summary"
+                        ],
+                        "type": "string",
+                        "description": "Response view (default full)",
+                        "name": "view",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma list of actions: deploy, rollback, stop, clean",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma list of statuses: running, success, error, partial",
+                        "name": "status",
                         "in": "query"
                     }
                 ],
@@ -6549,8 +6707,121 @@
                             }
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/stack-instances/{id}/deploy-log/{logId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns one deployment log of the instance with its output, error message and started_by. The values snapshot and the chart versions are not in the response (see the values endpoint).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-instances"
+                ],
+                "summary": "Get one deployment log entry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Deployment Log ID",
+                        "name": "logId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.DeploymentLog"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7361,6 +7632,67 @@
                     },
                     "504": {
                         "description": "Gateway Timeout",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/stack-instances/{id}/quota": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the quota that applies to the namespace of the instance: the cluster quota of the instance's cluster (the default cluster when the instance has none) merged with the instance quota override, with the same merge as the deployer. A non-empty override quantity replaces the cluster value, and an override pod_limit (also 0) replaces the cluster pod_limit. sources names the origin of each field of effective: override, cluster or none. In effective, an empty quantity means no value and pod_limit 0 means no limit. cluster and override are null when they are not set; cluster_id is empty when the instance has no cluster and no default cluster exists. valid is false when the merged quota breaks a quota rule (models.ValidateEffectiveQuota, the check of the deployer and of the background quota write); invalid_reason then names the field, the values and their source, and a deploy of the instance fails until the quota is fixed. can_modify is true when the caller may set or delete the override (the owner, admin or devops). Any authenticated user can read it.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stack-instances"
+                ],
+                "summary": "Get the effective quota of an instance",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Stack Instance ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.EffectiveQuotaResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8962,7 +9294,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Instantiate a template, create an instance, set branch overrides, and trigger deployment in a single call.\ninstance_name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).\nExpiry: ttl_minutes (omitted: DEFAULT_INSTANCE_TTL_MINUTES; 0: no expiry) or expires_at, a fixed stop time (RFC 3339 with a time zone, in the future, not later than now + MAX_INSTANCE_TTL_DAYS). Do not send both (400).\nThe template content comes from the latest published snapshot, not the working copy. A template that is not published, or has no snapshot, gives 409 \"Template has no published version\".\nThe new stack definition is owned by the instance (owner_instance_id): deleting the instance deletes the definition when no other instance uses it. The definition is named after the instance; when the caller already has a definition with that name, the name gets the suffix \" (2)\", \" (3)\", ...",
+                "description": "Instantiate a template, create an instance, set branch overrides, and trigger deployment in a single call.\ninstance_name must be a DNS label (lowercase a-z, 0-9, '-', start and end alphanumeric, at most 50 characters).\nExpiry: ttl_minutes (omitted: DEFAULT_INSTANCE_TTL_MINUTES; 0: no expiry) or expires_at, a fixed stop time (RFC 3339 with a time zone, in the future, not later than now + MAX_INSTANCE_TTL_DAYS). Do not send both (400).\nThe template content comes from the latest published snapshot, not the working copy. A template that is not published, or has no snapshot, gives 409 \"Template has no published version\".\nThe new stack definition is owned by the instance (owner_instance_id): deleting the instance deletes the definition when no other instance uses it. The definition is named after the instance; when the caller already has a definition with that name, the name gets the suffix \" (2)\", \" (3)\", ...\nThe owner and the subscribed notification channels get the notification instance.created, with the caller as the trigger.",
                 "consumes": [
                     "application/json"
                 ],
@@ -9035,7 +9367,7 @@
                         }
                     },
                     "409": {
-                        "description": "Namespace already exists, the name is taken on the cluster (UNIQUE_INSTANCE_NAMES), or the template has no published version ({error})",
+                        "description": "Namespace already exists, the name is taken on the cluster (UNIQUE_INSTANCE_NAMES), the template has no published version, or the per-user instance limit of the cluster is reached ({error})",
                         "schema": {
                             "$ref": "#/definitions/handlers.NamespaceConflictResponse"
                         }
@@ -10024,7 +10356,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Sets the role of a local user. Admin only. The role of an SSO user comes from the identity provider and cannot be changed here (409). An admin cannot change their own role (403), the caller must still be an enabled admin in the database (403), and the last enabled admin cannot lose the admin role (409). An unchanged role is a no-op (changed=false). A change revokes the user's current access tokens, all refresh tokens and open WebSocket connections, so the next request needs a new login with the new role. API keys stay valid and use the new role at once.",
+                "description": "Sets the role of a local user. Admin only. The role of an SSO user comes from the identity provider and cannot be changed here (409). An admin cannot change their own role (403), the caller must still be an enabled admin in the database (403), and the last enabled admin cannot lose the admin role (the own-role and enabled-admin checks reach this first; the 409 is defense in depth). An unchanged role is a no-op (changed=false) and writes no audit entry. A change revokes the user's current access tokens, all refresh tokens and open WebSocket connections, so the next request needs a new login with the new role. API keys stay valid and use the new role at once.",
                 "consumes": [
                     "application/json"
                 ],
@@ -11042,6 +11374,107 @@
                 }
             }
         },
+        "handlers.EffectiveQuotaResponse": {
+            "type": "object",
+            "properties": {
+                "can_modify": {
+                    "type": "boolean"
+                },
+                "cluster": {
+                    "$ref": "#/definitions/models.ResourceQuotaConfig"
+                },
+                "cluster_id": {
+                    "type": "string"
+                },
+                "effective": {
+                    "$ref": "#/definitions/handlers.EffectiveQuotaValues"
+                },
+                "invalid_reason": {
+                    "description": "InvalidReason is the validation error of the merged quota (empty when valid).",
+                    "type": "string",
+                    "example": "cpu_request 3 (instance override) exceeds the effective cpu_limit 2 (cluster quota)"
+                },
+                "override": {
+                    "$ref": "#/definitions/models.InstanceQuotaOverride"
+                },
+                "sources": {
+                    "description": "Sources maps each field of effective to \"override\", \"cluster\" or \"none\".",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "valid": {
+                    "description": "Valid is false when the merged quota breaks a quota rule; a deploy then fails.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.EffectiveQuotaValues": {
+            "type": "object",
+            "properties": {
+                "container_cpu_limit": {
+                    "type": "string",
+                    "example": "500m"
+                },
+                "container_cpu_max": {
+                    "type": "string",
+                    "example": "1"
+                },
+                "container_cpu_request": {
+                    "type": "string",
+                    "example": "100m"
+                },
+                "container_ephemeral_storage_limit": {
+                    "type": "string",
+                    "example": "1Gi"
+                },
+                "container_ephemeral_storage_request": {
+                    "type": "string",
+                    "example": "128Mi"
+                },
+                "container_memory_limit": {
+                    "type": "string",
+                    "example": "512Mi"
+                },
+                "container_memory_max": {
+                    "type": "string",
+                    "example": "1Gi"
+                },
+                "container_memory_request": {
+                    "type": "string",
+                    "example": "128Mi"
+                },
+                "cpu_limit": {
+                    "type": "string",
+                    "example": "2"
+                },
+                "cpu_request": {
+                    "type": "string",
+                    "example": "500m"
+                },
+                "ephemeral_storage_limit": {
+                    "type": "string",
+                    "example": "4Gi"
+                },
+                "memory_limit": {
+                    "type": "string",
+                    "example": "2Gi"
+                },
+                "memory_request": {
+                    "type": "string",
+                    "example": "1Gi"
+                },
+                "pod_limit": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "storage_limit": {
+                    "type": "string",
+                    "example": "10Gi"
+                }
+            }
+        },
         "handlers.LoginRequest": {
             "type": "object",
             "required": [
@@ -11624,6 +12057,10 @@
                 "required": {
                     "type": "boolean"
                 },
+                "sensitive": {
+                    "description": "Sensitive is true when the run history stores \"[redacted]\" instead of\nthe value; the web UI uses a password field.",
+                    "type": "boolean"
+                },
                 "type": {
                     "type": "string",
                     "enum": [
@@ -11631,6 +12068,85 @@
                         "bool",
                         "enum"
                     ]
+                }
+            }
+        },
+        "handlers.actionRunInfo": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "action_label": {
+                    "description": "ActionLabel is the current label of the action, else its name.",
+                    "type": "string"
+                },
+                "finished_at": {
+                    "description": "FinishedAt is the answer time of a run without a job, or the time the\njob log proxy saw the final job status.",
+                    "type": "string"
+                },
+                "has_job_log": {
+                    "description": "HasJobLog is true when the run has a job and the action still has a\nlog_path.",
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "instance_id": {
+                    "type": "string"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "job_status": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "parameters": {
+                    "description": "Parameters holds the declared parameters only; a sensitive value is\n\"[redacted]\".",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "started_by": {
+                    "description": "StartedBy is the username of user_id; omitted when the user is gone.",
+                    "type": "string"
+                },
+                "status_code": {
+                    "description": "StatusCode is the HTTP status of the subscriber; 0 means no answer.",
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.actionRunListResponse": {
+            "type": "object",
+            "properties": {
+                "can_view_logs": {
+                    "description": "CanViewLogs is true when the caller may read job logs (owner, admin,\ndevops).",
+                    "type": "boolean"
+                },
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.actionRunInfo"
+                    }
+                },
+                "instance_id": {
+                    "type": "string"
+                },
+                "next_cursor": {
+                    "description": "NextCursor loads the next page; omitted on the last page.",
+                    "type": "string"
                 }
             }
         },
@@ -11687,6 +12203,9 @@
                 "has_differences": {
                     "type": "boolean"
                 },
+                "left_build_pipeline_id": {
+                    "type": "string"
+                },
                 "left_chart_path": {
                     "type": "string"
                 },
@@ -11706,7 +12225,13 @@
                 "left_sort_order": {
                     "type": "integer"
                 },
+                "left_source_repo_url": {
+                    "type": "string"
+                },
                 "left_values": {
+                    "type": "string"
+                },
+                "right_build_pipeline_id": {
                     "type": "string"
                 },
                 "right_chart_path": {
@@ -11726,6 +12251,9 @@
                 },
                 "right_sort_order": {
                     "type": "integer"
+                },
+                "right_source_repo_url": {
+                    "type": "string"
                 },
                 "right_values": {
                     "type": "string"
@@ -12455,6 +12983,15 @@
                 "latest_version": {
                     "type": "string"
                 },
+                "reason": {
+                    "description": "Reason says why there is no upgrade (only when upgrade_available is\nfalse): no_source_template, no_published_version or up_to_date.",
+                    "type": "string",
+                    "enum": [
+                        "no_source_template",
+                        "no_published_version",
+                        "up_to_date"
+                    ]
+                },
                 "upgrade_available": {
                     "type": "boolean"
                 }
@@ -13160,6 +13697,35 @@
                 }
             }
         },
+        "models.DeployLogHighlights": {
+            "type": "object",
+            "properties": {
+                "current": {
+                    "description": "Current is the deploy whose values run now: the newest successful or\npartial deploy, or the target of a newer successful rollback. Nil when\nthat rollback has no target or its target is not a log of the\ninstance.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.DeploymentLog"
+                        }
+                    ]
+                },
+                "latest_failure": {
+                    "description": "LatestFailure is the newest error log that started after the newest\nsuccessful or partial deploy or rollback (any error log when there is\nnone). A partial log is never a failure here.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.DeploymentLog"
+                        }
+                    ]
+                },
+                "running": {
+                    "description": "Running is the newest running log (any action).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.DeploymentLog"
+                        }
+                    ]
+                }
+            }
+        },
         "models.DeploymentLog": {
             "type": "object",
             "properties": {
@@ -13193,6 +13759,10 @@
                 "started_at": {
                     "type": "string"
                 },
+                "started_by": {
+                    "description": "StartedBy is the username of UserID. The deploy log handlers set it\nwith one batch lookup. Empty when the user is not known.",
+                    "type": "string"
+                },
                 "status": {
                     "description": "\"running\", \"success\", \"error\", \"partial\" (deploy only)",
                     "type": "string"
@@ -13217,6 +13787,14 @@
                     "items": {
                         "$ref": "#/definitions/models.DeploymentLog"
                     }
+                },
+                "highlights": {
+                    "description": "Highlights is set only in the summary view without a cursor.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.DeployLogHighlights"
+                        }
+                    ]
                 },
                 "next_cursor": {
                     "type": "string"
@@ -13312,6 +13890,9 @@
                 },
                 "title": {
                     "type": "string"
+                },
+                "trigger": {
+                    "$ref": "#/definitions/models.Trigger"
                 },
                 "type": {
                     "type": "string"
@@ -13443,10 +14024,20 @@
                     }
                 },
                 "total": {
+                    "description": "Total is the number of matching notifications. It is exact unless\ntotal_capped is true; then it is offset + 1000, and at least\ntotal + 1 notifications match.",
                     "type": "integer"
                 },
+                "total_capped": {
+                    "description": "TotalCapped (total_capped) is true when more than offset + 1000\nnotifications match. total is then offset + 1000, a lower bound: at\nleast total + 1 notifications exist.",
+                    "type": "boolean"
+                },
                 "unread_count": {
+                    "description": "UnreadCount is the number of unread notifications of the user. It is\nexact unless unread_count_capped is true; then it is 1000, and the\nuser has at least 1001 unread notifications.",
                     "type": "integer"
+                },
+                "unread_count_capped": {
+                    "description": "UnreadCountCapped (unread_count_capped) is true when the user has more\nthan 1000 unread notifications. unread_count is then 1000.",
+                    "type": "boolean"
                 }
             }
         },
@@ -13834,6 +14425,38 @@
                 },
                 "version": {
                     "type": "string"
+                }
+            }
+        },
+        "models.Trigger": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "cleanup-policy",
+                        "ttl"
+                    ]
+                }
+            }
+        },
+        "models.UnreadNotificationCount": {
+            "type": "object",
+            "properties": {
+                "unread_count": {
+                    "description": "UnreadCount is the number of unread notifications of the user. It is\nexact unless unread_count_capped is true; then it is 1000, and the\nuser has at least 1001 unread notifications.",
+                    "type": "integer"
+                },
+                "unread_count_capped": {
+                    "description": "UnreadCountCapped (unread_count_capped) is true when the user has more\nthan 1000 unread notifications.",
+                    "type": "boolean"
                 }
             }
         },
