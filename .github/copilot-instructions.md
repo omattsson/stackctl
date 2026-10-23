@@ -7,7 +7,7 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 ## Architecture
 
 - All code lives under `cli/` — the Go module root (`cli/go.mod`). Run Go commands from `cli/`.
-- Go version: see `cli/go.mod` (1.26.9 or later). CI uses `go-version-file: cli/go.mod`.
+- Go version: see `cli/go.mod` (1.26.10 or later). CI uses `go-version-file: cli/go.mod`.
 - Commands: `cli/cmd/` (one file per command group, subcommands registered in `init()`)
 - HTTP client: `cli/pkg/client/client.go` (REST), `cli/pkg/client/auth.go` (session renewal), `cli/pkg/client/websocket.go` (deployment log streaming)
 - Types: `cli/pkg/types/types.go` (client-side structs matching API responses)

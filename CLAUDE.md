@@ -4,7 +4,7 @@
 
 Go CLI tool (Cobra + yaml.v3) for managing Kubernetes stack deployments. Pure API client — talks to the [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager) backend. No backend logic, no frontend, no database, no direct K8s interaction.
 
-Go version: see `cli/go.mod` (1.26.9 or later); the Dockerfile builder image may be newer.
+Go version: see `cli/go.mod` (1.26.10 or later); the Dockerfile builder image may be newer.
 
 ## Project Structure
 
@@ -125,6 +125,8 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
 
 **Warning headers**: `send()` writes each `Warning` response header (for example a `299` deprecation notice) to `Client.WarnWriter` (stderr when nil) as `Warning: <warn-text>`, for every command and also on error responses. The quoted warn-text is unescaped and sanitized like server error messages; one header can hold several comma-separated warnings (warn-dates are skipped). The same text is written once per client (retries do not repeat it; the dedupe set holds at most 64 texts), and writes are serialized under `warnMu`. `sanitizeServerMessage` replaces control characters (`unicode.IsControl`: C0, DEL, C1) with a space and drops bidi controls (U+200E, U+200F, U+202A–U+202E, U+2066–U+2069).
 
+**User-Agent**: every request sends `User-Agent: stackctl/<version> (<GOOS>/<GOARCH>)` (`pkg/client/useragent.go`). `cmd.SetVersionInfo` calls `client.SetVersion`, so it matches `stackctl version` (empty: `dev`). `SetVersion` builds the header value once; `UserAgent()` only loads it. Set it where the request is built (`setUserAgent` in `send()` and `sendSession()`; `baseWSHeader()` for both WebSocket dials, also the `?token=` fallback), not in a transport: `stack.go` replaces `HTTPClient`.
+
 **Plugins** (`cmd/plugins.go`): for a plugin, `Execute` sets `TraverseChildren`, so the global flags before the plugin name are parsed by stackctl and not passed to the plugin; `pluginEnv` exports them (`STACKCTL_OUTPUT`, `STACKCTL_QUIET`, `STACKCTL_NO_COLOR` + `NO_COLOR`, `STACKCTL_DEBUG`, `STACKCTL_INSECURE`, `STACKCTL_CONFIG_DIR`, plus the context values). Arguments after the plugin name pass unchanged. Contract in `EXTENDING.md`.
 
 **Config-free commands**: `version` and `completion` skip config file loading and work even if the config is missing or corrupted.
@@ -154,7 +156,7 @@ contexts:
 ## Testing Conventions
 
 - `testify/assert`, table-driven tests
-- `pkg/` tests call `t.Parallel()` on the parent test and on subtests
+- `pkg/` tests call `t.Parallel()` on the parent test and on subtests. Exception: a test that changes package-global state (for example `client.SetVersion`, see `TestUserAgent_Requests`) must not call `t.Parallel()`, nor its subtests; it restores the state with `t.Cleanup`. Go runs the parallel top-level tests only after the serial ones
 - `cmd/` tests that touch package globals (`cfg`, `printer`, `flagAPIURL` and other flag variables) must not call `t.Parallel()`. Pure-function tests in `cmd/` (for example `resolve_test.go`) may
 - No `tt := tt` needed (Go 1.22+ loop variable semantics)
 - Test helpers: `setupStackTestCmd` (`cmd/stack_test.go`), `setupTestCmd` (`cmd/config_test.go`)

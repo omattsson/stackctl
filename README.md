@@ -325,6 +325,8 @@ With `--id`, a connection that ends for another reason before every listed insta
 
 stackctl writes any `Warning` header from the API (for example a deprecation notice) to stderr as `Warning: <text>`, for every command.
 
+Every request, also the WebSocket upgrade, sends `User-Agent: stackctl/<version> (<os>/<arch>)`, for example `stackctl/1.4.0 (linux/amd64)`. The version is the one of `stackctl version`.
+
 ### Templates
 
 ```bash
@@ -706,7 +708,7 @@ stackctl completion powershell | Out-String | Invoke-Expression
 
 ### Prerequisites
 
-- Go version: see `cli/go.mod` (1.26.9 or later)
+- Go version: see `cli/go.mod` (1.26.10 or later)
 - A running [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager) backend for integration/e2e tests (`make dev` in that repo)
 
 ### Getting Started

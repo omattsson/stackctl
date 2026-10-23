@@ -387,6 +387,7 @@ func (c *Client) sendSession(method, path, bearer, refreshToken string) (*http.R
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	setUserAgent(req.Header)
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}

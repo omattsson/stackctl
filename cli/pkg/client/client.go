@@ -259,6 +259,7 @@ func (c *Client) send(method, path string, body interface{}) (*http.Response, er
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
+	setUserAgent(req.Header)
 
 	// API key takes precedence over JWT token
 	if c.APIKey != "" {

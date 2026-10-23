@@ -265,7 +265,7 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 		return nil, err
 	}
 
-	header := http.Header{}
+	header := baseWSHeader()
 	if c.APIKey != "" {
 		header.Set("X-API-Key", c.APIKey)
 	} else if token != "" {
@@ -293,7 +293,8 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 	// transparently switches to the JWT path (documented precedence).
 	if resp != nil && resp.StatusCode == http.StatusUnauthorized && token != "" {
 		fallbackURL := appendQueryToken(wsURL, token)
-		conn2, resp2, err2 := dialer.DialContext(ctx, fallbackURL, nil)
+		// The fallback carries the token in the URL only, never in a header.
+		conn2, resp2, err2 := dialer.DialContext(ctx, fallbackURL, baseWSHeader())
 		if err2 != nil {
 			if hsErr := handshakeError(resp2, err2, false); hsErr != nil {
 				return nil, hsErr
@@ -306,6 +307,15 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 		return nil, hsErr
 	}
 	return nil, fmt.Errorf("connecting to WebSocket: %w", err)
+}
+
+// baseWSHeader returns the headers of both WebSocket dials (the header-auth
+// dial and its ?token= fallback), without any credentials. Add a header for
+// every upgrade request here, so the fallback cannot miss it.
+func baseWSHeader() http.Header {
+	header := http.Header{}
+	setUserAgent(header)
+	return header
 }
 
 // wsAuthRequiredMessage is the 401 message of the k8s-stack-manager
