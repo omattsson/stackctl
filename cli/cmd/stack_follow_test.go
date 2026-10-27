@@ -376,3 +376,47 @@ func TestStackWatchCmd_PartialIsFailedTerminal(t *testing.T) {
 	}
 	assert.Contains(t, out.String(), "42 partial")
 }
+
+// TestFollowLogsCtx_NormalCloseReadsInstance: a normal close (code 1000)
+// ends the stream without a final status. --follow reads the instance and
+// exits 0 only for a final status that is not a failure.
+func TestFollowLogsCtx_NormalCloseReadsInstance(t *testing.T) {
+	tests := []struct {
+		name    string
+		op      string
+		status  string
+		wantErr string
+	}{
+		{"deploy ended running", followOpDeploy, "running", ""},
+		{"deploy ended error", followOpDeploy, "error", "deploy failed (status error): image pull failed"},
+		{"deploy still deploying", followOpDeploy, "deploying", "the server closed the connection before the operation ended\nThe deploy continues on the server. Do not start it again."},
+		{"logs still deploying", followOpLogs, "deploying", "The operation continues on the server"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var getCalls atomic.Int32
+			// The first read (after the subscribe) sees the operation in
+			// progress; the read after the close sees tt.status.
+			server, conns := watchCloseServer(t, func(_ int32, _ *http.Request, conn *websocket.Conn) {
+				readSubscribe(conn)
+				writeWatchStatus(t, conn, "42", "deploying")
+				_ = conn.WriteControl(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+					time.Now().Add(time.Second))
+			}, map[string]http.HandlerFunc{
+				"/api/v1/stack-instances/42": instanceRoute(&getCalls, "deploying", tt.status),
+			})
+			defer server.Close()
+			_ = setupStackTestCmd(t, server.URL)
+
+			_, err := runFollow(t, tt.op)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			}
+			assert.Equal(t, int32(1), conns.Load(), "no reconnect")
+		})
+	}
+}

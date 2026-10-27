@@ -49,7 +49,8 @@ func followLogs(c *client.Client, instanceID, op string) error {
 // it on shutdown. op is the operation that the command started (deploy,
 // stop, clean, rollback), or followOpLogs. Returns nil when:
 //   - the operation reaches a terminal non-error status (running,
-//     stopped, draft, "unknown" on graceful server close);
+//     stopped, draft); after a normal server close it reads the instance
+//     for the status;
 //   - ctx is cancelled before any other error surfaces (Ctrl-C path).
 //
 // For an operation, it reads the instance right after the first connect:
@@ -101,8 +102,25 @@ func followLogsCtx(ctx context.Context, c *client.Client, instanceID, op string,
 				return followStoppedError(followCloseError(closeErr, outcome, rerr), instanceID, op)
 			}
 		}
+		return followEndError(ctx, c, instanceID, op, result, warn)
+	}
+}
+
+// followEndError returns the error for the end of a stream. A normal close
+// (code 1000, for example a server restart) ends the stream without a
+// final status: then it reads the instance and fails when the status is not
+// final, so the exit code never claims a result that stackctl did not see.
+func followEndError(ctx context.Context, c *client.Client, instanceID, op string, result *types.StreamResult, warn io.Writer) error {
+	if result == nil || client.IsTerminalStatus(result.Status) {
 		return followResultError(instanceID, op, result)
 	}
+	if final := followCatchUp(ctx, c, instanceID, warn); final != nil {
+		return followResultError(instanceID, op, final)
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return followStoppedError(errors.New("the server closed the connection before the operation ended"), instanceID, op)
 }
 
 // followCloseError returns the message for a server close that ends
