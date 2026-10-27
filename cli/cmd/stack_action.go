@@ -96,7 +96,10 @@ Examples:
 			return printer.PrintYAML(list)
 		}
 		if len(list.Actions) == 0 {
-			printer.PrintMessage("The server has no custom actions.")
+			printer.PrintMessage("This stack has no custom actions.")
+			if list.ScopeIncomplete {
+				printer.PrintMessage(msgActionsIncomplete)
+			}
 			return nil
 		}
 		rows := make([][]string, len(list.Actions))
@@ -109,9 +112,19 @@ Examples:
 				client.SanitizeServerText(parameterSummary(a.Parameters)),
 			}
 		}
-		return printer.PrintTable([]string{"NAME", "LABEL", "CAN RUN", "JOB LOG", "PARAMETERS"}, rows)
+		if err := printer.PrintTable([]string{"NAME", "LABEL", "CAN RUN", "JOB LOG", "PARAMETERS"}, rows); err != nil {
+			return err
+		}
+		if list.ScopeIncomplete {
+			printer.PrintMessage(msgActionsIncomplete)
+		}
+		return nil
 	},
 }
+
+// msgActionsIncomplete tells that the server left out actions it could not
+// check for the stack (scope_incomplete).
+const msgActionsIncomplete = "Some actions are not shown: the server could not check where they apply. Try again."
 
 // parameterSummary returns the parameters of an action for the table, for
 // example "env:enum(se|dk)*=se, dry_run:bool".
@@ -265,7 +278,9 @@ func parseParamFlags(raw []string) (map[string]string, error) {
 	return out, nil
 }
 
-// findAction returns the action with the given name.
+// findAction returns the action with the given name. The list holds the
+// actions that apply to the stack: a server can limit an action to some
+// templates or clusters (applies_to).
 func findAction(list *types.ActionList, name string) (types.ActionInfo, error) {
 	names := make([]string, 0, len(list.Actions))
 	for _, a := range list.Actions {
@@ -274,10 +289,14 @@ func findAction(list *types.ActionList, name string) (types.ActionInfo, error) {
 		}
 		names = append(names, a.Name)
 	}
-	if len(names) == 0 {
-		return types.ActionInfo{}, fmt.Errorf("unknown action %q: the server has no custom actions", name)
+	hint := ""
+	if list.ScopeIncomplete {
+		hint = "; some actions could not be checked for this stack, try again"
 	}
-	return types.ActionInfo{}, fmt.Errorf("unknown action %q (actions: %s)", name, strings.Join(names, ", "))
+	if len(names) == 0 {
+		return types.ActionInfo{}, fmt.Errorf("unknown action %q: this stack has no custom actions%s", name, hint)
+	}
+	return types.ActionInfo{}, fmt.Errorf("unknown action %q (actions of this stack: %s)%s", name, strings.Join(names, ", "), hint)
 }
 
 // buildActionParams checks the given parameters against the declared ones

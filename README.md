@@ -286,6 +286,8 @@ stackctl stack rollback my-app --target-log <log-id>
 
 `stack get` shows `Following` and `Followers` (k8s-stack-manager v0.8.0 or later). `stack preview -q` prints the names of the charts whose values differ from the last deploy. `stack preview` writes the values-drift warning to stderr, so the YAML on stdout stays valid.
 
+`stack action list` and `stack action run` see the actions that apply to the stack: a server can limit an action to some templates, template categories, definitions or clusters (`applies_to`). An action of another stack gives "unknown action" with the actions of this stack. When the server could not check where an action applies, `stack action list` ends with "Some actions are not shown: the server could not check where they apply. Try again.", and `-o json` has `"scope_incomplete": true`.
+
 `stack action run`:
 
 - Checks the declared parameters before the request: a `bool` takes `true` or `false`, an `enum` takes one of its options, and a required parameter needs a value.
@@ -654,6 +656,7 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 | `--follow` and `stack watch` with an API key, `bulk delete` with clean first, `orphaned delete --confirm`, `user set-role` | v0.8.0 or later |
 | `definition link-template` | v0.11.0 or later |
 | `--stop-at`, `stack extend --until`, the TTL limit of `server info` and of the local check (an older server ignores `--stop-at` and `--until`: stackctl shows the result and exits with code 1; it uses 30 days as the limit) | v0.12.0 or later |
+| Actions limited to some stacks (`applies_to`) and the `scope_incomplete` hint of `stack action list` (an older server lists every action for every stack) | the release after v0.14.0 (omattsson/k8s-stack-manager#720) |
 
 ## Output Formats
 

@@ -164,7 +164,20 @@ func TestStackActionListCmd(t *testing.T) {
 		empty := &actionServer{list: `{"instance_id":"42","actions":[]}`}
 		buf := setupStackTestCmd(t, empty.start(t).URL)
 		require.NoError(t, stackActionListCmd.RunE(stackActionListCmd, []string{"42"}))
-		assert.Equal(t, "The server has no custom actions.\n", buf.String())
+		assert.Equal(t, "This stack has no custom actions.\n", buf.String())
+	})
+	t.Run("scope incomplete", func(t *testing.T) {
+		incomplete := &actionServer{list: strings.Replace(actionListBody, `"instance_id":"42",`, `"instance_id":"42","scope_incomplete":true,`, 1)}
+		buf := setupStackTestCmd(t, incomplete.start(t).URL)
+		require.NoError(t, stackActionListCmd.RunE(stackActionListCmd, []string{"42"}))
+		assert.Regexp(t, `ping\s+Ping`, buf.String())
+		assert.True(t, strings.HasSuffix(buf.String(), msgActionsIncomplete+"\n"), buf.String())
+	})
+	t.Run("no actions, scope incomplete", func(t *testing.T) {
+		empty := &actionServer{list: `{"instance_id":"42","actions":[],"scope_incomplete":true}`}
+		buf := setupStackTestCmd(t, empty.start(t).URL)
+		require.NoError(t, stackActionListCmd.RunE(stackActionListCmd, []string{"42"}))
+		assert.Equal(t, "This stack has no custom actions.\n"+msgActionsIncomplete+"\n", buf.String())
 	})
 }
 
@@ -198,7 +211,7 @@ func TestStackActionRunCmd_UsageErrors(t *testing.T) {
 		{"required empty", "refresh-db", []string{"note= "}, `parameter "note" is required and cannot be empty`},
 		{"no equals sign", "refresh-db", []string{"note"}, `--param "note": use key=value`},
 		{"duplicate", "refresh-db", []string{"note=a", "note=b"}, "--param note is set more than once"},
-		{"unknown action", "nope", nil, `unknown action "nope" (actions: refresh-db, ping)`},
+		{"unknown action", "nope", nil, `unknown action "nope" (actions of this stack: refresh-db, ping)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -442,4 +455,29 @@ func TestParameterSummary(t *testing.T) {
 		{Name: "b", Type: "enum", Options: []string{"x", "y"}, Default: "x"},
 		{Name: "c", Type: "bool", Default: false},
 	}))
+}
+
+func TestFindAction_ScopeMessages(t *testing.T) {
+	t.Parallel()
+	ping := types.ActionInfo{Name: "ping"}
+	tests := []struct {
+		name    string
+		list    types.ActionList
+		wantErr string
+	}{
+		{"no actions", types.ActionList{}, `unknown action "nope": this stack has no custom actions`},
+		{"no actions, scope incomplete", types.ActionList{ScopeIncomplete: true},
+			`unknown action "nope": this stack has no custom actions; some actions could not be checked for this stack, try again`},
+		{"other actions, scope incomplete", types.ActionList{Actions: []types.ActionInfo{ping}, ScopeIncomplete: true},
+			`unknown action "nope" (actions of this stack: ping); some actions could not be checked for this stack, try again`},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := findAction(&tt.list, "nope")
+			require.Error(t, err)
+			assert.Equal(t, tt.wantErr, err.Error())
+		})
+	}
 }

@@ -135,11 +135,16 @@ type ChannelDeliveryLog struct {
 }
 
 // ActionList is the response of GET /api/v1/stack-instances/:id/actions:
-// the custom actions of the hooks config, without URLs or secrets.
+// the custom actions of the hooks config that apply to the stack, without
+// URLs or secrets.
 type ActionList struct {
 	InstanceID string       `json:"instance_id" yaml:"instance_id"`
 	Actions    []ActionInfo `json:"actions" yaml:"actions"`
 	CanInvoke  bool         `json:"can_invoke" yaml:"can_invoke"`
+	// ScopeIncomplete is true when the server left out actions limited to
+	// some templates (applies_to) because it could not read the template
+	// of the stack. Omitted when false, and by servers without applies_to.
+	ScopeIncomplete bool `json:"scope_incomplete,omitempty" yaml:"scope_incomplete,omitempty"`
 }
 
 // ActionInfo is one custom action with its UI metadata.

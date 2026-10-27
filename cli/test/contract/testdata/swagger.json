@@ -355,7 +355,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates a new notification channel. format sets the body of the webhook request: \"generic\" (default, the event JSON) or \"teams\" (a Microsoft Teams Adaptive Card envelope for a Teams workflow made from the template \"Post to a channel when a webhook request is received\"). An unknown format gives 400. Optional filters limit the channel to some stack instances: instance_name_patterns (globs, path.Match syntax, case-insensitive), owner_ids, definition_ids and cluster_ids. Each set filter must match (AND); one value of a filter is enough (OR); empty filters match all instances. Events without an instance go only to channels without filters; a cleanup policy run goes to a channel when at least one affected instance matches. An invalid pattern gives 400. An ID that does not exist gives a warning in the response; the channel is saved.",
+                "description": "Creates a new notification channel. A secret needs KUBECONFIG_ENCRYPTION_KEY: without the key a non-empty secret gives 400. With the key the secret and the webhook URL are encrypted at rest; without the key the URL is stored in plaintext. The webhook URL is at most 2048 characters. format sets the body of the webhook request: \"generic\" (default, the event JSON) or \"teams\" (a Microsoft Teams Adaptive Card envelope for a Teams workflow made from the template \"Post to a channel when a webhook request is received\"). An unknown format gives 400. Optional filters limit the channel to some stack instances: instance_name_patterns (globs, path.Match syntax, case-insensitive), owner_ids, definition_ids and cluster_ids. Each set filter must match (AND); one value of a filter is enough (OR); empty filters match all instances. Events without an instance go only to channels without filters; a cleanup policy run goes to a channel when at least one affected instance matches. An invalid pattern gives 400. An ID that does not exist gives a warning in the response; the channel is saved.",
                 "consumes": [
                     "application/json"
                 ],
@@ -524,7 +524,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates an existing notification channel. Only the fields in the body change. format (\"generic\" or \"teams\") replaces the body format; omit it to keep the format; an unknown format gives 400. filters replaces the channel filters (omit it to keep them, send {} to remove them); the rules are the same as for create. An ID that does not exist gives a warning in the response.",
+                "description": "Updates an existing notification channel. Only the fields in the body change. A new non-empty secret needs KUBECONFIG_ENCRYPTION_KEY (400 without it); \"secret\": \"\" removes the secret. A secret_unreadable or webhook_url_unreadable channel (stored value that cannot be decrypted) sends nothing until a PUT sets the value again. format (\"generic\" or \"teams\") replaces the body format; omit it to keep the format; an unknown format gives 400. filters replaces the channel filters (omit it to keep them, send {} to remove them); the rules are the same as for create. An ID that does not exist gives a warning in the response.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1451,7 +1451,7 @@
         },
         "/api/v1/auth/logout": {
             "post": {
-                "description": "Revokes the session of the refresh token cookie (all refresh tokens of its family), blocklists the access token and closes its WebSockets. When the refresh token lookup or the revoke fails, the cookie is still cleared and the access token blocked, but the answer is 500.",
+                "description": "Ends the sessions that the request proves: the session of the refresh token cookie and the session of a valid bearer token (its sid claim), also when the cookie is missing. When both name different sessions, both end. It revokes all refresh tokens of each session, then blocks the session in the session store, so that every access token of it (not only the presented one) gets 401, and its WebSockets close within the revalidation interval. It also blocklists the presented access token and closes its WebSockets. Access tokens of other sessions of the user keep working. A request without a cookie and without a valid bearer token ends nothing and answers 200. When the refresh token lookup or a revoke fails, the cookie is still cleared and the blocks are still written, but the answer is 500.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1465,15 +1465,6 @@
                 "responses": {
                     "200": {
                         "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1495,7 +1486,7 @@
         },
         "/api/v1/auth/logout-all": {
             "post": {
-                "description": "Revokes all refresh tokens for the current user",
+                "description": "Revokes all refresh tokens for the current user, then blocks every session of the user that has a refresh token row whose expiry is later than now minus (access token lifetime + 1 minute + reuse grace), also when that refresh token was revoked earlier. A session block is a plain block, so every access token of those sessions is rejected, and cannot open a WebSocket, while the replica clocks differ by less than the 1 minute block margin. It also writes a user block that rejects every access token issued up to now. The refresh-token cleanup keeps rows for that window after they expire. A session without such a row (a login whose refresh token could not be stored) and a token without a session (the SSO CLI token) rely on the user block, which holds on replicas with synchronised (NTP) clocks. A login after the logout works. The presented access token is blocklisted and all WebSockets of the user close. When the revoke fails, the sessions get the long block (until the maximum session lifetime), the other blocks are still written, the cookie is cleared and the answer is 500. When only the listing of the sessions fails, the revoke and the user block still run and the answer is 200. When the listing and the revoke both fail, only the presented session is blocked and the answer is 500.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5109,6 +5100,15 @@
                                 "type": "string"
                             }
                         }
+                    },
+                    "503": {
+                        "description": "A pre-instance-create hook could not check where it applies (applies_to); try again",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     }
                 }
             }
@@ -5679,7 +5679,7 @@
                         }
                     },
                     "503": {
-                        "description": "Deploy manager not configured",
+                        "description": "Deploy manager not configured, or a pre-instance-delete hook could not check where it applies (applies_to)",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5772,7 +5772,7 @@
         },
         "/api/v1/stack-instances/{id}/actions": {
             "get": {
-                "description": "Returns the registered actions with their UI metadata (label, description, confirmation text, parameter schema) and a can_invoke flag. Any authenticated user who can view the instance gets the list; can_invoke is true for the owner, an admin and a devops user. The response never contains the subscriber URL, secret or headers. Without an action registry the list is empty.",
+                "description": "Returns the registered actions that apply to the instance (the applies_to of each action: templates, template categories, definitions, clusters) with their UI metadata (label, description, confirmation text, parameter schema) and a can_invoke flag. Any authenticated user who can view the instance gets the list; can_invoke is true for the owner, an admin and a devops user. When the template of the instance cannot be read, the actions limited to templates are left out and scope_incomplete is true. The response never contains the subscriber URL, secret, headers or applies_to. Without an action registry the list is empty.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5920,7 +5920,7 @@
                         }
                     },
                     "404": {
-                        "description": "Instance not found or action not registered",
+                        "description": "Instance not found, or action not registered or not for this instance (applies_to)",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5947,7 +5947,7 @@
                         }
                     },
                     "503": {
-                        "description": "Action registry not configured",
+                        "description": "Action registry not configured, or the template of the instance could not be read to check where the action applies",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -12032,6 +12032,10 @@
                 },
                 "instance_id": {
                     "type": "string"
+                },
+                "scope_incomplete": {
+                    "description": "ScopeIncomplete is true when an action limited to some templates\n(applies_to) was left out because the template of the instance could\nnot be read. Omitted when false.",
+                    "type": "boolean"
                 }
             }
         },
@@ -12529,6 +12533,10 @@
                 "name": {
                     "type": "string"
                 },
+                "secret_unreadable": {
+                    "description": "SecretUnreadable is set by the repository when the stored secret cannot\nbe decrypted. Secret is then empty, the channel sends nothing, and a\nPUT with a new secret repairs the row.",
+                    "type": "boolean"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -12540,7 +12548,12 @@
                     }
                 },
                 "webhook_url": {
+                    "description": "https URL, at most 2048 characters; empty when webhook_url_unreadable.",
                     "type": "string"
+                },
+                "webhook_url_unreadable": {
+                    "description": "WebhookURLUnreadable is set by the repository when the stored webhook\nURL cannot be decrypted. WebhookURL is then empty, the channel sends\nnothing, and a PUT with a new URL repairs the row.",
+                    "type": "boolean"
                 }
             }
         },
@@ -12572,6 +12585,10 @@
                 "name": {
                     "type": "string"
                 },
+                "secret_unreadable": {
+                    "description": "SecretUnreadable is set by the repository when the stored secret cannot\nbe decrypted. Secret is then empty, the channel sends nothing, and a\nPUT with a new secret repairs the row.",
+                    "type": "boolean"
+                },
                 "subscription_count": {
                     "type": "integer"
                 },
@@ -12579,7 +12596,12 @@
                     "type": "string"
                 },
                 "webhook_url": {
+                    "description": "https URL, at most 2048 characters; empty when webhook_url_unreadable.",
                     "type": "string"
+                },
+                "webhook_url_unreadable": {
+                    "description": "WebhookURLUnreadable is set by the repository when the stored webhook\nURL cannot be decrypted. WebhookURL is then empty, the channel sends\nnothing, and a PUT with a new URL repairs the row.",
+                    "type": "boolean"
                 }
             }
         },
@@ -13930,11 +13952,20 @@
                 "name": {
                     "type": "string"
                 },
+                "secret_unreadable": {
+                    "description": "SecretUnreadable is set by the repository when the stored secret cannot\nbe decrypted. Secret is then empty, the channel sends nothing, and a\nPUT with a new secret repairs the row.",
+                    "type": "boolean"
+                },
                 "updated_at": {
                     "type": "string"
                 },
                 "webhook_url": {
+                    "description": "https URL, at most 2048 characters; empty when webhook_url_unreadable.",
                     "type": "string"
+                },
+                "webhook_url_unreadable": {
+                    "description": "WebhookURLUnreadable is set by the repository when the stored webhook\nURL cannot be decrypted. WebhookURL is then empty, the channel sends\nnothing, and a PUT with a new URL repairs the row.",
+                    "type": "boolean"
                 }
             }
         },
