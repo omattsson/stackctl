@@ -28,6 +28,7 @@ without any configuration.
 Examples:
   stackctl agent-guide
   stackctl agent-guide > STACKCTL.md`,
+	Annotations:  map[string]string{skipConfigAnnotation: "true"},
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {

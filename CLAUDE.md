@@ -107,8 +107,9 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
 - `json`: machine-readable, full API response
 - `yaml`: machine-readable, full API response
 - `--quiet`: IDs only, one per line (pipeable to `xargs`)
+- `printer.PrintMessage` (text for people) writes to `printer.ErrWriter` (stderr) when `printer.MachineReadable()` (`-o json|yaml` or `-q`; not the table or a custom format), so stdout holds only data. An empty list prints `[]` in those modes, not a message. deploy/stop/clean/rollback end in `printOperation` (202 response for json/yaml, log ID for `-q`); with `--follow` in those modes `followOperation` sends the log to stderr (`followLogWriter`) and prints the instance (GET) or the log ID; `stack logs -f` prints the log as without `--follow`
 
-**Destructive operations**: Commands that delete or clean resources must prompt for confirmation (`confirmAction`). `--yes` flag skips the prompt. A declined prompt returns `errAborted` (exit 1, "aborted: not confirmed, nothing changed" on stderr), so scripts can tell that nothing changed.
+**Destructive operations**: Commands that delete or clean resources must prompt for confirmation: `if err := confirmAction(cmd, msg); err != nil { return err }`. `--yes` flag skips the prompt. A declined prompt returns `errAborted` (exit 1, "aborted: not confirmed, nothing changed" on stderr), so scripts can tell that nothing changed.
 
 ## HTTP Client Pattern
 
@@ -130,7 +131,7 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
 
 **Plugins** (`cmd/plugins.go`): for a plugin, `Execute` sets `TraverseChildren`, so the global flags before the plugin name are parsed by stackctl and not passed to the plugin; `pluginEnv` exports them (`STACKCTL_OUTPUT`, `STACKCTL_QUIET`, `STACKCTL_NO_COLOR` + `NO_COLOR`, `STACKCTL_DEBUG`, `STACKCTL_INSECURE`, `STACKCTL_CONFIG_DIR`, plus the context values). Arguments after the plugin name pass unchanged. Contract in `EXTENDING.md`.
 
-**Config-free commands**: `version`, `agent-guide` and `completion` skip config file loading and work even if the config is missing or corrupted.
+**Config-free commands**: `version`, `agent-guide` and `completion` skip config file loading and work even if the config is missing or corrupted. Mark such a command (and its subcommands) with the annotation `skipConfigAnnotation` (`skipsConfig` in `root.go`).
 
 **Insecure mode**: When `--insecure` is active, a warning is printed to stderr.
 

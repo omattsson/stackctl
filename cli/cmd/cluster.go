@@ -222,9 +222,12 @@ Examples:
 			return nil
 		}
 
-		if len(svList) == 0 {
+		if len(svList) == 0 && !printer.MachineReadable() {
 			printer.PrintMessage("No shared values found for cluster %s", id)
 			return nil
+		}
+		if svList == nil {
+			svList = []types.SharedValues{} // -o json: [], not null
 		}
 
 		switch printer.Format {
@@ -508,12 +511,8 @@ Examples:
 			return nil
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete shared values %s from cluster %s. Continue? (y/n): ", svID, clusterID))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will delete shared values %s from cluster %s. Continue? (y/n): ", svID, clusterID)); err != nil {
 			return err
-		}
-		if !confirmed {
-			return errAborted
 		}
 
 		c, err := newClient()

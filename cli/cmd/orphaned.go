@@ -132,12 +132,8 @@ Examples:
 			return nil
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete orphaned namespace %q. Continue? (y/n): ", namespace))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will delete orphaned namespace %q. Continue? (y/n): ", namespace)); err != nil {
 			return err
-		}
-		if !confirmed {
-			return errAborted
 		}
 
 		c, err := newClient()

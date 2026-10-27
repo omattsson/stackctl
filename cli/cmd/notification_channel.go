@@ -558,12 +558,8 @@ Examples:
 		if err != nil {
 			return err
 		}
-		ok, err := confirmAction(cmd, fmt.Sprintf("Delete notification channel %s? (y/n): ", args[0]))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("Delete notification channel %s? (y/n): ", args[0])); err != nil {
 			return err
-		}
-		if !ok {
-			return errAborted
 		}
 		if err := c.DeleteNotificationChannel(id); err != nil {
 			return err

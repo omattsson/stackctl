@@ -168,12 +168,8 @@ Examples:
 		if err != nil {
 			return err
 		}
-		ok, err := confirmAction(cmd, fmt.Sprintf("Remove chart %s from definition %s? (y/n): ", args[1], args[0]))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("Remove chart %s from definition %s? (y/n): ", args[1], args[0])); err != nil {
 			return err
-		}
-		if !ok {
-			return errAborted
 		}
 		if err := c.DeleteDefinitionChart(defID, chartID); err != nil {
 			return err
@@ -364,13 +360,9 @@ Examples:
 			if err := printUpgradeCheckTo(cmd, c, defID, check); err != nil {
 				return err
 			}
-			ok, err := confirmAction(cmd, fmt.Sprintf("Upgrade definition %s to version %s? The default values of the template charts replace the values of the definition. (y/n): ",
-				args[0], client.SanitizeServerText(check.LatestVersion)))
-			if err != nil {
+			if err := confirmAction(cmd, fmt.Sprintf("Upgrade definition %s to version %s? The default values of the template charts replace the values of the definition. (y/n): ",
+				args[0], client.SanitizeServerText(check.LatestVersion))); err != nil {
 				return err
-			}
-			if !ok {
-				return errAborted
 			}
 		}
 
@@ -557,12 +549,8 @@ Examples:
 		if err != nil {
 			return err
 		}
-		ok, err := confirmAction(cmd, fmt.Sprintf("Remove chart %s from template %s? (y/n): ", args[1], args[0]))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("Remove chart %s from template %s? (y/n): ", args[1], args[0])); err != nil {
 			return err
-		}
-		if !ok {
-			return errAborted
 		}
 		if err := c.DeleteTemplateChart(templateID, chartID); err != nil {
 			return err

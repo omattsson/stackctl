@@ -685,6 +685,8 @@ stackctl stack list -o yaml
 stackctl stack list -q
 ```
 
+With `-o json`, `-o yaml` and `-q`, stdout holds only data. Messages for people (for example `Deleted stack ...`, `--dry-run` text) go to stderr. `stack deploy`, `stop`, `clean` and `rollback` print the server response (`log_id`, `message`), and `-q` prints the log ID. With `--follow` the deployment log goes to stderr and stdout gets the stack after the operation (`-q`: the log ID); `stack logs -f` prints the log as without `--follow`. An empty list prints `[]`. Custom output formats keep the messages on stdout.
+
 `definition export` and `audit log export` do not use `-o`. They use `--output-file` and, for the audit export, `--format` (`json` or `csv`).
 
 ## Confirmations

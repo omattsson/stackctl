@@ -36,12 +36,73 @@ const (
 // (error, partial).
 //
 // Installs an os.Interrupt signal handler for Ctrl-C; writes log lines to
-// os.Stdout and warnings to os.Stderr. Test code should call followLogsCtx
-// directly to inject a context + writers.
-func followLogs(c *client.Client, instanceID, op string) error {
+// out and warnings to warn. Test code should call followLogsCtx directly to
+// inject a context.
+func followLogs(c *client.Client, instanceID, op string, out, warn io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	return followLogsCtx(ctx, c, instanceID, op, os.Stdout, os.Stderr)
+	return followLogsCtx(ctx, c, instanceID, op, out, warn)
+}
+
+// followLogWriter returns the writer for the log lines of --follow: stdout
+// in the table format; stderr in machine-readable modes (-o json|yaml, -q),
+// where stdout holds only data.
+func followLogWriter(cmd *cobra.Command) io.Writer {
+	if printer.MachineReadable() {
+		return cmd.ErrOrStderr()
+	}
+	return cmd.OutOrStdout()
+}
+
+// printOperation ends deploy, stop, clean and rollback once the server has
+// accepted the operation (HTTP 202). With --follow it waits for the final
+// status (followOperation). Else -q prints the log ID, -o json|yaml prints
+// resp and the table format prints message.
+func printOperation(cmd *cobra.Command, c *client.Client, id, op, logID string, resp any, message string) error {
+	if follow, _ := cmd.Flags().GetBool("follow"); follow {
+		return followOperation(cmd, c, id, op, logID)
+	}
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, logID)
+		return nil
+	}
+	switch printer.Format {
+	case output.FormatJSON:
+		return printer.PrintJSON(resp)
+	case output.FormatYAML:
+		return printer.PrintYAML(resp)
+	default:
+		printer.PrintMessage("%s", message)
+		return nil
+	}
+}
+
+// followOperation follows an operation to its final status. The table
+// format streams the log to stdout. In machine-readable modes the log goes
+// to stderr, so stdout holds only data: -q prints the log ID, other formats
+// print the instance as read after the operation (also after a failed
+// one; the exit code shows the result).
+func followOperation(cmd *cobra.Command, c *client.Client, id, op, logID string) error {
+	followErr := followLogs(c, id, op, followLogWriter(cmd), cmd.ErrOrStderr())
+	if !printer.MachineReadable() {
+		return followErr
+	}
+	if printer.Quiet {
+		fmt.Fprintln(printer.Writer, logID)
+		return followErr
+	}
+	inst, err := c.GetStack(id)
+	if err != nil {
+		if followErr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not read stack %s: %v\n", id, err)
+			return followErr
+		}
+		return fmt.Errorf("reading stack %s after the %s: %w", id, op, err)
+	}
+	if err := printInstance(inst); err != nil {
+		return err
+	}
+	return followErr
 }
 
 // followLogsCtx is the testable core of followLogs. It does NOT install a
@@ -263,8 +324,9 @@ const flagPageSize = "page-size"
 // part of the help of every command with --follow that waits for a status.
 const followHelp = `With --follow, the exit code shows the result of the operation:
   - running, stopped or draft: exit code 0.
-  - error: exit code 1. The operation failed.
+  - error or failed: exit code 1. The operation failed.
   - partial: exit code 1. Some charts deployed and others failed.
+  - Ctrl-C (SIGINT): exit code 0; the operation continues on the server.
 The command reads the instance status after it connects, so an operation
 that ends before the connection is complete counts.
 When the access token expires during a long operation (server close
@@ -272,13 +334,17 @@ When the access token expires during a long operation (server close
 the instance status, so a status change during the reconnect is not lost.
 The command stops with exit code 1 when it cannot follow the operation to
 the end: the server ends the session ("session revoked"), the login has no
-refresh token (SSO login), the renewal fails, or the connection is lost.
-The operation continues on the server. Do not start it again. Run
+refresh token (SSO login), the renewal fails, the connection is lost, or
+the server closes the connection normally (for example on a restart) while
+the status is not final. The operation continues on the server. Do not start it again. Run
 'stackctl stack watch --id <id>' or 'stackctl stack status <id>' to see
 the result (after 'stackctl login' if necessary).
 --follow works with an API key from k8s-stack-manager v0.8.0. An older
 server refuses an API key for live updates: use a login session, or run
-the command without --follow and use 'stackctl stack status <id>'.`
+the command without --follow and use 'stackctl stack status <id>'.
+Without --follow, -o json|yaml prints the response of the server (log_id,
+message) and -q the log ID. With --follow in these modes the log goes to
+stderr; stdout gets the instance after the operation (-q: the log ID).`
 
 var stackCmd = &cobra.Command{
 	Use:   "stack",
@@ -629,18 +695,8 @@ Examples:
 			return err
 		}
 
-		follow, _ := cmd.Flags().GetBool("follow")
-		if follow {
-			return followLogs(c, id, followOpDeploy)
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, resp.LogID)
-			return nil
-		}
-
-		printer.PrintMessage("Deploying stack %s... (log ID: %s)", id, resp.LogID)
-		return nil
+		return printOperation(cmd, c, id, followOpDeploy, resp.LogID, resp,
+			fmt.Sprintf("Deploying stack %s... (log ID: %s)", id, resp.LogID))
 	},
 }
 
@@ -678,18 +734,8 @@ Examples:
 			return err
 		}
 
-		follow, _ := cmd.Flags().GetBool("follow")
-		if follow {
-			return followLogs(c, id, followOpStop)
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, resp.LogID)
-			return nil
-		}
-
-		printer.PrintMessage("Stopping stack %s... (log ID: %s)", id, resp.LogID)
-		return nil
+		return printOperation(cmd, c, id, followOpStop, resp.LogID, resp,
+			fmt.Sprintf("Stopping stack %s... (log ID: %s)", id, resp.LogID))
 	},
 }
 
@@ -724,12 +770,8 @@ Examples:
 			return err
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will undeploy and remove the namespace for stack %s. Continue? (y/n): ", id))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will undeploy and remove the namespace for stack %s. Continue? (y/n): ", id)); err != nil {
 			return err
-		}
-		if !confirmed {
-			return errAborted
 		}
 
 		resp, err := c.CleanStack(id)
@@ -737,18 +779,8 @@ Examples:
 			return err
 		}
 
-		follow, _ := cmd.Flags().GetBool("follow")
-		if follow {
-			return followLogs(c, id, followOpClean)
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, resp.LogID)
-			return nil
-		}
-
-		printer.PrintMessage("Cleaning stack %s... (log ID: %s)", id, resp.LogID)
-		return nil
+		return printOperation(cmd, c, id, followOpClean, resp.LogID, resp,
+			fmt.Sprintf("Cleaning stack %s... (log ID: %s)", id, resp.LogID))
 	},
 }
 
@@ -952,7 +984,12 @@ Examples:
 
 		follow, _ := cmd.Flags().GetBool("follow")
 		if follow {
-			return followLogs(c, id, followOpLogs)
+			followErr := followLogs(c, id, followOpLogs, followLogWriter(cmd), cmd.ErrOrStderr())
+			if followErr != nil || !printer.MachineReadable() {
+				return followErr
+			}
+			// -o json|yaml and -q: the stream went to stderr; stdout
+			// gets the log as without --follow.
 		}
 
 		log, err := c.GetStackLogs(id)
@@ -1670,12 +1707,8 @@ Examples:
 			return err
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will rollback stack %s. Continue? (y/n): ", id))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will rollback stack %s. Continue? (y/n): ", id)); err != nil {
 			return err
-		}
-		if !confirmed {
-			return errAborted
 		}
 
 		targetLog, _ := cmd.Flags().GetString("target-log")
@@ -1691,25 +1724,8 @@ Examples:
 		}
 		printServerWarning(cmd, warning)
 
-		follow, _ := cmd.Flags().GetBool("follow")
-		if follow {
-			return followLogs(c, id, followOpRollback)
-		}
-
-		if printer.Quiet {
-			fmt.Fprintln(printer.Writer, resp.LogID)
-			return nil
-		}
-
-		switch printer.Format {
-		case output.FormatJSON:
-			return printer.PrintJSON(resp)
-		case output.FormatYAML:
-			return printer.PrintYAML(resp)
-		default:
-			printer.PrintMessage("Rollback started for stack %s (log ID: %s)", id, resp.LogID)
-			return nil
-		}
+		return printOperation(cmd, c, id, followOpRollback, resp.LogID, resp,
+			fmt.Sprintf("Rollback started for stack %s (log ID: %s)", id, resp.LogID))
 	},
 }
 

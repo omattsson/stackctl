@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,7 +44,12 @@ func TestAgentGuideCmd_IgnoresOutputFormat(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Setenv("STACKCTL_CONFIG_DIR", t.TempDir())
-			t.Cleanup(func() { flagOutput, flagQuiet = "table", false })
+			t.Cleanup(func() {
+				flagOutput, flagQuiet = "table", false
+				// pluginEnv reads Changed: do not leak it into later tests.
+				rootCmd.PersistentFlags().Lookup("output").Changed = false
+				rootCmd.PersistentFlags().Lookup("quiet").Changed = false
+			})
 
 			var stdout bytes.Buffer
 			rootCmd.SetOut(&stdout)
@@ -80,23 +87,53 @@ func TestRootHelp_PointsToAgentGuide(t *testing.T) {
 
 // TestAgentGuide_CommandsExist keeps the guide in step with the CLI: every
 // stackctl invocation in a code span or code block must name existing
-// commands, and each of its flags must exist on that command. It reads
-// rootCmd, so it does not run in parallel.
+// commands, each of its flags must exist on that command, and the command
+// must accept the number of positional arguments. Commands in prose without
+// the stackctl prefix are not checked. It reads rootCmd, so it does not run
+// in parallel.
 func TestAgentGuide_CommandsExist(t *testing.T) {
 	invocations := guideInvocations(agentGuide)
 	require.NotEmpty(t, invocations)
 
 	for _, inv := range invocations {
 		t.Run(inv, func(t *testing.T) {
-			cmd, rest, err := walkCommand(rootCmd, strings.Fields(inv)[1:])
+			cmd, rest, err := walkCommand(rootCmd, shellWords(inv)[1:])
 			require.NoError(t, err)
-			for _, tok := range rest {
-				name, ok := flagName(tok)
-				if !ok {
-					continue
-				}
-				assert.NotNil(t, lookupFlag(cmd, name), "%s has no flag %s", cmd.CommandPath(), tok)
+			args, err := positionalArgs(cmd, rest)
+			require.NoError(t, err)
+			assert.NoError(t, cmd.ValidateArgs(args), "arguments of %s", cmd.CommandPath())
+		})
+	}
+}
+
+func TestShellWords(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t,
+		[]string{"stackctl", "stack", "update", "x", "--stop-at", "<YYYY-MM-DD HH:MM>", "$ID"},
+		shellWords(`stackctl stack update x --stop-at "<YYYY-MM-DD HH:MM>" "$ID"`))
+}
+
+func TestPositionalArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     *cobra.Command
+		args    []string
+		want    []string
+		wantErr string
+	}{
+		{"value flag takes the next word", stackCreateCmd, []string{"x", "--definition", "d", "--branch=b"}, []string{"x"}, ""},
+		{"bool and global flags", stackDeleteCmd, []string{"--dry-run", "x", "-o", "json", "-q", "--help"}, []string{"x"}, ""},
+		{"unknown flag", stackCreateCmd, []string{"--nope"}, nil, "stackctl stack create has no flag --nope"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := positionalArgs(tt.cmd, tt.args)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
 			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -177,38 +214,72 @@ func (e *unknownCommandError) Error() string {
 	return e.path + " has no subcommand " + e.name
 }
 
-// flagName returns the flag name of a token: "image" for "--image=x", "q"
-// for "-q". It returns false for a token that is not a flag.
-func flagName(tok string) (string, bool) {
-	tok = strings.Trim(tok, `"'`)
-	if !strings.HasPrefix(tok, "-") || tok == "-" {
-		return "", false
+// shellWords splits a command line at spaces; double quotes keep words
+// together and are removed.
+func shellWords(line string) []string {
+	var words []string
+	var word strings.Builder
+	inWord, quoted := false, false
+	for _, r := range line {
+		switch {
+		case r == '"':
+			quoted = !quoted
+			inWord = true
+		case r == ' ' && !quoted:
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+				inWord = false
+			}
+		default:
+			word.WriteRune(r)
+			inWord = true
+		}
 	}
-	name := strings.TrimLeft(tok, "-")
-	name, _, _ = strings.Cut(name, "=")
-	return name, name != ""
+	if inWord {
+		words = append(words, word.String())
+	}
+	return words
 }
 
-// lookupFlag finds a local or inherited flag by name or shorthand. Cobra
-// adds the help flag only when a command runs, so help and h always exist.
-func lookupFlag(cmd *cobra.Command, name string) any {
-	if name == "help" || name == "h" {
-		return name
+// positionalArgs returns the positional arguments of cmd in args. A flag
+// that is not boolean takes the next word as its value unless it has
+// "=value". It fails on a flag that cmd does not have.
+func positionalArgs(cmd *cobra.Command, args []string) ([]string, error) {
+	var positional []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positional = append(positional, arg)
+			continue
+		}
+		name, _, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if name == "help" || name == "h" {
+			// Cobra adds the help flag only when a command runs.
+			continue
+		}
+		f := lookupFlag(cmd, name)
+		if f == nil {
+			return nil, fmt.Errorf("%s has no flag %s", cmd.CommandPath(), arg)
+		}
+		if f.Value.Type() != "bool" && !hasValue {
+			i++
+		}
 	}
-	if len(name) == 1 {
-		if f := cmd.Flags().ShorthandLookup(name); f != nil {
+	return positional, nil
+}
+
+// lookupFlag finds a local or inherited flag by name, or by shorthand for a
+// one-letter name.
+func lookupFlag(cmd *cobra.Command, name string) *pflag.Flag {
+	for _, fs := range []*pflag.FlagSet{cmd.Flags(), cmd.InheritedFlags()} {
+		if len(name) == 1 {
+			if f := fs.ShorthandLookup(name); f != nil {
+				return f
+			}
+		} else if f := fs.Lookup(name); f != nil {
 			return f
 		}
-		if f := cmd.InheritedFlags().ShorthandLookup(name); f != nil {
-			return f
-		}
-		return nil
-	}
-	if f := cmd.Flags().Lookup(name); f != nil {
-		return f
-	}
-	if f := cmd.InheritedFlags().Lookup(name); f != nil {
-		return f
 	}
 	return nil
 }

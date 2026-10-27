@@ -274,6 +274,45 @@ func TestPrintMessage(t *testing.T) {
 	assert.Equal(t, "Hello world, count: 42\n", buf.String())
 }
 
+// TestPrintMessage_MachineModesUseErrWriter: messages for people go to
+// ErrWriter with JSON, YAML or quiet mode, so stdout holds only data. The
+// table format and custom formats keep them on Writer.
+func TestPrintMessage_MachineModesUseErrWriter(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		format  Format
+		quiet   bool
+		wantOut bool
+	}{
+		{"zero printer", "", false, true},
+		{"table", FormatTable, false, true},
+		{"table quiet", FormatTable, true, false},
+		{"json", FormatJSON, false, false},
+		{"yaml", FormatYAML, false, false},
+		{"custom", Format("csv"), false, true},
+		{"custom quiet", Format("csv"), true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var out, errOut bytes.Buffer
+			p := &Printer{Format: tt.format, Quiet: tt.quiet, Writer: &out, ErrWriter: &errOut}
+
+			p.PrintMessage("Deleted %s", "x")
+			assert.Equal(t, !tt.wantOut, p.MachineReadable())
+
+			if tt.wantOut {
+				assert.Equal(t, "Deleted x\n", out.String())
+				assert.Empty(t, errOut.String())
+			} else {
+				assert.Empty(t, out.String())
+				assert.Equal(t, "Deleted x\n", errOut.String())
+			}
+		})
+	}
+}
+
 // --- Resource-specific formatter tests ---
 
 // Helper to create a realistic StackInstance for tests.

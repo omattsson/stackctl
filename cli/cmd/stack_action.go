@@ -204,12 +204,8 @@ Examples:
 		}
 
 		if action.Confirm != "" {
-			ok, err := confirmAction(cmd, client.SanitizeServerText(action.Confirm)+" (y/n): ")
-			if err != nil {
+			if err := confirmAction(cmd, client.SanitizeServerText(action.Confirm)+" (y/n): "); err != nil {
 				return err
-			}
-			if !ok {
-				return errAborted
 			}
 		}
 

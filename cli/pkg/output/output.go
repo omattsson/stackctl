@@ -114,6 +114,9 @@ type Printer struct {
 	Quiet   bool
 	NoColor bool
 	Writer  io.Writer
+	// ErrWriter gets the messages of PrintMessage in machine-readable
+	// modes (os.Stderr when nil).
+	ErrWriter io.Writer
 }
 
 // NewPrinter creates a new Printer with the given format.
@@ -276,8 +279,26 @@ type KeyValue struct {
 }
 
 // PrintMessage prints a plain text message (used for confirmations, status updates).
+//
+// In machine-readable modes (MachineReadable) it writes to ErrWriter, so
+// stdout holds only data: `-o json` output stays valid JSON and `-q` output
+// stays a list of IDs. Else it writes to Writer.
 func (p *Printer) PrintMessage(format string, args ...interface{}) {
-	fmt.Fprintf(p.Writer, format+"\n", args...)
+	w := p.Writer
+	if p.MachineReadable() {
+		w = p.ErrWriter
+		if w == nil {
+			w = os.Stderr
+		}
+	}
+	fmt.Fprintf(w, format+"\n", args...)
+}
+
+// MachineReadable reports whether stdout is for programs: -o json, -o yaml
+// or -q. The table format and custom formats are not: a custom format can
+// print messages as its data.
+func (p *Printer) MachineReadable() bool {
+	return p.Quiet || p.Format == FormatJSON || p.Format == FormatYAML
 }
 
 // PrintError prints an error message to stderr.

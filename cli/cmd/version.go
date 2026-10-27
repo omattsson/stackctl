@@ -33,6 +33,7 @@ that stackctl is installed correctly.
 Examples:
   stackctl version
   stackctl version -o json`,
+	Annotations:  map[string]string{skipConfigAnnotation: "true"},
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		versionInfo := map[string]string{

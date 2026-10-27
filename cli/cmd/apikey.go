@@ -212,12 +212,8 @@ Examples:
 			return nil
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will revoke API key %s. Continue? (y/n): ", keyID))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will revoke API key %s. Continue? (y/n): ", keyID)); err != nil {
 			return err
-		}
-		if !confirmed {
-			return errAborted
 		}
 
 		c, err := newClient()

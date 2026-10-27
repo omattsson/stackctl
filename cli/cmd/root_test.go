@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,4 +98,13 @@ func TestInsecureWarningFromConfig(t *testing.T) {
 	err := rootCmd.Execute()
 	assert.NoError(t, err)
 	assert.Contains(t, stderr.String(), "WARNING: TLS certificate verification is disabled")
+}
+
+func TestSkipsConfig(t *testing.T) {
+	for _, c := range []*cobra.Command{versionCmd, agentGuideCmd, completionCmd} {
+		assert.True(t, skipsConfig(c), c.Name())
+	}
+	for _, c := range []*cobra.Command{rootCmd, stackCmd, stackGetCmd, configListCmd} {
+		assert.False(t, skipsConfig(c), c.Name())
+	}
 }
