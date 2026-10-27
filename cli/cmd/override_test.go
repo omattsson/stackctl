@@ -557,7 +557,7 @@ func TestOverrideDeleteCmd_ConfirmDecline(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	overrideDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -570,8 +570,7 @@ func TestOverrideDeleteCmd_ConfirmDecline(t *testing.T) {
 	overrideDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := overrideDeleteCmd.RunE(overrideDeleteCmd, []string{"42", "1"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestOverrideDeleteCmd_QuietOutput(t *testing.T) {
@@ -911,7 +910,7 @@ func TestOverrideBranchDeleteCmd_ConfirmDecline(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	overrideBranchDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -924,8 +923,7 @@ func TestOverrideBranchDeleteCmd_ConfirmDecline(t *testing.T) {
 	overrideBranchDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := overrideBranchDeleteCmd.RunE(overrideBranchDeleteCmd, []string{"42", "1"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestOverrideBranchDeleteCmd_QuietOutput(t *testing.T) {
@@ -1454,7 +1452,7 @@ func TestOverrideQuotaDeleteCmd_ConfirmDecline(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	overrideQuotaDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -1467,8 +1465,7 @@ func TestOverrideQuotaDeleteCmd_ConfirmDecline(t *testing.T) {
 	overrideQuotaDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := overrideQuotaDeleteCmd.RunE(overrideQuotaDeleteCmd, []string{"42"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestOverrideQuotaDeleteCmd_QuietOutput(t *testing.T) {

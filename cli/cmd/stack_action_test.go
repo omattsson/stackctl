@@ -233,7 +233,7 @@ func TestStackActionRunCmd_Confirmation(t *testing.T) {
 		wantErr string
 	}{
 		{"yes", "y\n", true, ""},
-		{"no", "n\n", false, ""},
+		{"no", "n\n", false, "aborted: not confirmed"},
 		{"no answer", "", false, "use --yes to confirm"},
 	}
 	for _, tt := range tests {

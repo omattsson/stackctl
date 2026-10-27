@@ -180,7 +180,7 @@ func TestBulkCleanCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupBulkTestCmd(t, server.URL)
+	_ = setupBulkTestCmd(t, server.URL)
 
 	bulkCleanCmd.Flags().Set("ids", "1,2,3")
 	bulkCleanCmd.Flags().Set("yes", "false")
@@ -195,8 +195,7 @@ func TestBulkCleanCmd_Declined(t *testing.T) {
 	bulkCleanCmd.SetErr(&bytes.Buffer{})
 
 	err := bulkCleanCmd.RunE(bulkCleanCmd, []string{})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestBulkCleanCmd_WithYesFlag(t *testing.T) {
@@ -265,7 +264,7 @@ func TestBulkDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupBulkTestCmd(t, server.URL)
+	_ = setupBulkTestCmd(t, server.URL)
 
 	bulkDeleteCmd.Flags().Set("ids", "1,2,3")
 	bulkDeleteCmd.Flags().Set("yes", "false")
@@ -280,8 +279,7 @@ func TestBulkDeleteCmd_Declined(t *testing.T) {
 	bulkDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := bulkDeleteCmd.RunE(bulkDeleteCmd, []string{})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestBulkDeleteCmd_WithYesFlag(t *testing.T) {
@@ -1109,7 +1107,7 @@ func TestBulkTemplateDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupBulkTestCmd(t, server.URL)
+	_ = setupBulkTestCmd(t, server.URL)
 
 	bulkTemplateDeleteCmd.Flags().Set("ids", "1,2,3")
 	bulkTemplateDeleteCmd.Flags().Set("yes", "false")
@@ -1124,8 +1122,7 @@ func TestBulkTemplateDeleteCmd_Declined(t *testing.T) {
 	bulkTemplateDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := bulkTemplateDeleteCmd.RunE(bulkTemplateDeleteCmd, []string{})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestBulkTemplateDeleteCmd_WithYesFlag(t *testing.T) {

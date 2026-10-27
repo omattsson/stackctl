@@ -722,7 +722,7 @@ func TestCleanupPolicyDeleteCmd_InteractiveDecline(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	cleanupPolicyDeleteCmd.SetIn(strings.NewReader("n\n"))
 	cleanupPolicyDeleteCmd.SetErr(&bytes.Buffer{})
@@ -731,8 +731,7 @@ func TestCleanupPolicyDeleteCmd_InteractiveDecline(t *testing.T) {
 		cleanupPolicyDeleteCmd.SetErr(nil)
 	})
 
-	require.NoError(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"1"}))
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, cleanupPolicyDeleteCmd.RunE(cleanupPolicyDeleteCmd, []string{"1"}), errAborted)
 }
 
 // ---------- run ----------

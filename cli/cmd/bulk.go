@@ -140,8 +140,7 @@ Examples:
 			return err
 		}
 		if !confirmed {
-			printer.PrintMessage("Aborted.")
-			return nil
+			return errAborted
 		}
 
 		resp, err := c.BulkClean(ids)
@@ -199,8 +198,7 @@ Examples:
 			return err
 		}
 		if !confirmed {
-			printer.PrintMessage("Aborted.")
-			return nil
+			return errAborted
 		}
 
 		resp, err := c.BulkDelete(ids)
@@ -324,8 +322,7 @@ Examples:
 			return err
 		}
 		if !confirmed {
-			printer.PrintMessage("Aborted.")
-			return nil
+			return errAborted
 		}
 
 		resp, err := c.BulkDeleteTemplates(ids)

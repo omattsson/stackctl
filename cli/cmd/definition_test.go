@@ -547,7 +547,7 @@ func TestDefinitionDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	definitionDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -560,8 +560,7 @@ func TestDefinitionDeleteCmd_Declined(t *testing.T) {
 	definitionDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := definitionDeleteCmd.RunE(definitionDeleteCmd, []string{"5"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestDefinitionDeleteCmd_NotFound(t *testing.T) {

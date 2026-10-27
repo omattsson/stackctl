@@ -513,8 +513,7 @@ Examples:
 			return err
 		}
 		if !confirmed {
-			printer.PrintMessage(msgAborted)
-			return nil
+			return errAborted
 		}
 
 		c, err := newClient()

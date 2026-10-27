@@ -173,8 +173,7 @@ Examples:
 			return err
 		}
 		if !ok {
-			printer.PrintMessage("Aborted.")
-			return nil
+			return errAborted
 		}
 		if err := c.DeleteDefinitionChart(defID, chartID); err != nil {
 			return err
@@ -371,8 +370,7 @@ Examples:
 				return err
 			}
 			if !ok {
-				printer.PrintMessage("Aborted.")
-				return nil
+				return errAborted
 			}
 		}
 
@@ -564,8 +562,7 @@ Examples:
 			return err
 		}
 		if !ok {
-			printer.PrintMessage("Aborted.")
-			return nil
+			return errAborted
 		}
 		if err := c.DeleteTemplateChart(templateID, chartID); err != nil {
 			return err

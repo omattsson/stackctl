@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	msgAborted          = "Aborted."
 	flagDescSkipConfirm = "Skip confirmation prompt"
 )
 
@@ -255,8 +254,7 @@ Examples:
 				return err
 			}
 			if !confirmed {
-				printer.PrintMessage(msgAborted)
-				return nil
+				return errAborted
 			}
 		}
 
@@ -960,8 +958,7 @@ Examples:
 			return err
 		}
 		if !confirmed {
-			printer.PrintMessage(msgAborted)
-			return nil
+			return errAborted
 		}
 
 		if err := c.DeleteQuotaOverride(instanceID); err != nil {
@@ -1002,8 +999,7 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 		return err
 	}
 	if !confirmed {
-		printer.PrintMessage(msgAborted)
-		return nil
+		return errAborted
 	}
 
 	if err := deleteFn(c, instanceID, chartID); err != nil {

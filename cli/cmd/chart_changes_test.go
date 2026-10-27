@@ -128,10 +128,11 @@ func TestDefinitionRemoveChartCmd(t *testing.T) {
 		stdin      string
 		wantDelete bool
 		wantOut    string
+		wantErr    error
 	}{
-		{"yes flag", true, "", true, "Removed chart c2 from definition 7\n"},
-		{"confirmed", false, "y\n", true, "Removed chart c2 from definition 7\n"},
-		{"declined", false, "n\n", false, "Aborted.\n"},
+		{"yes flag", true, "", true, "Removed chart c2 from definition 7\n", nil},
+		{"confirmed", false, "y\n", true, "Removed chart c2 from definition 7\n", nil},
+		{"declined", false, "n\n", false, "", errAborted},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -146,7 +147,12 @@ func TestDefinitionRemoveChartCmd(t *testing.T) {
 				definitionRemoveChartCmd.SetIn(strings.NewReader(tt.stdin))
 			}
 
-			require.NoError(t, definitionRemoveChartCmd.RunE(definitionRemoveChartCmd, []string{"7", "worker"}))
+			err := definitionRemoveChartCmd.RunE(definitionRemoveChartCmd, []string{"7", "worker"})
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
 			assert.Equal(t, tt.wantDelete, containsString(rs.requests, "DELETE /api/v1/stack-definitions/7/charts/c2"))
 			assert.Equal(t, tt.wantOut, buf.String())
 			if !tt.yes {
@@ -228,12 +234,13 @@ func TestDefinitionUpgradeCmd(t *testing.T) {
 		wantPost   bool
 		wantOut    string
 		wantStderr string
+		wantErr    error
 	}{
-		{"yes", upgradeAvailable, true, "", true, "Upgraded definition 7 to version 1.1.0\n", ""},
+		{"yes", upgradeAvailable, true, "", true, "Upgraded definition 7 to version 1.1.0\n", "", nil},
 		{"confirmed", upgradeAvailable, false, "y\n", true, "Upgraded definition 7 to version 1.1.0\n",
-			"Upgrade definition 7 to version 1.1.0? The default values of the template charts replace the values of the definition. (y/n): "},
-		{"declined", upgradeAvailable, false, "n\n", false, "Aborted.\n", ""},
-		{"nothing to do", noUpgrade, true, "", false, "No upgrade: the definition has template version 1.1.0, and the template has no newer published version.\n", ""},
+			"Upgrade definition 7 to version 1.1.0? The default values of the template charts replace the values of the definition. (y/n): ", nil},
+		{"declined", upgradeAvailable, false, "n\n", false, "", "", errAborted},
+		{"nothing to do", noUpgrade, true, "", false, "No upgrade: the definition has template version 1.1.0, and the template has no newer published version.\n", "", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -249,7 +256,12 @@ func TestDefinitionUpgradeCmd(t *testing.T) {
 				definitionUpgradeCmd.SetIn(strings.NewReader(tt.stdin))
 			}
 
-			require.NoError(t, definitionUpgradeCmd.RunE(definitionUpgradeCmd, []string{"7"}))
+			err := definitionUpgradeCmd.RunE(definitionUpgradeCmd, []string{"7"})
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
 			assert.Equal(t, tt.wantPost, containsString(rs.requests, "POST /api/v1/stack-definitions/7/upgrade"))
 			assert.Equal(t, tt.wantOut, buf.String())
 			assert.Contains(t, stderr.String(), tt.wantStderr)
@@ -443,8 +455,8 @@ func TestChartCmds_OutputModes(t *testing.T) {
 		rs := &recordServer{routes: map[string]route{"GET /api/v1/templates/9": {body: `{"id":"9","charts":[{"id":"t2","chart_name":"worker"}]}`}}}
 		buf, _ := setupChartCmd(t, templateRemoveChartCmd, rs)
 		templateRemoveChartCmd.SetIn(strings.NewReader("n\n"))
-		require.NoError(t, templateRemoveChartCmd.RunE(templateRemoveChartCmd, []string{"9", "worker"}))
-		assert.Equal(t, "Aborted.\n", buf.String())
+		require.ErrorIs(t, templateRemoveChartCmd.RunE(templateRemoveChartCmd, []string{"9", "worker"}), errAborted)
+		assert.Empty(t, buf.String())
 		assert.NotContains(t, strings.Join(rs.requests, ","), "DELETE")
 	})
 }

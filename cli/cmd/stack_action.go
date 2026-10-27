@@ -209,8 +209,7 @@ Examples:
 				return err
 			}
 			if !ok {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Aborted.")
-				return nil
+				return errAborted
 			}
 		}
 

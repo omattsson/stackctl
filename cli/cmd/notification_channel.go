@@ -563,8 +563,7 @@ Examples:
 			return err
 		}
 		if !ok {
-			printer.PrintMessage("Aborted.")
-			return nil
+			return errAborted
 		}
 		if err := c.DeleteNotificationChannel(id); err != nil {
 			return err

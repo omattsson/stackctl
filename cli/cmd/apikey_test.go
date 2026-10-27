@@ -403,7 +403,7 @@ func TestAPIKeyRevokeCmd_InteractiveDecline(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 	apikeyRevokeCmd.SetIn(strings.NewReader("n\n"))
 	apikeyRevokeCmd.SetErr(&bytes.Buffer{})
 	t.Cleanup(func() {
@@ -411,8 +411,7 @@ func TestAPIKeyRevokeCmd_InteractiveDecline(t *testing.T) {
 		apikeyRevokeCmd.SetErr(nil)
 	})
 
-	require.NoError(t, apikeyRevokeCmd.RunE(apikeyRevokeCmd, []string{"k1"}))
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, apikeyRevokeCmd.RunE(apikeyRevokeCmd, []string{"k1"}), errAborted)
 }
 
 func TestAPIKeyRevokeCmd_QuietOutput(t *testing.T) {

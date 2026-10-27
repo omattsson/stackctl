@@ -729,8 +729,7 @@ Examples:
 			return err
 		}
 		if !confirmed {
-			printer.PrintMessage("Aborted.")
-			return nil
+			return errAborted
 		}
 
 		resp, err := c.CleanStack(id)
@@ -1676,8 +1675,7 @@ Examples:
 			return err
 		}
 		if !confirmed {
-			printer.PrintMessage("Aborted.")
-			return nil
+			return errAborted
 		}
 
 		targetLog, _ := cmd.Flags().GetString("target-log")

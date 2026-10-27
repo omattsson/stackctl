@@ -108,7 +108,7 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
 - `yaml`: machine-readable, full API response
 - `--quiet`: IDs only, one per line (pipeable to `xargs`)
 
-**Destructive operations**: Commands that delete or clean resources must prompt for confirmation. `--yes` flag skips the prompt.
+**Destructive operations**: Commands that delete or clean resources must prompt for confirmation (`confirmAction`). `--yes` flag skips the prompt. A declined prompt returns `errAborted` (exit 1, "aborted: not confirmed, nothing changed" on stderr), so scripts can tell that nothing changed.
 
 ## HTTP Client Pattern
 

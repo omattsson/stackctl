@@ -597,7 +597,7 @@ func TestTemplateDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	templateDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -610,8 +610,7 @@ func TestTemplateDeleteCmd_Declined(t *testing.T) {
 	templateDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := templateDeleteCmd.RunE(templateDeleteCmd, []string{"10"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestTemplateDeleteCmd_NotFound(t *testing.T) {

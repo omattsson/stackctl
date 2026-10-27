@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -279,6 +280,10 @@ func isTerminalWriter(w io.Writer) bool {
 
 // confirmAction prompts the user for confirmation unless --yes is set.
 // Returns true if the action should proceed, false if aborted.
+// errAborted is returned when the user declines a confirmation prompt: the
+// command exits with code 1, so a script can tell that nothing changed.
+var errAborted = errors.New("aborted: not confirmed, nothing changed")
+
 func confirmAction(cmd *cobra.Command, message string) (bool, error) {
 	yes, _ := cmd.Flags().GetBool("yes")
 	if yes {
@@ -320,8 +325,7 @@ func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn f
 		return err
 	}
 	if !confirmed {
-		printer.PrintMessage("Aborted.")
-		return nil
+		return errAborted
 	}
 
 	if err := deleteFn(c, id); err != nil {

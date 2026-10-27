@@ -687,6 +687,14 @@ stackctl stack list -q
 
 `definition export` and `audit log export` do not use `-o`. They use `--output-file` and, for the audit export, `--format` (`json` or `csv`).
 
+## Confirmations
+
+Commands that delete, clean, roll back or replace data ask for confirmation. `--yes` (`-y`) skips the question. Without `--yes`:
+
+- `y` runs the command.
+- Any other answer stops it with exit code 1 and `aborted: not confirmed, nothing changed` on stderr.
+- A closed stdin (no answer, for example `< /dev/null`) fails with `use --yes to confirm`.
+
 ## Global Flags
 
 | Flag | Short | Description |
