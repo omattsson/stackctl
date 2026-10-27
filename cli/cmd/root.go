@@ -42,7 +42,9 @@ stacks across Kubernetes clusters.
 Get started:
   stackctl config use-context local
   stackctl config set api-url http://localhost:8081
-  stackctl version`,
+  stackctl version
+
+AI agents and scripts: run 'stackctl agent-guide' first.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -54,7 +56,7 @@ Get started:
 
 		// Skip config loading for commands that should work without a config file
 		name := cmd.Name()
-		if name == "version" || name == "completion" || (cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
+		if name == "version" || name == "agent-guide" || name == "completion" || (cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
 			cfg = &config.Config{Contexts: map[string]*config.Context{}}
 			return nil
 		}

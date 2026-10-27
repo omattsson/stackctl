@@ -25,6 +25,7 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
     root.go                   # Root cobra command, global flags, config loading, flag > env > config (resolveAPIURL, resolveAPIKey)
     config.go                 # config set/get/list/use-context/current-context/delete-context
     version.go                # Version info (build-time ldflags)
+    agent_guide.go, .md       # agent-guide: embedded Markdown guide for agents and scripts ({{VERSION}} = build version); agent_guide_test.go checks every stackctl command and flag in it
     login.go                  # login, logout (--all: logout-all first), whoami, auth register
     token.go                  # Token helpers (save/load/delete session, fresh token for plugins)
     stack.go                  # stack list/get/create/update/deploy/stop/clean/delete/status/logs/clone/extend/values/compare/history/rollback/history-values/watch
@@ -129,7 +130,7 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
 
 **Plugins** (`cmd/plugins.go`): for a plugin, `Execute` sets `TraverseChildren`, so the global flags before the plugin name are parsed by stackctl and not passed to the plugin; `pluginEnv` exports them (`STACKCTL_OUTPUT`, `STACKCTL_QUIET`, `STACKCTL_NO_COLOR` + `NO_COLOR`, `STACKCTL_DEBUG`, `STACKCTL_INSECURE`, `STACKCTL_CONFIG_DIR`, plus the context values). Arguments after the plugin name pass unchanged. Contract in `EXTENDING.md`.
 
-**Config-free commands**: `version` and `completion` skip config file loading and work even if the config is missing or corrupted.
+**Config-free commands**: `version`, `agent-guide` and `completion` skip config file loading and work even if the config is missing or corrupted.
 
 **Insecure mode**: When `--insecure` is active, a warning is printed to stderr.
 
@@ -226,3 +227,4 @@ All API calls go to `/api/v1/*`. Key route groups:
 5. Use `pkg/output` for formatting results
 6. Add to parent command in `init()`
 7. Write tests: flag parsing, success output, error handling
+8. If agents or scripts need to know about it (output, prompts, exit codes, waiting), update `cmd/agent_guide.md`

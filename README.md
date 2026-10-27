@@ -87,6 +87,18 @@ stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-st
 stackctl stack list --mine
 ```
 
+## Use with AI agents and scripts
+
+`stackctl agent-guide` prints a Markdown guide for AI agents (Claude Code, Copilot, Codex, ...) and scripts: machine-readable output, exit codes, authentication without a prompt, `--yes`, waiting for deploys, and common tasks. The guide is part of the binary, so it matches the installed version, and it works without a config. `stackctl --help` points agents to it.
+
+To give an agent the guide up front, add a line to the instructions of your project (for example `CLAUDE.md` or `AGENTS.md`):
+
+```markdown
+Before you use stackctl, run `stackctl agent-guide` and follow it.
+```
+
+Or save it next to them: `stackctl agent-guide > STACKCTL.md`.
+
 ## Extending — add your own subcommands
 
 Drop an executable named `stackctl-<name>` anywhere on your `$PATH` and it becomes `stackctl <name>` automatically. No plugin SDK, no recompile, no changes to stackctl itself. Same pattern as `git`, `kubectl`, and `gh`.
