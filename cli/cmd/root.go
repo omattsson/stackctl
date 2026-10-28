@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,7 +43,9 @@ stacks across Kubernetes clusters.
 Get started:
   stackctl config use-context local
   stackctl config set api-url http://localhost:8081
-  stackctl version`,
+  stackctl version
+
+AI agents and scripts: run 'stackctl agent-guide' first.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -51,10 +54,10 @@ Get started:
 		// (https://no-color.org) or a stdout that is a pipe or a file.
 		printer = output.NewPrinter(flagOutput, flagQuiet, flagNoColor || noColorEnv() || !isTerminalWriter(cmd.OutOrStdout()))
 		printer.Writer = cmd.OutOrStdout()
+		printer.ErrWriter = cmd.ErrOrStderr()
 
 		// Skip config loading for commands that should work without a config file
-		name := cmd.Name()
-		if name == "version" || name == "completion" || (cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
+		if skipsConfig(cmd) {
 			cfg = &config.Config{Contexts: map[string]*config.Context{}}
 			return nil
 		}
@@ -275,12 +278,33 @@ func isTerminalWriter(w io.Writer) bool {
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
+// skipConfigAnnotation marks a Cobra command that works without a config
+// file (version, agent-guide, completion). It also applies to the
+// subcommands of a marked command.
+const skipConfigAnnotation = "stackctl.skip-config"
+
+// skipsConfig reports whether cmd or one of its parents has
+// skipConfigAnnotation.
+func skipsConfig(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Annotations[skipConfigAnnotation] == "true" {
+			return true
+		}
+	}
+	return false
+}
+
+// errAborted is returned when the user declines a confirmation prompt: the
+// command exits with code 1, so a script can tell that nothing changed.
+var errAborted = errors.New("aborted: not confirmed, nothing changed")
+
 // confirmAction prompts the user for confirmation unless --yes is set.
-// Returns true if the action should proceed, false if aborted.
-func confirmAction(cmd *cobra.Command, message string) (bool, error) {
+// It returns nil if the action should proceed and errAborted if the user
+// declined, so callers only pass the error on.
+func confirmAction(cmd *cobra.Command, message string) error {
 	yes, _ := cmd.Flags().GetBool("yes")
 	if yes {
-		return true, nil
+		return nil
 	}
 	fmt.Fprint(cmd.ErrOrStderr(), message)
 	reader := bufio.NewReader(cmd.InOrStdin())
@@ -288,14 +312,14 @@ func confirmAction(cmd *cobra.Command, message string) (bool, error) {
 	if err != nil && (err != io.EOF || answer == "") {
 		if err == io.EOF {
 			// stdin closed without an answer: a non-interactive shell.
-			return false, fmt.Errorf("no answer to the confirmation prompt (non-interactive shell?): use --yes to confirm")
+			return fmt.Errorf("no answer to the confirmation prompt (non-interactive shell?): use --yes to confirm")
 		}
-		return false, fmt.Errorf("reading confirmation: %w (use --yes to skip the prompt)", err)
+		return fmt.Errorf("reading confirmation: %w (use --yes to skip the prompt)", err)
 	}
 	if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-		return false, nil
+		return errAborted
 	}
-	return true, nil
+	return nil
 }
 
 func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn func(*client.Client, string) (string, error), deleteFn func(*client.Client, string) error, successFmt string) error {
@@ -313,13 +337,8 @@ func deleteByID(cmd *cobra.Command, args []string, promptFmt string, resolveFn f
 		return err
 	}
 
-	confirmed, err := confirmAction(cmd, fmt.Sprintf(promptFmt, id))
-	if err != nil {
+	if err := confirmAction(cmd, fmt.Sprintf(promptFmt, id)); err != nil {
 		return err
-	}
-	if !confirmed {
-		printer.PrintMessage("Aborted.")
-		return nil
 	}
 
 	if err := deleteFn(c, id); err != nil {

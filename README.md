@@ -87,6 +87,18 @@ stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-st
 stackctl stack list --mine
 ```
 
+## Use with AI agents and scripts
+
+`stackctl agent-guide` prints a Markdown guide for AI agents (Claude Code, Copilot, Codex, ...) and scripts: machine-readable output, exit codes, authentication without a prompt, `--yes`, waiting for deploys, and common tasks. The guide is part of the binary, so it matches the installed version, and it works without a config. `stackctl --help` points agents to it.
+
+To give an agent the guide up front, add a line to the instructions of your project (for example `CLAUDE.md` or `AGENTS.md`):
+
+```markdown
+Before you use stackctl, run `stackctl agent-guide` and follow it.
+```
+
+Or save it next to them: `stackctl agent-guide > STACKCTL.md`.
+
 ## Extending — add your own subcommands
 
 Drop an executable named `stackctl-<name>` anywhere on your `$PATH` and it becomes `stackctl <name>` automatically. No plugin SDK, no recompile, no changes to stackctl itself. Same pattern as `git`, `kubectl`, and `gh`.
@@ -310,7 +322,7 @@ stackctl stack rollback my-app --target-log <log-id>
 
 List commands (`stack list`, `definition list`, `template list`) show one page: 25 items by default, `--page-size` up to 100. When the server has more items, the command writes `Showing X of TOTAL. Use --page/--page-size to see more.` to stderr, so `-q` and `-o json` output stays clean. `-q` without `--page` prints the IDs of all pages, so `stackctl stack list --mine -q | xargs ...` gets every ID. Older servers return every match of `--mine` and name queries on one page. When a name matches more than one stack or definition, the error lists the first page and the number of matches.
 
-`stack deploy`, `stop`, `clean` and `rollback` with `--follow` (`-f`), and `stack watch --id`, wait for a terminal status: `running`, `stopped` or `draft` (exit code 0), or `error` or `partial` (exit code 1). `partial` means that some charts deployed and others failed; the message names the operation, the status and the server error, for example `deploy partially failed (status partial): some charts did not deploy: ...`. `--follow` reads the instance after it connects, so an operation that ended before the connection counts. It handles a server close like `stack watch`: after `token expired` it renews the session, connects again and reads the instance, so a final status during the reconnect counts. When `--follow` cannot follow the operation to the end (session revoked, SSO login without refresh token, failed renewal, lost connection), it exits with code 1 and says that the operation continues on the server. Do not start the operation again: run `stackctl stack watch --id <id>` or `stackctl stack status <id>`.
+`stack deploy`, `stop`, `clean` and `rollback` with `--follow` (`-f`), and `stack watch --id`, wait for a terminal status: `running`, `stopped` or `draft` (exit code 0), or `error` or `partial` (exit code 1). `partial` means that some charts deployed and others failed; the message names the operation, the status and the server error, for example `deploy partially failed (status partial): some charts did not deploy: ...`. `--follow` reads the instance after it connects, so an operation that ended before the connection counts. It handles a server close like `stack watch`: after `token expired` it renews the session, connects again and reads the instance, so a final status during the reconnect counts. When `--follow` cannot follow the operation to the end (session revoked, SSO login without refresh token, failed renewal, lost connection, or a normal close by the server, for example on a restart, while the status of the instance is not final), it exits with code 1 and says that the operation continues on the server. Do not start the operation again: run `stackctl stack watch --id <id>` or `stackctl stack status <id>`.
 
 `--follow` and `stack watch` work with an API key on newer servers. An older server accepts only a login session for live updates and refuses an API key: stackctl then prints `This server does not accept API keys for live updates; use a login session or upgrade the server.`
 
@@ -676,7 +688,17 @@ stackctl stack list -o yaml
 stackctl stack list -q
 ```
 
+With `-o json`, `-o yaml` and `-q`, stdout holds only data. Messages for people (for example `Deleted stack ...`, `--dry-run` text) go to stderr. `stack deploy`, `stop`, `clean` and `rollback` print the server response (`log_id`, `message`), and `-q` prints the log ID. With `--follow` the deployment log goes to stderr and stdout gets the stack after the operation (`-q`: the log ID); `stack logs -f` prints the log as without `--follow`. An empty list prints `[]`. Custom output formats keep the messages on stdout.
+
 `definition export` and `audit log export` do not use `-o`. They use `--output-file` and, for the audit export, `--format` (`json` or `csv`).
+
+## Confirmations
+
+Commands that delete, clean, roll back or replace data ask for confirmation. `--yes` (`-y`) skips the question. Without `--yes`:
+
+- `y` runs the command.
+- Any other answer stops it with exit code 1 and `aborted: not confirmed, nothing changed` on stderr.
+- A closed stdin (no answer, for example `< /dev/null`) fails with `use --yes to confirm`.
 
 ## Global Flags
 

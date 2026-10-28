@@ -531,7 +531,7 @@ func TestStackCleanCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	stackCleanCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -544,8 +544,7 @@ func TestStackCleanCmd_Declined(t *testing.T) {
 	stackCleanCmd.SetErr(&bytes.Buffer{})
 
 	err := stackCleanCmd.RunE(stackCleanCmd, []string{"42"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestStackCleanCmd_WithYesFlag(t *testing.T) {
@@ -605,7 +604,7 @@ func TestStackDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	stackDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -618,8 +617,7 @@ func TestStackDeleteCmd_Declined(t *testing.T) {
 	stackDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := stackDeleteCmd.RunE(stackDeleteCmd, []string{"42"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestStackDeleteCmd_WithYesFlag(t *testing.T) {

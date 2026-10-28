@@ -1751,10 +1751,13 @@ func TestE2E_BulkTemplateDelete_NoConfirmation(t *testing.T) {
 	dir := t.TempDir()
 	setupE2EStackContext(t, dir, server.URL)
 
-	// Without --yes, provide "n" on stdin — should abort
-	stdout, _, err := runStackctlWithStdin(t, dir, "n\n", "bulk", "template", "delete", "--ids", "1,2")
-	require.NoError(t, err)
-	assert.Contains(t, stdout, "Aborted")
+	// Without --yes, "n" on stdin declines: exit code 1, nothing changed.
+	stdout, stderr, err := runStackctlWithStdin(t, dir, "n\n", "bulk", "template", "delete", "--ids", "1,2")
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, 1, exitErr.ExitCode())
+	assert.Contains(t, stderr, "aborted: not confirmed, nothing changed")
+	assert.NotContains(t, stdout, "Deleted")
 }
 
 // ---------- Cluster E2E Mock Server ----------

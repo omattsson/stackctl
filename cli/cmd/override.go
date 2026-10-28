@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	msgAborted          = "Aborted."
 	flagDescSkipConfirm = "Skip confirmation prompt"
 )
 
@@ -250,13 +249,8 @@ Examples:
 		}
 
 		if len(values) == 0 && existing != nil {
-			confirmed, err := confirmAction(cmd, fmt.Sprintf("The new values are empty. This will remove the value override of chart %s on instance %s. Continue? (y/n): ", args[1], instanceID))
-			if err != nil {
+			if err := confirmAction(cmd, fmt.Sprintf("The new values are empty. This will remove the value override of chart %s on instance %s. Continue? (y/n): ", args[1], instanceID)); err != nil {
 				return err
-			}
-			if !confirmed {
-				printer.PrintMessage(msgAborted)
-				return nil
 			}
 		}
 
@@ -955,13 +949,8 @@ Examples:
 			return err
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the quota override for instance %s. Continue? (y/n): ", instanceID))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will delete the quota override for instance %s. Continue? (y/n): ", instanceID)); err != nil {
 			return err
-		}
-		if !confirmed {
-			printer.PrintMessage(msgAborted)
-			return nil
 		}
 
 		if err := c.DeleteQuotaOverride(instanceID); err != nil {
@@ -997,13 +986,8 @@ func deleteChartOverride(cmd *cobra.Command, args []string, kind string, deleteF
 		return err
 	}
 
-	confirmed, err := confirmAction(cmd, fmt.Sprintf("This will delete the %s override for chart %s on instance %s. Continue? (y/n): ", kind, args[1], instanceID))
-	if err != nil {
+	if err := confirmAction(cmd, fmt.Sprintf("This will delete the %s override for chart %s on instance %s. Continue? (y/n): ", kind, args[1], instanceID)); err != nil {
 		return err
-	}
-	if !confirmed {
-		printer.PrintMessage(msgAborted)
-		return nil
 	}
 
 	if err := deleteFn(c, instanceID, chartID); err != nil {

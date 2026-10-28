@@ -776,7 +776,7 @@ func TestClusterSharedValuesDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupClusterTestCmd(t, server.URL)
+	_ = setupClusterTestCmd(t, server.URL)
 
 	clusterSharedValuesDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -789,8 +789,7 @@ func TestClusterSharedValuesDeleteCmd_Declined(t *testing.T) {
 	clusterSharedValuesDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := clusterSharedValuesDeleteCmd.RunE(clusterSharedValuesDeleteCmd, []string{"1", "5"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestClusterSharedValuesDeleteCmd_QuietOutput(t *testing.T) {
@@ -1201,7 +1200,7 @@ func TestClusterDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupClusterTestCmd(t, server.URL)
+	_ = setupClusterTestCmd(t, server.URL)
 	clusterDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
 		clusterDeleteCmd.Flags().Set("yes", "false")
@@ -1212,8 +1211,7 @@ func TestClusterDeleteCmd_Declined(t *testing.T) {
 	clusterDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := clusterDeleteCmd.RunE(clusterDeleteCmd, []string{"1"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestClusterDeleteCmd_DryRun(t *testing.T) {
@@ -2242,7 +2240,7 @@ func TestClusterQuotaDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupClusterTestCmd(t, server.URL)
+	_ = setupClusterTestCmd(t, server.URL)
 	clusterQuotaDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
 		resetFlag(t, clusterQuotaDeleteCmd.Flags(), "yes", "false")
@@ -2253,8 +2251,7 @@ func TestClusterQuotaDeleteCmd_Declined(t *testing.T) {
 	clusterQuotaDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := clusterQuotaDeleteCmd.RunE(clusterQuotaDeleteCmd, []string{"1"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestClusterQuotaDeleteCmd_Forbidden(t *testing.T) {

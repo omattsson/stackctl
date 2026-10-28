@@ -24,6 +24,7 @@ Fish:
 
 PowerShell:
   stackctl completion powershell | Out-String | Invoke-Expression`,
+	Annotations:  map[string]string{skipConfigAnnotation: "true"},
 	Args:         cobra.ExactArgs(1),
 	ValidArgs:    []string{"bash", "zsh", "fish", "powershell"},
 	SilenceUsage: true,

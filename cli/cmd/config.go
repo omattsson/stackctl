@@ -93,7 +93,7 @@ Examples:
   stackctl config list -o json`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(cfg.Contexts) == 0 {
+		if len(cfg.Contexts) == 0 && !printer.MachineReadable() {
 			printer.PrintMessage("No contexts configured. Run 'stackctl config use-context <name>' to create one.")
 			return nil
 		}
@@ -112,7 +112,7 @@ Examples:
 			APIKey   string `json:"api-key,omitempty" yaml:"api-key,omitempty"`
 			Insecure bool   `json:"insecure,omitempty" yaml:"insecure,omitempty"`
 		}
-		var structured []contextOutput
+		structured := []contextOutput{} // -o json: [], not null
 		headers := []string{"", "CONTEXT", "API URL", "API KEY", "INSECURE"}
 		var rows [][]string
 		for _, name := range names {

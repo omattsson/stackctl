@@ -135,13 +135,8 @@ Examples:
 			return err
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will clean %d stack instances. Continue? (y/n): ", len(ids)))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will clean %d stack instances. Continue? (y/n): ", len(ids))); err != nil {
 			return err
-		}
-		if !confirmed {
-			printer.PrintMessage("Aborted.")
-			return nil
 		}
 
 		resp, err := c.BulkClean(ids)
@@ -194,13 +189,8 @@ Examples:
 			return err
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d stack instances. Continue? (y/n): ", len(ids)))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d stack instances. Continue? (y/n): ", len(ids))); err != nil {
 			return err
-		}
-		if !confirmed {
-			printer.PrintMessage("Aborted.")
-			return nil
 		}
 
 		resp, err := c.BulkDelete(ids)
@@ -319,13 +309,8 @@ Examples:
 			return err
 		}
 
-		confirmed, err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d template(s). Continue? (y/n): ", len(ids)))
-		if err != nil {
+		if err := confirmAction(cmd, fmt.Sprintf("This will permanently delete %d template(s). Continue? (y/n): ", len(ids))); err != nil {
 			return err
-		}
-		if !confirmed {
-			printer.PrintMessage("Aborted.")
-			return nil
 		}
 
 		resp, err := c.BulkDeleteTemplates(ids)

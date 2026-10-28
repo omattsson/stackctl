@@ -175,7 +175,7 @@ func TestOrphanedDeleteCmd_Declined(t *testing.T) {
 	}))
 	defer server.Close()
 
-	buf := setupStackTestCmd(t, server.URL)
+	_ = setupStackTestCmd(t, server.URL)
 
 	orphanedDeleteCmd.Flags().Set("yes", "false")
 	t.Cleanup(func() {
@@ -188,8 +188,7 @@ func TestOrphanedDeleteCmd_Declined(t *testing.T) {
 	orphanedDeleteCmd.SetErr(&bytes.Buffer{})
 
 	err := orphanedDeleteCmd.RunE(orphanedDeleteCmd, []string{"stack-old-app"})
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Aborted")
+	require.ErrorIs(t, err, errAborted)
 }
 
 func TestOrphanedDeleteCmd_NotFound(t *testing.T) {
