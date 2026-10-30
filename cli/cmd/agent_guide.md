@@ -67,6 +67,9 @@ stackctl stack values my-app              # merged Helm values
 stackctl stack preview my-app             # values that the next deploy uses
 stackctl stack history my-app
 
+# Reach a service of the stack: runs until interrupted, so start it in the background
+stackctl stack port-forward my-app mysql 0:3306 -q   # stdout: 127.0.0.1:<port>; exit 1 on 403/404/409
+
 # Change values, then deploy again
 stackctl override set my-app my-chart --set image.tag=1.2.3
 stackctl override branch set my-app my-chart feature/x

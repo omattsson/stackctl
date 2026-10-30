@@ -251,6 +251,11 @@ stackctl stack recent                 # your 5 most recently updated stacks
 stackctl stack preview my-app
 stackctl stack preview my-app --chart backend > backend-values.yaml
 
+# Forward a local port to a service of the stack (runs until Ctrl-C)
+stackctl stack port-forward my-app mysql 3306     # then: mysql -h 127.0.0.1 -P 3306
+stackctl stack port-forward my-app frontend 80    # local port 10080
+stackctl stack port-forward my-app mysql 0:3306 -q   # any free port; stdout: 127.0.0.1:<port>
+
 # Custom actions of the hooks config (for example a database refresh)
 stackctl stack action list my-app
 stackctl stack action run my-app refresh-db --param market=dk --yes --wait
@@ -297,6 +302,13 @@ stackctl stack rollback my-app --target-log <log-id>
 `--stop-at` (`stack create`, `clone`, `update`, `template quick-deploy`) sets a fixed stop time: the TTL becomes 0 and the stack stops at that time. `--stop-at` and `--until` accept RFC 3339 (`2026-10-17T18:00:00+02:00`) or a local time without a zone (`2026-10-17 18:00`). stackctl sends the time in UTC. `stack create --ttl 0` now sends 0 (no expiry); without `--ttl` the server applies its default TTL. `--ttl` and `--stop-at` together, a stop time in the past or a bad format are usage errors; stackctl sends no request. Before the request, stackctl also refuses a `--ttl`, a `--stop-at` or an `--until` above the TTL limit of the server (`max_instance_ttl_days` of `GET /api/v1/ui-config`; 30 days for an older server). `stack list` (column `EXPIRES`) and `stack get` show a fixed stop time as `stops at <time>`. A deploy after the stop time fails with 409: set a new stop time or a TTL with `stack update`.
 
 `stack get` shows `Following` and `Followers` (k8s-stack-manager v0.8.0 or later). `stack preview -q` prints the names of the charts whose values differ from the last deploy. `stack preview` writes the values-drift warning to stderr, so the YAML on stdout stays valid.
+
+`stack port-forward <name|id> <service> [LOCAL:]REMOTE` opens a local port that forwards to a service of the stack through the server (`GET /api/v1/stack-instances/:id/port-forward`). You need no kubeconfig. REMOTE is the service port. LOCAL must be 0 (any free port) or from 1025 to 65535. Without LOCAL, the local port is REMOTE when REMOTE is above 1024, else REMOTE + 10000; when that port is in use, stackctl tries the next 20 ports, then any free port. An explicit LOCAL port that is in use stops the command. `--address` sets the local addresses (default `127.0.0.1`, comma-separated). stdout gets `Forwarding from 127.0.0.1:3306 -> mysql:3306` (`-q`: only `host:port`); stderr gets one line when a connection opens and one when it closes. Each local connection opens its own tunnel. Ctrl-C closes all connections and exits 0.
+
+- Errors that stop the command (exit 1): no access (401, 403), an unknown stack, service or port (404), the feature turned off on the server or on the cluster, a stack that is not deployed (409), and a revoked session or permission during a tunnel (close 1008). A 404 without an error code means that the server has no port-forward route: upgrade k8s-stack-manager. A status 200 without an upgrade means that a proxy dropped the WebSocket upgrade.
+- Errors that close only one connection: the tunnel limit (429), no ready pod (503), a failed pod dial (502), the server time limit (close 4001), the idle timeout (4002), a pod stream error (4502) and network errors.
+- The server can refuse API keys for port-forward: then run `stackctl login` and remove the API key from the context or the environment.
+- Security: anyone who can reach the local port uses your access to the stack. On a shared machine, other local users can connect to it. Web pages in your browser can reach a forwarded HTTP service through DNS rebinding: stop the command when you do not need it. An address that is not loopback opens the port to the network (stackctl writes a warning). `--insecure` is refused, because a man in the middle could read the tunnel data; `--allow-insecure-stream` accepts that risk.
 
 `stack action list` and `stack action run` see the actions that apply to the stack: a server can limit an action to some templates, template categories, definitions or clusters (`applies_to`). An action of another stack gives "unknown action" with the actions of this stack. When the server could not check where an action applies, `stack action list` ends with "Some actions are not shown: the server could not check where they apply. Try again.", and `-o json` has `"scope_incomplete": true`.
 
@@ -669,6 +681,7 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 | `definition link-template` | v0.11.0 or later |
 | `--stop-at`, `stack extend --until`, the TTL limit of `server info` and of the local check (an older server ignores `--stop-at` and `--until`: stackctl shows the result and exits with code 1; it uses 30 days as the limit) | v0.12.0 or later |
 | Actions limited to some stacks (`applies_to`) and the `scope_incomplete` hint of `stack action list` (an older server lists every action for every stack) | the release after v0.14.0 (omattsson/k8s-stack-manager#720) |
+| `stack port-forward` (an older server answers 404 without an error code: stackctl says "upgrade k8s-stack-manager") | the release after v0.14.0 (omattsson/k8s-stack-manager#722) |
 
 ## Output Formats
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -254,6 +255,22 @@ func (c *Client) StreamDeploymentLogsWithOptions(ctx context.Context, instanceID
 // transport triggers a warning via warnWriter (when non-nil) because we
 // can't extract TLS settings safely.
 func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) (*websocket.Conn, error) {
+	return c.dialWSOpts(ctx, path, warnWriter, wsDialOptions{})
+}
+
+// wsDialOptions changes the behaviour of dialWSOpts.
+type wsDialOptions struct {
+	// stream marks a stream route (port-forward, exec). These routes accept
+	// only header auth: no ?token= retry, which would only put the JWT in
+	// access logs. A 401 gets one forced session renewal and one more dial.
+	stream bool
+	// op names the operation in handshake errors, for example
+	// "port-forward".
+	op string
+}
+
+// dialWSOpts is dialWS with options (see wsDialOptions).
+func (c *Client) dialWSOpts(ctx context.Context, path string, warnWriter io.Writer, opts wsDialOptions) (*websocket.Conn, error) {
 	wsURL, err := c.websocketURL(path)
 	if err != nil {
 		return nil, err
@@ -286,6 +303,27 @@ func (c *Client) dialWS(ctx context.Context, path string, warnWriter io.Writer) 
 	conn, resp, err := dialer.DialContext(ctx, wsURL, header)
 	if err == nil {
 		return conn, nil
+	}
+	if opts.stream {
+		if resp != nil && resp.StatusCode == http.StatusUnauthorized && c.APIKey == "" && token != "" {
+			renewed, rerr := c.RenewSession()
+			if rerr != nil {
+				return nil, rerr
+			}
+			if renewed {
+				c.debugf("↻ session renewed after a WebSocket 401; dialing %s again\n", opts.op)
+				header.Set("Authorization", "Bearer "+c.currentToken())
+				conn, resp, err = dialer.DialContext(ctx, wsURL, header)
+				if err == nil {
+					return conn, nil
+				}
+			}
+		}
+		if hsErr := handshakeError(resp, err, c.APIKey != ""); hsErr != nil {
+			hsErr.Op = opts.op
+			return nil, hsErr
+		}
+		return nil, fmt.Errorf("connecting to the %s WebSocket: %w", opts.op, err)
 	}
 	// 401 → fall back to ?token= query param when a JWT is configured.
 	// The retry is gated on c.Token because an API-key-only caller has no
@@ -335,15 +373,51 @@ const maxHandshakeBody = 4096
 type WSHandshakeError struct {
 	StatusCode int
 	Message    string
+	// Code is the stable error code of the JSON body ({"error","code"}) of
+	// the stream routes, for example StreamCodeFeatureDisabled. Empty when
+	// the body has no code.
+	Code string
+	// Op names the operation of a stream route, for example "port-forward".
+	// Empty for /ws.
+	Op string
 	// APIKey is true when the refused request used an API key (no JWT
 	// fallback).
 	APIKey bool
 	err    error
 }
 
+// Error codes of the stream routes (port-forward, exec) of
+// k8s-stack-manager, in the JSON body of a refused upgrade.
+const (
+	StreamCodeFeatureDisabled     = "feature_disabled"
+	StreamCodeAPIKeyNotAllowed    = "api_key_not_allowed"
+	StreamCodeForbidden           = "forbidden"
+	StreamCodeClusterDisabled     = "cluster_port_forward_disabled"
+	StreamCodeNamespaceNotAllowed = "namespace_not_allowed"
+	StreamCodeOriginNotAllowed    = "origin_not_allowed"
+	StreamCodeInstanceNotFound    = "instance_not_found"
+	StreamCodeServiceNotFound     = "service_not_found"
+	StreamCodePortNotFound        = "port_not_found"
+	StreamCodeInvalidService      = "invalid_service"
+	StreamCodeInvalidPort         = "invalid_port"
+	StreamCodeUpgradeRequired     = "upgrade_required"
+	StreamCodeInstanceNotDeployed = "instance_not_deployed"
+	StreamCodeServiceExternalName = "service_external_name"
+	StreamCodeServiceNoSelector   = "service_no_selector"
+	StreamCodeTunnelLimit         = "tunnel_limit"
+	StreamCodeNoReadyPod          = "no_ready_pod"
+	StreamCodeKubeTimeout         = "kube_timeout"
+	StreamCodeShuttingDown        = "shutting_down"
+	StreamCodeDialFailed          = "dial_failed"
+	StreamCodeInternal            = "internal"
+)
+
 // Error returns a message for the user, for example "WebSocket refused by
 // the server (HTTP 401): Invalid or expired token. Run 'stackctl login'."
 func (e *WSHandshakeError) Error() string {
+	if e.Op != "" {
+		return e.streamError()
+	}
 	msg := fmt.Sprintf("WebSocket refused by the server (HTTP %d): %s", e.StatusCode, e.Message)
 	switch {
 	case e.APIKeyNotAccepted():
@@ -357,9 +431,73 @@ func (e *WSHandshakeError) Error() string {
 	}
 }
 
+// streamError is the message of a refused stream route upgrade.
+func (e *WSHandshakeError) streamError() string {
+	if e.UpgradeDropped() {
+		return fmt.Sprintf("%s failed: the server answered HTTP %d without a WebSocket upgrade; a proxy between stackctl and the server probably dropped the upgrade", e.Op, e.StatusCode)
+	}
+	if e.NoRoute() {
+		return fmt.Sprintf("%s failed: the server has no %s route (HTTP 404); upgrade k8s-stack-manager", e.Op, e.Op)
+	}
+	msg := fmt.Sprintf("%s refused by the server (HTTP %d): %s", e.Op, e.StatusCode, e.Message)
+	switch {
+	case e.StatusCode == http.StatusUnauthorized && e.APIKey:
+		return msg + ". Check the API key."
+	case e.StatusCode == http.StatusUnauthorized:
+		return msg + ". Run 'stackctl login'."
+	}
+	switch e.Code {
+	case StreamCodeFeatureDisabled:
+		return msg + ". The server has " + e.Op + " turned off; ask an administrator."
+	case StreamCodeAPIKeyNotAllowed:
+		return msg + ". API keys are not allowed for this command: run 'stackctl login' and remove the API key (--api-key, STACKCTL_API_KEY or the api-key of the context)."
+	case StreamCodeServiceNotFound, StreamCodePortNotFound:
+		return msg + ". Check the service name and the service port (not the container port)."
+	case StreamCodeInstanceNotDeployed:
+		return msg + ". Deploy the stack first."
+	case StreamCodeTunnelLimit:
+		return msg + ". Close other connections, then try again."
+	}
+	return msg
+}
+
 // Unwrap returns the dialer error (websocket.ErrBadHandshake).
 func (e *WSHandshakeError) Unwrap() error {
 	return e.err
+}
+
+// FeatureDisabled reports whether the server has the stream feature turned
+// off (404 with code feature_disabled).
+func (e *WSHandshakeError) FeatureDisabled() bool {
+	return e.StatusCode == http.StatusNotFound && e.Code == StreamCodeFeatureDisabled
+}
+
+// NoRoute reports a 404 without an error code: a server without the route
+// (an older k8s-stack-manager). Only meaningful for a stream route.
+func (e *WSHandshakeError) NoRoute() bool {
+	return e.StatusCode == http.StatusNotFound && e.Code == ""
+}
+
+// UpgradeDropped reports a success status, or a 400 without a code or with
+// upgrade_required: the request reached the server without the upgrade
+// headers, so a proxy dropped them.
+func (e *WSHandshakeError) UpgradeDropped() bool {
+	if e.StatusCode >= 200 && e.StatusCode < 300 {
+		return true
+	}
+	return e.StatusCode == http.StatusBadRequest && (e.Code == "" || e.Code == StreamCodeUpgradeRequired)
+}
+
+// Fatal reports whether every later dial of the same stream would fail the
+// same way: 400, 401, 403, 404 and 409. 429, 5xx and network errors can pass
+// on the next try.
+func (e *WSHandshakeError) Fatal() bool {
+	switch e.StatusCode {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden,
+		http.StatusNotFound, http.StatusConflict:
+		return true
+	}
+	return e.UpgradeDropped()
 }
 
 // APIKeyNotAccepted reports whether the server refused an API key because
@@ -386,8 +524,10 @@ func handshakeError(resp *http.Response, err error, apiKey bool) *WSHandshakeErr
 		var errResp struct {
 			Error   string `json:"error"`
 			Message string `json:"message"`
+			Code    string `json:"code"`
 		}
 		if json.Unmarshal(body, &errResp) == nil {
+			hsErr.Code = sanitizeServerMessage(errResp.Code)
 			hsErr.Message = sanitizeServerMessage(errResp.Error)
 			if hsErr.Message == "" {
 				hsErr.Message = sanitizeServerMessage(errResp.Message)
@@ -610,4 +750,154 @@ func appendQueryToken(rawURL, token string) string {
 		return rawURL + "&token=" + escaped
 	}
 	return rawURL + "?token=" + escaped
+}
+
+// Close codes of the stream routes (port-forward, exec) of
+// k8s-stack-manager.
+const (
+	CloseNormal         = websocket.CloseNormalClosure     // 1000
+	CloseGoingAway      = websocket.CloseGoingAway         // 1001: server shutdown
+	CloseUnsupported    = websocket.CloseUnsupportedData   // 1003: text frame from the client
+	ClosePolicy         = websocket.ClosePolicyViolation   // 1008: access revoked
+	CloseMessageTooBig  = websocket.CloseMessageTooBig     // 1009
+	CloseInternalError  = websocket.CloseInternalServerErr // 1011
+	CloseMaxDuration    = 4001                             // server time limit
+	CloseIdleTimeout    = 4002                             // no data in either direction
+	ClosePodStreamError = 4502                             // the reason holds the error
+	closeNoStatus       = websocket.CloseNoStatusReceived  // 1005: close frame without a code
+)
+
+// StreamClosedError reports that the server closed a stream WebSocket
+// (port-forward, exec) with a code other than 1000.
+type StreamClosedError struct {
+	// Subject names the stream in the message, for example "tunnel".
+	Subject string
+	Code    int
+	// Reason is the sanitized close reason of the server.
+	Reason string
+	// APIKey is true when the stream used an API key.
+	APIKey bool
+}
+
+// Error returns a message for the user, for example "tunnel closed: server
+// time limit reached".
+func (e *StreamClosedError) Error() string {
+	return e.Subject + " closed: " + CloseCodeText(e.Code, e.Reason, e.APIKey)
+}
+
+// Fatal reports whether a new stream would fail the same way (1008: access
+// revoked).
+func (e *StreamClosedError) Fatal() bool {
+	return e.Code == ClosePolicy
+}
+
+// Unwrap returns a *WSClosedError for close code 1008, so callers that
+// handle a revoked /ws connection handle a revoked stream too.
+func (e *StreamClosedError) Unwrap() error {
+	if e.Code == ClosePolicy {
+		return &WSClosedError{Code: e.Code, Reason: e.Reason, APIKey: e.APIKey}
+	}
+	return nil
+}
+
+// CloseCodeText returns a short text for the user for a close code of a
+// stream route, for example "server time limit reached" for 4001.
+func CloseCodeText(code int, reason string, apiKey bool) string {
+	reason = sanitizeServerMessage(reason)
+	switch code {
+	case CloseNormal, closeNoStatus:
+		return "normal close"
+	case CloseGoingAway:
+		return "the server is shutting down"
+	case CloseUnsupported:
+		return "the server refused a text frame"
+	case ClosePolicy:
+		if apiKey {
+			return "access revoked (API key or permissions); check the key with 'stackctl apikey list'"
+		}
+		return "access revoked (token, session or permissions); run 'stackctl login'"
+	case CloseMessageTooBig:
+		return "message too big"
+	case CloseInternalError:
+		return "internal server error"
+	case CloseMaxDuration:
+		return "server time limit reached"
+	case CloseIdleTimeout:
+		return "idle timeout (no data in either direction)"
+	case ClosePodStreamError:
+		if reason == "" {
+			return "pod stream error"
+		}
+		return "pod stream error: " + reason
+	}
+	if reason == "" {
+		return fmt.Sprintf("closed by the server (code %d)", code)
+	}
+	return fmt.Sprintf("closed by the server (code %d): %s", code, reason)
+}
+
+// KeepaliveTimings are the keepalive deadlines of a stream WebSocket. A zero
+// field takes the default. Tests inject short values.
+type KeepaliveTimings struct {
+	// PingInterval is the interval of the client pings (default 30 s).
+	PingInterval time.Duration
+	// ReadTimeout is the read deadline, moved by data, a ping or a pong
+	// (default 75 s; the server pings every 30 s).
+	ReadTimeout time.Duration
+	// WriteTimeout is the deadline of a control frame (default 10 s).
+	WriteTimeout time.Duration
+}
+
+// Default keepalive timings of a stream WebSocket.
+const (
+	DefaultPingInterval = 30 * time.Second
+	DefaultReadTimeout  = 75 * time.Second
+	DefaultWriteTimeout = 10 * time.Second
+)
+
+func (k KeepaliveTimings) withDefaults() KeepaliveTimings {
+	if k.PingInterval <= 0 {
+		k.PingInterval = DefaultPingInterval
+	}
+	if k.ReadTimeout <= 0 {
+		k.ReadTimeout = DefaultReadTimeout
+	}
+	if k.WriteTimeout <= 0 {
+		k.WriteTimeout = DefaultWriteTimeout
+	}
+	return k
+}
+
+// setKeepalive sets the read deadline and the ping and pong handlers of ws.
+// It returns the function that moves the read deadline. Call it, and read
+// ws, only from the reader goroutine: gorilla runs the handlers there.
+func setKeepalive(ws *websocket.Conn, k KeepaliveTimings) (extend func()) {
+	extend = func() { _ = ws.SetReadDeadline(time.Now().Add(k.ReadTimeout)) }
+	extend()
+	ws.SetPongHandler(func(string) error {
+		extend()
+		return nil
+	})
+	ws.SetPingHandler(func(data string) error {
+		extend()
+		err := ws.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(k.WriteTimeout))
+		var ne net.Error
+		if err == nil || errors.Is(err, websocket.ErrCloseSent) || (errors.As(err, &ne) && ne.Timeout()) {
+			return nil
+		}
+		return err
+	})
+	return extend
+}
+
+// sendPing writes a ping control frame. It is safe to call concurrently with
+// the data writer.
+func sendPing(ws *websocket.Conn, k KeepaliveTimings) error {
+	return ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(k.WriteTimeout))
+}
+
+// sendClose writes a close control frame. It is safe to call concurrently
+// with the data writer.
+func sendClose(ws *websocket.Conn, code int, timeout time.Duration) error {
+	return ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, ""), time.Now().Add(timeout))
 }
