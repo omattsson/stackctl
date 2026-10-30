@@ -115,10 +115,17 @@ func (c *Client) EnsureFreshToken() (string, error) {
 // session, or a session without a refresh token (SSO login, old token
 // file). A 401 *APIError means that the server ended the session.
 func (c *Client) RenewSession() (bool, error) {
+	return c.renewSession(c.currentToken())
+}
+
+// renewSession is RenewSession for the access token stale that the server
+// refused. When another goroutine already replaced stale, it uses that token
+// and sends no refresh.
+func (c *Client) renewSession(stale string) (bool, error) {
 	if c.Tokens == nil || c.APIKey != "" {
 		return false, nil
 	}
-	if err := c.renew(c.currentToken()); err != nil {
+	if err := c.renew(stale); err != nil {
 		if errors.Is(err, errNoRefreshToken) {
 			return false, nil
 		}

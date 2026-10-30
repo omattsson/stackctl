@@ -7,9 +7,9 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 ## Architecture
 
 - All code lives under `cli/` — the Go module root (`cli/go.mod`). Run Go commands from `cli/`.
-- Go version: see `cli/go.mod` (1.26.10 or later). CI uses `go-version-file: cli/go.mod`.
+- Go version: see `cli/go.mod` (1.27.3 or later). CI uses `go-version-file: cli/go.mod`.
 - Commands: `cli/cmd/` (one file per command group, subcommands registered in `init()`)
-- HTTP client: `cli/pkg/client/client.go` (REST), `cli/pkg/client/auth.go` (session renewal), `cli/pkg/client/websocket.go` (deployment log streaming)
+- HTTP client: `cli/pkg/client/client.go` (REST), `cli/pkg/client/auth.go` (session renewal), `cli/pkg/client/websocket.go` (deployment log streaming, stream dial, close codes, keepalive), `cli/pkg/client/portforward.go` (port-forward tunnel)
 - Types: `cli/pkg/types/types.go` (client-side structs matching API responses)
 - Output: `cli/pkg/output/output.go` (table, JSON, YAML, quiet formatters)
 - Config: `cli/pkg/config/config.go` (YAML via `gopkg.in/yaml.v3`, `~/.stackmanager/config.yaml`), `cli/pkg/config/token.go` (token files), `lock_unix.go`, `lock_windows.go` and `lock_other.go` (file locks)
@@ -22,7 +22,7 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 | `config` | set, get, list, use-context, current-context, delete-context | config.go |
 | `login`/`logout`/`whoami` | top-level; supports password + OIDC loopback flow; `logout --all` ends every session of the user | login.go |
 | `auth` | register | login.go |
-| `stack` | list, get, create, update, deploy, stop, clean, delete, status, logs, clone, extend, values, compare, history, rollback, history-values, watch, preview, pods, recent, follow, unfollow, action (list, run, log) | stack.go; preview/pods/recent: stack_inspect.go; follow/unfollow: stack_followers.go; action: stack_action.go; TTL and stop-time helpers: ttl.go |
+| `stack` | list, get, create, update, deploy, stop, clean, delete, status, logs, clone, extend, values, compare, history, rollback, history-values, watch, preview, pods, recent, follow, unfollow, action (list, run, log), port-forward | stack.go; preview/pods/recent: stack_inspect.go; follow/unfollow: stack_followers.go; action: stack_action.go; port-forward: stack_portforward.go; TTL and stop-time helpers: ttl.go |
 | `template` | list, get, create, update, delete, clone, instantiate, quick-deploy, publish, unpublish, update-chart, add-chart, remove-chart, versions (list, get, diff) | template.go; add-chart/remove-chart: chart_changes.go |
 | `definition` | list, get, create, update, delete, export, import, update-chart, add-chart, remove-chart, check-upgrade, upgrade, link-template | definition.go; add-chart/remove-chart/check-upgrade/upgrade/link-template: chart_changes.go |
 | `override` | list, get, set, unset, delete, branch (list/get/set/delete), quota (get/set/delete) | override.go |
