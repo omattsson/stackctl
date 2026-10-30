@@ -33,7 +33,13 @@ const (
 	// portForwardMaxConns is the default limit of open tunnels. Each tunnel
 	// uses a tunnel slot, the API rate limit and an audit row on the server.
 	portForwardMaxConns = 16
+	// portForwardMax429 is the number of 429 handshakes in a row, with no
+	// successful upgrade between them, that stops the command.
+	portForwardMax429 = 3
 )
+
+// portForwardSignals end the command like Ctrl-C.
+var portForwardSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
 
 // portForwardConnLimit is the limit of open tunnels (tests lower it).
 var portForwardConnLimit = portForwardMaxConns
@@ -73,9 +79,11 @@ cluster switch turned off (404, 403), a stack that is not deployed (409),
 and a close 1008 during a tunnel: a revoked session ('stackctl login'), or
 a stack that was stopped, deleted or cleaned, or access that changed. API keys
 are not allowed by default: run 'stackctl login' and use a login session.
-Errors that close only one connection: the tunnel limit (429), no ready pod
-(503), a failed pod dial (502), the server time limit (4001), the idle
-timeout (4002), a pod stream error (4502) and network errors.
+Errors that close only one connection: the rate limit or the tunnel limit
+(429), no ready pod (503), a failed pod dial (502), the server time limit
+(4001), the idle timeout (4002), a pod stream error (4502) and network
+errors. 3 refusals with 429 in a row, with no successful tunnel between
+them, stop the command.
 
 Security:
   - Anyone who can reach the local port uses your access to the stack.
@@ -106,7 +114,7 @@ Examples:
 		if parent == nil {
 			parent = context.Background()
 		}
-		ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+		ctx, stop := signal.NotifyContext(parent, portForwardSignals...)
 		defer stop()
 		return runPortForward(ctx, cmd, args)
 	},
@@ -304,6 +312,12 @@ func portForwardFatal(err error) bool {
 		(apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden)
 }
 
+// isRateLimited reports a handshake refused with 429.
+func isRateLimited(err error) bool {
+	var hs *client.WSHandshakeError
+	return errors.As(err, &hs) && hs.StatusCode == http.StatusTooManyRequests
+}
+
 // portForwardTunnelOptions are the tunnel timings (tests shorten them).
 var portForwardTunnelOptions client.TunnelOptions
 
@@ -389,6 +403,9 @@ type portForwarder struct {
 	// slots limits the open tunnels of all listeners.
 	slots chan struct{}
 	conns atomic.Int64
+	// rateLimited counts the 429 handshakes since the last successful
+	// upgrade of any tunnel.
+	rateLimited atomic.Int32
 }
 
 // serve accepts connections until ctx ends or an error stops the command.
@@ -480,9 +497,14 @@ func (pf *portForwarder) handle(ctx context.Context, local net.Conn) {
 			pf.stop(err)
 			return
 		}
+		if isRateLimited(err) && pf.rateLimited.Add(1) >= portForwardMax429 {
+			pf.stop(fmt.Errorf("port-forward stopped: the server rate limit or tunnel limit was hit %d times in a row; wait and try again (last error: %w)", portForwardMax429, err))
+			return
+		}
 		fmt.Fprintf(pf.stderr, "Connection %d from %s failed: %v\n", n, local.RemoteAddr(), err)
 		return
 	}
+	pf.rateLimited.Store(0)
 	fmt.Fprintf(pf.stderr, "Connection %d from %s opened\n", n, local.RemoteAddr())
 	stats, err := pf.client.Tunnel(ctx, ws, local, portForwardTunnelOptions)
 	fatal := err != nil && portForwardFatal(err)

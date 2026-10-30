@@ -366,6 +366,10 @@ func baseWSHeader() http.Header {
 // "Invalid API key" or "API key expired" instead.
 const wsAuthRequiredMessage = "Authentication required"
 
+// PortForwardServerVersion is the first server release with the
+// port-forward route (k8s-stack-manager#722).
+const PortForwardServerVersion = "k8s-stack-manager v0.15.0 or later"
+
 // maxHandshakeBody is the number of response body bytes that
 // handshakeError reads. gorilla/websocket keeps at most 1024 bytes.
 const maxHandshakeBody = 4096
@@ -441,7 +445,7 @@ func (e *WSHandshakeError) streamError() string {
 		return fmt.Sprintf("%s failed: the server answered HTTP %d without a WebSocket upgrade; a proxy between stackctl and the server probably dropped the upgrade", e.Op, e.StatusCode)
 	}
 	if e.NoRoute() {
-		return fmt.Sprintf("%s failed: the server has no %s route (HTTP 404); upgrade k8s-stack-manager", e.Op, e.Op)
+		return fmt.Sprintf("%s failed: the server has no %s route (HTTP 404); upgrade the server to %s", e.Op, e.Op, PortForwardServerVersion)
 	}
 	msg := fmt.Sprintf("%s refused by the server (HTTP %d): %s", e.Op, e.StatusCode, e.Message)
 	switch {

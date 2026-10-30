@@ -279,7 +279,7 @@ func TestDialPortForward_HandshakeErrors(t *testing.T) {
 			wantFatal: true, wantMsg: []string{"Service not found", "service port"}},
 		{name: "plain 404", status: 404, body: "404 page not found",
 			check:     func(t *testing.T, hs *WSHandshakeError) { assert.True(t, hs.NoRoute()) },
-			wantFatal: true, wantMsg: []string{"no port-forward route", "upgrade k8s-stack-manager"}},
+			wantFatal: true, wantMsg: []string{"no port-forward route", "upgrade the server to k8s-stack-manager v0.15.0 or later"}},
 		{name: "not deployed", status: 409,
 			body:      `{"error":"Instance is not deployed","code":"instance_not_deployed"}`,
 			wantFatal: true, wantMsg: []string{"Deploy the stack first"}},

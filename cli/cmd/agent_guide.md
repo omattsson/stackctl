@@ -71,6 +71,8 @@ stackctl stack history my-app
 stackctl stack port-forward my-app mysql 0:3306 -q   # stdout: 127.0.0.1:<port>; exit 1 on 403/404/409
 # SIGTERM or Ctrl-C ends it with exit 0. At most 16 open connections; more are closed at once.
 # After a local EOF the tunnel passes server data until the server closes or 2 s pass without data.
+# 3 refusals with 429 in a row end it with exit 1: wait and try again.
+# Needs k8s-stack-manager v0.15.0 or later (an older server: "upgrade the server to k8s-stack-manager v0.15.0 or later").
 # An http:// API URL to a host that is not loopback is refused (add --allow-insecure-stream to accept the risk).
 
 # Change values, then deploy again
@@ -112,7 +114,7 @@ When `--follow` or `watch --id` stops early for another reason (lost connection,
 - `Conflict: ...`: the state does not allow the change (for example a name in use; the message lists free names).
 - `Rate limited`: wait and try once more.
 - `Server error`: report it; the server logs have the cause.
-- `upgrade k8s-stack-manager to vX or later`: the server is too old for this feature. Tell the user.
+- `upgrade k8s-stack-manager to vX or later` or `upgrade the server to k8s-stack-manager vX or later`: the server is too old for this feature. Tell the user.
 - `Warning: ...` on stderr: a notice from the server (for example a deprecation). The command still worked.
 
 ## More

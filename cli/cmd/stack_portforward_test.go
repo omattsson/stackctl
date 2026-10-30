@@ -4,16 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -634,4 +637,90 @@ func TestPortForwardCmd_Registered(t *testing.T) {
 	assert.Equal(t, stackPortForwardCmd, found)
 	assert.True(t, strings.Contains(found.Long, "mysql -h 127.0.0.1 -P 3306"))
 	assert.Contains(t, found.Long, "DNS rebinding")
+}
+
+func TestPortForwardSignals(t *testing.T) {
+	t.Parallel()
+	assert.Contains(t, portForwardSignals, os.Interrupt)
+	assert.Contains(t, portForwardSignals, syscall.SIGTERM)
+}
+
+// dialUntilClosed opens a local connection and waits until the command
+// closes it.
+func dialUntilClosed(t *testing.T, addr string) {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, err = conn.Read(make([]byte, 1))
+	require.Error(t, err)
+	var ne net.Error
+	require.False(t, errors.As(err, &ne) && ne.Timeout(), "the refused connection is closed")
+}
+
+func TestPortForwardCmd_Repeated429StopsCommand(t *testing.T) {
+	var dials atomic.Int32
+	srv := newPFTestServer(t, func(w http.ResponseWriter) bool {
+		dials.Add(1)
+		return jsonRefusal(http.StatusTooManyRequests, "tunnel_limit", "Too many tunnels")(w)
+	})
+	stdout, stderr := setupPortForwardTest(t, srv.URL)
+	done := startPortForward(context.Background(), "42", "mysql", "0:3306")
+	addr := waitForwarding(t, stdout, done)
+
+	for i := 0; i < portForwardMax429; i++ {
+		dialUntilClosed(t, addr)
+	}
+	err := waitDone(t, done)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rate limit or tunnel limit was hit 3 times in a row; wait and try again")
+	assert.Equal(t, int32(3), dials.Load())
+	assert.Equal(t, int32(0), srv.upgrades.Load())
+	assert.Equal(t, 2, strings.Count(stderr.String(), "HTTP 429"), "one line for each 429 below the limit")
+
+	_, err = net.DialTimeout("tcp", addr, time.Second)
+	assert.Error(t, err, "the listener is closed")
+}
+
+func TestPortForwardCmd_SuccessResets429Count(t *testing.T) {
+	// 429, 429, upgrade, 429, 429, upgrade: never 3 in a row.
+	var dials atomic.Int32
+	srv := newPFTestServer(t, func(w http.ResponseWriter) bool {
+		if dials.Add(1)%3 == 0 {
+			return false
+		}
+		return jsonRefusal(http.StatusTooManyRequests, "tunnel_limit", "Too many tunnels")(w)
+	})
+	stdout, stderr := setupPortForwardTest(t, srv.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := startPortForward(ctx, "42", "mysql", "0:3306")
+	addr := waitForwarding(t, stdout, done)
+
+	roundTrip := func() {
+		conn, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		defer conn.Close()
+		_, err = conn.Write([]byte("ok"))
+		require.NoError(t, err)
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, err = io.ReadFull(conn, make([]byte, 2))
+		require.NoError(t, err)
+	}
+	for round := 0; round < 2; round++ {
+		dialUntilClosed(t, addr)
+		dialUntilClosed(t, addr)
+		roundTrip()
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("command ended: %v", err)
+	default:
+	}
+	cancel()
+	require.NoError(t, waitDone(t, done))
+	assert.Equal(t, int32(6), dials.Load())
+	assert.Equal(t, int32(2), srv.upgrades.Load())
+	assert.Equal(t, 4, strings.Count(stderr.String(), "HTTP 429"))
 }
