@@ -838,6 +838,8 @@ func resetClusterCreateFlags(t *testing.T) {
 	clusterCreateCmd.Flags().Set("kubeconfig-path", "")
 	clusterCreateCmd.Flags().Set("allow-port-forward", "false")
 	clusterCreateCmd.Flags().Set("allow-exec", "false")
+	clusterCreateCmd.Flags().Set("api-server-url", "")
+	clusterCreateCmd.Flags().Set("use-in-cluster", "false")
 }
 
 func TestClusterCreateCmd_TableOutput(t *testing.T) {
@@ -1007,6 +1009,10 @@ func resetClusterUpdateFlags(t *testing.T) {
 	clusterUpdateCmd.Flags().Set("allow-exec", "false")
 	clusterUpdateCmd.Flags().Lookup("allow-port-forward").Changed = false
 	clusterUpdateCmd.Flags().Lookup("allow-exec").Changed = false
+	clusterUpdateCmd.Flags().Set("api-server-url", "")
+	clusterUpdateCmd.Flags().Set("use-in-cluster", "false")
+	clusterUpdateCmd.Flags().Lookup("api-server-url").Changed = false
+	clusterUpdateCmd.Flags().Lookup("use-in-cluster").Changed = false
 }
 
 func TestClusterUpdateCmd_TableOutput(t *testing.T) {
@@ -1187,6 +1193,114 @@ func TestClusterGetCmd_StreamSwitches(t *testing.T) {
 	require.NoError(t, clusterGetCmd.RunE(clusterGetCmd, []string{"1"}))
 	assert.Contains(t, buf.String(), `"allow_port_forward": true`)
 	assert.NotContains(t, buf.String(), `"allow_exec"`, "a switch that is off is left out, like the other bool fields")
+}
+
+func TestClusterCreateCmd_ConnectionFlags(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	require.NoError(t, os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\n"), 0o600))
+
+	tests := []struct {
+		name    string
+		flags   map[string]string
+		want    map[string]interface{}
+		wantErr string
+	}{
+		{
+			name:  "kubeconfig with api server url",
+			flags: map[string]string{"api-server-url": "https://k8s.example.com:6443", "kubeconfig-path": kubeconfig},
+			want:  map[string]interface{}{"name": "dev", "api_server_url": "https://k8s.example.com:6443", "kubeconfig_data": "apiVersion: v1\nkind: Config\n"},
+		},
+		{
+			name:  "in cluster",
+			flags: map[string]string{"use-in-cluster": "true"},
+			want:  map[string]interface{}{"name": "dev", "use_in_cluster": true},
+		},
+		{
+			name:    "kubeconfig without api server url",
+			flags:   map[string]string{"kubeconfig-path": kubeconfig},
+			wantErr: "--api-server-url is required with --kubeconfig-data or --kubeconfig-path",
+		},
+		{
+			name:    "in cluster with kubeconfig",
+			flags:   map[string]string{"use-in-cluster": "true", "kubeconfig-data": "x", "api-server-url": "https://k8s.example.com"},
+			wantErr: "--use-in-cluster cannot be combined",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]interface{}
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(sampleCluster())
+			}))
+			defer server.Close()
+
+			_ = setupClusterTestCmd(t, server.URL)
+			require.NoError(t, clusterCreateCmd.Flags().Set("name", "dev"))
+			for k, v := range tt.flags {
+				require.NoError(t, clusterCreateCmd.Flags().Set(k, v))
+			}
+			t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+			err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				assert.Zero(t, requests, "refused before any request")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, body)
+		})
+	}
+}
+
+func TestClusterUpdateCmd_ConnectionFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		flags   map[string]string
+		want    map[string]interface{}
+		wantErr string
+	}{
+		{name: "api server url", flags: map[string]string{"api-server-url": "https://new.example.com:6443"}, want: map[string]interface{}{"api_server_url": "https://new.example.com:6443"}},
+		{name: "in cluster", flags: map[string]string{"use-in-cluster": "true"}, want: map[string]interface{}{"use_in_cluster": true}},
+		{name: "in cluster off is sent", flags: map[string]string{"use-in-cluster": "false", "kubeconfig-data": "x"}, want: map[string]interface{}{"use_in_cluster": false, "kubeconfig_data": "x"}},
+		{name: "in cluster with kubeconfig", flags: map[string]string{"use-in-cluster": "true", "kubeconfig-data": "x"}, wantErr: "--use-in-cluster cannot be combined"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]interface{}
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(sampleCluster())
+			}))
+			defer server.Close()
+
+			_ = setupClusterTestCmd(t, server.URL)
+			for k, v := range tt.flags {
+				require.NoError(t, clusterUpdateCmd.Flags().Set(k, v))
+			}
+			t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+			err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				assert.Zero(t, requests, "refused before any request")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, body)
+		})
+	}
 }
 
 func TestClusterUpdateCmd_PathTraversal(t *testing.T) {

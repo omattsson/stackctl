@@ -43,7 +43,7 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
     override.go               # override list/get/set/unset/delete, branch overrides (list/get/set/delete), quota overrides (quota set merges with GET, --replace)
     bulk.go                   # bulk deploy/stop/clean/delete, bulk template publish/unpublish/delete (--ids flag or positional args)
     git.go                    # git providers/branches/validate
-    cluster.go                # cluster list/get/create/update/delete/set-default/test-connection/health/nodes/namespaces/utilization (create/update --allow-port-forward/--allow-exec: per-cluster stream switches; update sends false), quota get/set/delete, shared-values list/set/update/delete (update: GET list, merge, PUT the full record)
+    cluster.go                # cluster list/get/create/update/delete/set-default/test-connection/health/nodes/namespaces/utilization (create/update --allow-port-forward/--allow-exec: per-cluster stream switches; update sends false. --api-server-url is required with a kubeconfig flag; --use-in-cluster excludes the kubeconfig flags), quota get/set/delete, shared-values list/set/update/delete (update: GET list, merge, PUT the full record)
     analytics.go              # analytics overview/templates/users
     apikey.go                 # apikey list/create/revoke
     audit.go                  # audit log list/export

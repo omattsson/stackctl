@@ -646,6 +646,11 @@ stackctl stack list --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -q | xargs -n
 stackctl cluster list
 stackctl cluster get 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
 
+# Register a cluster: with a kubeconfig and the API server URL as the server reaches it,
+# or the cluster that the server runs in (its service account, no kubeconfig)
+stackctl cluster create --name prod --api-server-url https://prod.example.com:6443 --kubeconfig-path ~/.kube/prod.yaml
+stackctl cluster create --name local --use-in-cluster
+
 # Per-cluster switches of stack port-forward and stack exec (admin; off by default)
 stackctl cluster update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --allow-exec --allow-port-forward
 stackctl cluster update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --allow-exec=false

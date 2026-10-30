@@ -587,7 +587,12 @@ var clusterCreateCmd = &cobra.Command{
 	Short: "Register a new cluster",
 	Long: `Register a new Kubernetes cluster.
 
-Provide either --from-file with a JSON/YAML file, or use --name and --kubeconfig-data / --kubeconfig-path.
+Provide either --from-file with a JSON/YAML file, or use --name with one of:
+  - --api-server-url and --kubeconfig-data / --kubeconfig-path: a cluster that
+    the server reaches with that kubeconfig. --api-server-url is the address of
+    the Kubernetes API server as the server reaches it.
+  - --use-in-cluster: the cluster that the server runs in (its service
+    account); no kubeconfig and no API server URL.
 
 --allow-port-forward and --allow-exec turn on the per-cluster switches of
 'stackctl stack port-forward' and 'stackctl stack exec' (off by default; the
@@ -596,8 +601,8 @@ ignore them: check the Port-forward and Exec rows of the output.
 
 Examples:
   stackctl cluster create --from-file cluster.json
-  stackctl cluster create --name prod --kubeconfig-path ~/.kube/config
-  stackctl cluster create --name dev --kubeconfig-path ~/.kube/config --allow-exec`,
+  stackctl cluster create --name prod --api-server-url https://prod.example.com:6443 --kubeconfig-path ~/.kube/prod.yaml
+  stackctl cluster create --name local --use-in-cluster --allow-exec`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fromFile, _ := cmd.Flags().GetString("from-file")
@@ -655,8 +660,19 @@ Examples:
 			if kubeconfigData != "" && kubeconfigPath != "" {
 				return fmt.Errorf("--kubeconfig-data and --kubeconfig-path are mutually exclusive")
 			}
+			apiServerURL, _ := cmd.Flags().GetString("api-server-url")
+			useInCluster, _ := cmd.Flags().GetBool("use-in-cluster")
+			hasKubeconfig := kubeconfigData != "" || kubeconfigPath != ""
+			if useInCluster && hasKubeconfig {
+				return fmt.Errorf("--use-in-cluster cannot be combined with --kubeconfig-data or --kubeconfig-path")
+			}
+			if hasKubeconfig && apiServerURL == "" {
+				return fmt.Errorf("--api-server-url is required with --kubeconfig-data or --kubeconfig-path (or use --use-in-cluster)")
+			}
 			req.Name = name
 			req.Description, _ = cmd.Flags().GetString("description")
+			req.APIServerURL = apiServerURL
+			req.UseInCluster = useInCluster
 			req.AllowPortForward, _ = cmd.Flags().GetBool("allow-port-forward")
 			req.AllowExec, _ = cmd.Flags().GetBool("allow-exec")
 			req.KubeconfigData = kubeconfigData
@@ -702,9 +718,11 @@ var clusterUpdateCmd = &cobra.Command{
 		defaultChanged := cmd.Flags().Changed("default")
 		portForwardChanged := cmd.Flags().Changed("allow-port-forward")
 		execChanged := cmd.Flags().Changed("allow-exec")
+		apiServerURLChanged := cmd.Flags().Changed("api-server-url")
+		inClusterChanged := cmd.Flags().Changed("use-in-cluster")
 
-		if fromFile == "" && !nameChanged && !descChanged && !kubeconfigDataChanged && !kubeconfigPathChanged && !defaultChanged && !portForwardChanged && !execChanged {
-			return fmt.Errorf("at least one of --name, --description, --kubeconfig-data, --kubeconfig-path, --default, --allow-port-forward, --allow-exec, or --from-file must be specified")
+		if fromFile == "" && !nameChanged && !descChanged && !kubeconfigDataChanged && !kubeconfigPathChanged && !defaultChanged && !portForwardChanged && !execChanged && !apiServerURLChanged && !inClusterChanged {
+			return fmt.Errorf("at least one of --name, --description, --api-server-url, --kubeconfig-data, --kubeconfig-path, --use-in-cluster, --default, --allow-port-forward, --allow-exec, or --from-file must be specified")
 		}
 
 		var req types.UpdateClusterRequest
@@ -759,6 +777,17 @@ var clusterUpdateCmd = &cobra.Command{
 		} else {
 			if kubeconfigDataChanged && kubeconfigPathChanged {
 				return fmt.Errorf("--kubeconfig-data and --kubeconfig-path are mutually exclusive")
+			}
+			if inClusterChanged {
+				v, _ := cmd.Flags().GetBool("use-in-cluster")
+				if v && (kubeconfigDataChanged || kubeconfigPathChanged) {
+					return fmt.Errorf("--use-in-cluster cannot be combined with --kubeconfig-data or --kubeconfig-path")
+				}
+				req.UseInCluster = &v
+			}
+			if apiServerURLChanged {
+				v, _ := cmd.Flags().GetString("api-server-url")
+				req.APIServerURL = &v
 			}
 			if nameChanged {
 				v, _ := cmd.Flags().GetString("name")
@@ -1344,6 +1373,8 @@ func init() {
 	clusterCreateCmd.Flags().String("description", "", "Cluster description")
 	clusterCreateCmd.Flags().String("kubeconfig-data", "", "Raw kubeconfig data (base64 or YAML string)")
 	clusterCreateCmd.Flags().String("kubeconfig-path", "", "Path to kubeconfig file")
+	clusterCreateCmd.Flags().String("api-server-url", "", "Kubernetes API server URL as the server reaches it (required with --kubeconfig-data or --kubeconfig-path)")
+	clusterCreateCmd.Flags().Bool("use-in-cluster", false, "Use the cluster that the server runs in (its service account; no kubeconfig)")
 	clusterCreateCmd.Flags().Bool("allow-port-forward", false, "Allow 'stackctl stack port-forward' to stacks on this cluster (k8s-stack-manager v0.15.0 or later)")
 	clusterCreateCmd.Flags().Bool("allow-exec", false, "Allow 'stackctl stack exec' in stacks on this cluster (k8s-stack-manager v0.15.0 or later)")
 
@@ -1354,6 +1385,8 @@ func init() {
 	clusterUpdateCmd.Flags().String("kubeconfig-data", "", "New kubeconfig data")
 	clusterUpdateCmd.Flags().String("kubeconfig-path", "", "New path to kubeconfig file")
 	clusterUpdateCmd.Flags().Bool("default", false, "Mark cluster as default")
+	clusterUpdateCmd.Flags().String("api-server-url", "", "New Kubernetes API server URL")
+	clusterUpdateCmd.Flags().Bool("use-in-cluster", false, "Use the cluster that the server runs in (the server removes the stored kubeconfig; --use-in-cluster=false needs a kubeconfig)")
 	clusterUpdateCmd.Flags().Bool("allow-port-forward", false, "Allow 'stackctl stack port-forward' to stacks on this cluster (--allow-port-forward=false turns it off)")
 	clusterUpdateCmd.Flags().Bool("allow-exec", false, "Allow 'stackctl stack exec' in stacks on this cluster (--allow-exec=false turns it off)")
 
