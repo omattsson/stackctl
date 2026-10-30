@@ -395,17 +395,167 @@ func TestPortForwardCmd_CancelReturnsNilWithoutLeaks(t *testing.T) {
 	goleak.VerifyNone(t, ignore)
 }
 
-func TestPortForwardCmd_NonLoopbackWarning(t *testing.T) {
+func TestPortForwardCmd_BindFailureOpensNothing(t *testing.T) {
 	srv := newPFTestServer(t, nil)
-	_, stderr := setupPortForwardTest(t, srv.URL)
-	// 192.0.2.1 (TEST-NET-1) is not a local address: the bind fails after
-	// the warning, so no port opens to the network.
+	stdout, stderr := setupPortForwardTest(t, srv.URL)
+	// 192.0.2.1 (TEST-NET-1) is not a local address: the bind fails, so no
+	// port opens to the network.
 	require.NoError(t, stackPortForwardCmd.Flags().Set("address", "127.0.0.1,192.0.2.1"))
 	err := waitDone(t, startPortForward(context.Background(), "42", "mysql", "0:3306"))
 	require.Error(t, err)
-	assert.Contains(t, stderr.String(), "Warning: 192.0.2.1 is not a loopback address")
-	assert.NotContains(t, stderr.String(), "Warning: 127.0.0.1")
+	assert.Contains(t, err.Error(), "192.0.2.1")
+	assert.Empty(t, stdout.String())
+	assert.NotContains(t, stderr.String(), "Warning")
 	assert.Equal(t, int32(0), srv.upgrades.Load())
+}
+
+func TestPortForwardCmd_LocalhostBindsLoopbackWithoutWarning(t *testing.T) {
+	srv := newPFTestServer(t, nil)
+	stdout, stderr := setupPortForwardTest(t, srv.URL)
+	require.NoError(t, stackPortForwardCmd.Flags().Set("address", "localhost"))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := startPortForward(ctx, "42", "mysql", "0:3306")
+	waitForwarding(t, stdout, done)
+	cancel()
+	require.NoError(t, waitDone(t, done))
+	assert.NotContains(t, stderr.String(), "not a loopback address")
+}
+
+// addrListener is a net.Listener that only reports an address.
+type addrListener struct {
+	net.Listener
+	addr net.Addr
+}
+
+func (l addrListener) Addr() net.Addr { return l.addr }
+
+func TestWarnNonLoopback(t *testing.T) {
+	t.Parallel()
+	listeners := []net.Listener{
+		addrListener{addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 3306}},
+		addrListener{addr: &net.TCPAddr{IP: net.ParseIP("::1"), Port: 3306}},
+		addrListener{addr: &net.TCPAddr{IP: net.ParseIP("192.0.2.1"), Port: 3306}},
+		addrListener{addr: &net.TCPAddr{IP: net.IPv4zero, Port: 3306}},
+	}
+	var buf bytes.Buffer
+	warnNonLoopback(&buf, listeners)
+	assert.Equal(t, "Warning: 192.0.2.1 is not a loopback address: anyone who can reach it uses your access to the stack\n"+
+		"Warning: 0.0.0.0 is not a loopback address: anyone who can reach it uses your access to the stack\n", buf.String())
+}
+
+func TestPlaintextRemoteURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"http://localhost:8081", false},
+		{"http://LOCALHOST:8081", false},
+		{"http://127.0.0.1:8081", false},
+		{"http://127.0.0.2", false},
+		{"http://[::1]:8081", false},
+		{"https://stacks.example.com", false},
+		{"http://stacks.example.com", true},
+		{"HTTP://stacks.example.com", true},
+		{"http://192.0.2.1:8081", true},
+		{"http://localhost.example.com", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, plaintextRemoteURL(tt.url))
+		})
+	}
+}
+
+func TestPortForwardCmd_PlainHTTPRemoteNeedsAllowFlag(t *testing.T) {
+	// Refused before any request: stacks.example.com is never contacted.
+	stdout, _ := setupPortForwardTest(t, "http://stacks.example.com")
+	err := waitDone(t, startPortForward(context.Background(), "42", "mysql", "0:3306"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refuses an http:// API URL")
+	assert.Contains(t, err.Error(), "--allow-insecure-stream")
+	assert.Empty(t, stdout.String())
+}
+
+func TestPortForwardCmd_ConnectionLimit(t *testing.T) {
+	srv := newPFTestServer(t, nil)
+	stdout, stderr := setupPortForwardTest(t, srv.URL)
+	old := portForwardConnLimit
+	portForwardConnLimit = 2
+	t.Cleanup(func() { portForwardConnLimit = old })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := startPortForward(ctx, "42", "mysql", "0:3306")
+	addr := waitForwarding(t, stdout, done)
+
+	roundTrip := func(conn net.Conn) error {
+		if _, err := conn.Write([]byte("ping")); err != nil {
+			return err
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, err := io.ReadFull(conn, make([]byte, 4))
+		return err
+	}
+	var open []net.Conn
+	for i := 0; i < 2; i++ {
+		conn, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		defer conn.Close()
+		require.NoError(t, roundTrip(conn))
+		open = append(open, conn)
+	}
+
+	over, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer over.Close()
+	_ = over.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, err = over.Read(make([]byte, 1))
+	assert.Error(t, err, "the connection over the limit is closed")
+	assert.Contains(t, stderr.String(), "refused: 2 tunnels are open (the limit)")
+	assert.Equal(t, int32(2), srv.upgrades.Load(), "no WebSocket for the refused connection")
+
+	// A closed tunnel frees its slot.
+	_ = open[0].Close()
+	require.Eventually(t, func() bool { return strings.Contains(stderr.String(), "Connection 1 closed") }, 5*time.Second, 10*time.Millisecond)
+	next, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer next.Close()
+	require.NoError(t, roundTrip(next))
+
+	cancel()
+	require.NoError(t, waitDone(t, done))
+}
+
+func TestPortForwardCmd_FatalCloseNotPrintedTwice(t *testing.T) {
+	up := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != pfTestPath {
+			http.NotFound(w, r)
+			return
+		}
+		ws, err := up.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+		_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "access revoked"), time.Now().Add(time.Second))
+		_, _, _ = ws.ReadMessage()
+	}))
+	defer srv.Close()
+	stdout, stderr := setupPortForwardTest(t, srv.URL)
+	done := startPortForward(context.Background(), "42", "mysql", "0:3306")
+	addr := waitForwarding(t, stdout, done)
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	err = waitDone(t, done)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stopped, deleted or cleaned")
+	assert.Contains(t, stderr.String(), "Connection 1 closed")
+	assert.Contains(t, stderr.String(), "(the command stops)")
+	assert.NotContains(t, stderr.String(), "stopped, deleted or cleaned", "the error prints once, as the command error")
 }
 
 func TestPortForwardCmd_DefaultPortInUseTakesNext(t *testing.T) {

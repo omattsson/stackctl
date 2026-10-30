@@ -69,6 +69,9 @@ stackctl stack history my-app
 
 # Reach a service of the stack: runs until interrupted, so start it in the background
 stackctl stack port-forward my-app mysql 0:3306 -q   # stdout: 127.0.0.1:<port>; exit 1 on 403/404/409
+# SIGTERM or Ctrl-C ends it with exit 0. At most 16 open connections; more are closed at once.
+# After a local EOF the tunnel passes server data until the server closes or 2 s pass without data.
+# An http:// API URL to a host that is not loopback is refused (add --allow-insecure-stream to accept the risk).
 
 # Change values, then deploy again
 stackctl override set my-app my-chart --set image.tag=1.2.3

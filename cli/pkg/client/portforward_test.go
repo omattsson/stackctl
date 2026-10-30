@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -340,7 +341,9 @@ func TestTunnel_ServerCloseCodes(t *testing.T) {
 		{"idle timeout", CloseIdleTimeout, "idle timeout", "tunnel closed: idle timeout", false},
 		{"pod stream error", ClosePodStreamError, "connection refused", "tunnel closed: pod stream error: connection refused", false},
 		{"server shutdown", CloseGoingAway, "server shutdown", "tunnel closed: the server is shutting down", false},
-		{"revoked", ClosePolicy, "session revoked", "tunnel closed: access revoked (token, session or permissions); run 'stackctl login'", true},
+		{"session revoked", ClosePolicy, "session revoked", "tunnel closed: access revoked (token, session or permissions); run 'stackctl login'", true},
+		{"token expired", ClosePolicy, "token expired", "run 'stackctl login'", true},
+		{"stack stopped or access lost", ClosePolicy, "access revoked", "tunnel closed: access revoked: the stack was stopped, deleted or cleaned, or your access to it changed", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -391,36 +394,164 @@ func TestTunnel_ServerNormalCloseEndsLocalStream(t *testing.T) {
 	assert.Equal(t, TunnelReasonServerClosed, r.stats.CloseReason)
 }
 
-func TestTunnel_LocalEOFSendsCloseAndDrains(t *testing.T) {
-	t.Parallel()
-	gotClose := make(chan int, 1)
-	srv := pfServer(t, func(_ *http.Request, ws *websocket.Conn) {
-		ws.SetCloseHandler(func(code int, _ string) error {
-			gotClose <- code
-			return nil
-		})
-		if _, _, err := ws.ReadMessage(); err != nil {
+// podstreamLike serves like the server: the default close handler echoes
+// the close of the client, and nothing is sent after it. send runs once
+// localEOF is closed, unless the client closed first.
+func podstreamLike(localEOF <-chan struct{}, gotClose chan<- int, send func(ws *websocket.Conn, closed <-chan struct{})) func(*http.Request, *websocket.Conn) {
+	return func(_ *http.Request, ws *websocket.Conn) {
+		closed := make(chan struct{})
+		go func() {
+			defer close(closed)
+			for {
+				_, _, err := ws.ReadMessage()
+				if err != nil {
+					var ce *websocket.CloseError
+					if errors.As(err, &ce) {
+						gotClose <- ce.Code
+					}
+					return
+				}
+			}
+		}()
+		select {
+		case <-localEOF:
+		case <-closed:
 			return
 		}
-		// The close frame of the client ends this read.
-		_, _, _ = ws.ReadMessage()
+		send(ws, closed)
+		<-closed
+	}
+}
+
+func TestTunnel_LocalEOFSendsCloseAndDrains(t *testing.T) {
+	t.Parallel()
+	localEOF := make(chan struct{})
+	gotClose := make(chan int, 1)
+	srv := pfServer(t, podstreamLike(localEOF, gotClose, func(ws *websocket.Conn, closed <-chan struct{}) {
+		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-closed:
+			return
+		default:
+		}
 		_ = ws.WriteMessage(websocket.BinaryMessage, []byte("late"))
-		_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(CloseNormal, ""), time.Now().Add(time.Second))
-	})
-	clientSide, done := startTunnel(t, context.Background(), New(srv.URL), TunnelOptions{DrainTimeout: 5 * time.Second})
+	}))
+	clientSide, done := startTunnel(t, context.Background(), New(srv.URL), TunnelOptions{DrainTimeout: 500 * time.Millisecond})
 	_, err := clientSide.Write([]byte("query"))
 	require.NoError(t, err)
 	time.Sleep(50 * time.Millisecond)
 	require.NoError(t, clientSide.CloseWrite())
+	close(localEOF)
 
 	got, _ := io.ReadAll(clientSide)
 	assert.Equal(t, "late", string(got), "data after the local EOF still reaches the local side")
-	assert.Equal(t, CloseNormal, <-gotClose)
 	r := waitTunnel(t, done)
 	require.NoError(t, r.err)
+	select {
+	case code := <-gotClose:
+		assert.Equal(t, CloseNormal, code)
+	case <-time.After(2 * time.Second):
+		t.Fatal("the server got no close frame")
+	}
 	assert.Equal(t, TunnelReasonLocalClosed, r.stats.CloseReason)
 	assert.Equal(t, int64(4), r.stats.BytesIn)
 	assert.Equal(t, int64(5), r.stats.BytesOut)
+}
+
+func TestTunnel_DrainWaitRestartsOnData(t *testing.T) {
+	t.Parallel()
+	localEOF := make(chan struct{})
+	gotClose := make(chan int, 1)
+	srv := pfServer(t, podstreamLike(localEOF, gotClose, func(ws *websocket.Conn, closed <-chan struct{}) {
+		for i := 0; i < 6; i++ {
+			select {
+			case <-closed:
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
+			_ = ws.WriteMessage(websocket.BinaryMessage, []byte("x"))
+		}
+	}))
+	clientSide, done := startTunnel(t, context.Background(), New(srv.URL), TunnelOptions{DrainTimeout: 250 * time.Millisecond})
+	require.NoError(t, clientSide.CloseWrite())
+	close(localEOF)
+
+	got, _ := io.ReadAll(clientSide)
+	assert.Equal(t, "xxxxxx", string(got), "600 ms of data with a 250 ms drain timeout")
+	r := waitTunnel(t, done)
+	require.NoError(t, r.err)
+	assert.Equal(t, CloseNormal, <-gotClose)
+}
+
+func TestTunnel_ServerCloseDuringDrainEndsAtOnce(t *testing.T) {
+	t.Parallel()
+	srv := pfServer(t, func(_ *http.Request, ws *websocket.Conn) {
+		if _, _, err := ws.ReadMessage(); err != nil {
+			return
+		}
+		_ = ws.WriteMessage(websocket.BinaryMessage, []byte("reply"))
+		_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(CloseNormal, ""), time.Now().Add(time.Second))
+		_, _, _ = ws.ReadMessage()
+	})
+	clientSide, done := startTunnel(t, context.Background(), New(srv.URL), TunnelOptions{DrainTimeout: 10 * time.Second})
+	start := time.Now()
+	_, err := clientSide.Write([]byte("q"))
+	require.NoError(t, err)
+	require.NoError(t, clientSide.CloseWrite())
+	got, _ := io.ReadAll(clientSide)
+	assert.Equal(t, "reply", string(got))
+	r := waitTunnel(t, done)
+	require.NoError(t, r.err)
+	assert.Less(t, time.Since(start), 3*time.Second, "no wait for the drain timeout")
+}
+
+func TestTunnel_StalledLocalReaderEndsTunnel(t *testing.T) {
+	t.Parallel()
+	srv := pfServer(t, func(_ *http.Request, ws *websocket.Conn) {
+		chunk := make([]byte, 32<<10)
+		for {
+			_ = ws.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := ws.WriteMessage(websocket.BinaryMessage, chunk); err != nil {
+				return
+			}
+		}
+	})
+	opts := TunnelOptions{Keepalive: KeepaliveTimings{ReadTimeout: 300 * time.Millisecond}}
+	_, done := startTunnel(t, context.Background(), New(srv.URL), opts)
+	// The local client never reads.
+	r := waitTunnel(t, done)
+	require.NoError(t, r.err)
+	assert.Equal(t, TunnelReasonLocalStalled, r.stats.CloseReason)
+	assert.Positive(t, r.stats.BytesIn)
+}
+
+func TestTunnel_CancelWhileDataWriterBlocked(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	srv := pfServer(t, func(_ *http.Request, ws *websocket.Conn) {
+		// Read nothing, so the data writer of the client blocks.
+		<-release
+	})
+	t.Cleanup(func() { close(release) })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opts := TunnelOptions{Keepalive: KeepaliveTimings{PingInterval: 10 * time.Millisecond}}
+	clientSide, done := startTunnel(t, ctx, New(srv.URL), opts)
+	go func() {
+		buf := make([]byte, 256<<10)
+		for {
+			if _, err := clientSide.Write(buf); err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(500 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	r := waitTunnel(t, done)
+	require.NoError(t, r.err)
+	assert.Equal(t, TunnelReasonInterrupted, r.stats.CloseReason)
+	assert.Less(t, time.Since(start), 2*time.Second, "a blocked ping must not delay the cancel")
 }
 
 func TestTunnel_DrainTimeout(t *testing.T) {
@@ -536,4 +667,95 @@ func TestCloseCodeText(t *testing.T) {
 	assert.Equal(t, "internal server error", CloseCodeText(CloseInternalError, "", false))
 	assert.Equal(t, "closed by the server (code 4999): odd", CloseCodeText(4999, "odd", false))
 	assert.Equal(t, "pod stream error", CloseCodeText(ClosePodStreamError, "", false))
+
+	tests := []struct {
+		name    string
+		reason  string
+		apiKey  bool
+		want    []string
+		notWant string
+	}{
+		{"session revoked", "session revoked", false, []string{"stackctl login"}, "stopped"},
+		{"token expired", "token expired", false, []string{"stackctl login"}, "stopped"},
+		{"session revoked with api key", "session revoked", true, []string{"stackctl apikey list"}, "stopped"},
+		{"stack stopped or access lost", "access revoked", false, []string{"stopped, deleted or cleaned", "access to it changed"}, "stackctl login"},
+		{"stack stopped with api key", "access revoked", true, []string{"stopped, deleted or cleaned"}, "stackctl login"},
+		{"api key expired", "api key expired", true, []string{"stackctl apikey create"}, "stackctl login"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := CloseCodeText(ClosePolicy, tt.reason, tt.apiKey)
+			for _, w := range tt.want {
+				assert.Contains(t, got, w)
+			}
+			assert.NotContains(t, got, tt.notWant)
+			assert.True(t, (&StreamClosedError{Code: ClosePolicy, Reason: tt.reason}).Fatal(), "1008 stays fatal")
+		})
+	}
+}
+
+func TestDialPortForward_Parallel401sRenewOnce(t *testing.T) {
+	t.Parallel()
+	renewed := makeJWT(t, "alice", time.Now().Add(time.Hour))
+	var refreshCalls, stale atomic.Int32
+	bothStale, renewedSeen := make(chan struct{}), make(chan struct{})
+	var renewedOnce sync.Once
+	wait := func(ch <-chan struct{}) {
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/refresh":
+			refreshCalls.Add(1)
+			http.SetCookie(w, &http.Cookie{Name: "refresh_token", Value: "r2", Path: "/api/v1/auth"})
+			writeJSON(w, http.StatusOK, map[string]string{"token": renewed})
+		case pfPath:
+			if r.Header.Get("Authorization") != "Bearer "+renewed {
+				// Both dials hold the old token. The second 401 comes after
+				// the first dial has renewed and dialed again.
+				n := stale.Add(1)
+				if n == 2 {
+					close(bothStale)
+				}
+				wait(bothStale)
+				if n == 2 {
+					wait(renewedSeen)
+				}
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid or expired token"})
+				return
+			}
+			renewedOnce.Do(func() { close(renewedSeen) })
+			ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer ws.Close()
+			_, _, _ = ws.ReadMessage()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	old := makeJWT(t, "alice-old", time.Now().Add(time.Hour))
+	c, _ := newSessionClient(t, srv.URL, &config.StoredToken{Token: old, RefreshToken: "r1", ExpiresAt: time.Now().Add(time.Hour), APIURL: srv.URL})
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			ws, err := c.DialPortForward(context.Background(), "42", "mysql", 3306)
+			if err == nil {
+				_ = ws.Close()
+			}
+			errs <- err
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		require.NoError(t, <-errs)
+	}
+	assert.Equal(t, int32(2), stale.Load())
+	assert.Equal(t, int32(1), refreshCalls.Load(), "the second 401 reuses the renewed token")
 }

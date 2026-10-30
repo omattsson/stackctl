@@ -24,6 +24,10 @@ const (
 	CloseReasonSessionRevoked = "session revoked"
 	// CloseReasonTokenExpired: the access token of the connection expired.
 	CloseReasonTokenExpired = "token expired"
+	// CloseReasonAccessLost: a stream (port-forward, exec) lost its stack:
+	// the stack was stopped, deleted or cleaned, or the access re-check of the
+	// user failed.
+	CloseReasonAccessLost = "access revoked"
 )
 
 // WSClosedError reports that the server closed the WebSocket connection
@@ -306,7 +310,7 @@ func (c *Client) dialWSOpts(ctx context.Context, path string, warnWriter io.Writ
 	}
 	if opts.stream {
 		if resp != nil && resp.StatusCode == http.StatusUnauthorized && c.APIKey == "" && token != "" {
-			renewed, rerr := c.RenewSession()
+			renewed, rerr := c.renewSession(token)
 			if rerr != nil {
 				return nil, rerr
 			}
@@ -758,7 +762,7 @@ const (
 	CloseNormal         = websocket.CloseNormalClosure     // 1000
 	CloseGoingAway      = websocket.CloseGoingAway         // 1001: server shutdown
 	CloseUnsupported    = websocket.CloseUnsupportedData   // 1003: text frame from the client
-	ClosePolicy         = websocket.ClosePolicyViolation   // 1008: access revoked
+	ClosePolicy         = websocket.ClosePolicyViolation   // 1008: session, access or stack revoked
 	CloseMessageTooBig  = websocket.CloseMessageTooBig     // 1009
 	CloseInternalError  = websocket.CloseInternalServerErr // 1011
 	CloseMaxDuration    = 4001                             // server time limit
@@ -785,8 +789,8 @@ func (e *StreamClosedError) Error() string {
 	return e.Subject + " closed: " + CloseCodeText(e.Code, e.Reason, e.APIKey)
 }
 
-// Fatal reports whether a new stream would fail the same way (1008: access
-// revoked).
+// Fatal reports whether a new stream would fail the same way (1008: session,
+// access or stack revoked).
 func (e *StreamClosedError) Fatal() bool {
 	return e.Code == ClosePolicy
 }
@@ -812,6 +816,12 @@ func CloseCodeText(code int, reason string, apiKey bool) string {
 	case CloseUnsupported:
 		return "the server refused a text frame"
 	case ClosePolicy:
+		switch reason {
+		case CloseReasonAccessLost:
+			return "access revoked: the stack was stopped, deleted or cleaned, or your access to it changed"
+		case CloseReasonAPIKeyExpired:
+			return "the API key expired; create a new key with 'stackctl apikey create'"
+		}
 		if apiKey {
 			return "access revoked (API key or permissions); check the key with 'stackctl apikey list'"
 		}
@@ -891,7 +901,7 @@ func setKeepalive(ws *websocket.Conn, k KeepaliveTimings) (extend func()) {
 }
 
 // sendPing writes a ping control frame. It is safe to call concurrently with
-// the data writer.
+// the data writer, but it waits up to k.WriteTimeout for the write lock.
 func sendPing(ws *websocket.Conn, k KeepaliveTimings) error {
 	return ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(k.WriteTimeout))
 }

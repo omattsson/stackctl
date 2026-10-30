@@ -21,8 +21,8 @@ const (
 	maxTunnelFrame = 32 << 10
 	// tunnelReadLimit bounds a server frame (the server sends at most 32 KiB).
 	tunnelReadLimit = 1 << 20
-	// DefaultDrainTimeout is how long a tunnel reads after the local client
-	// closed its side.
+	// DefaultDrainTimeout is how long a tunnel waits for server data after
+	// the local client closed its side.
 	DefaultDrainTimeout = 2 * time.Second
 	// interruptCloseTimeout bounds the close frame after a cancel.
 	interruptCloseTimeout = time.Second
@@ -33,6 +33,7 @@ const (
 	TunnelReasonLocalClosed  = "local connection closed"
 	TunnelReasonServerClosed = "closed by the server"
 	TunnelReasonInterrupted  = "interrupted"
+	TunnelReasonLocalStalled = "local client stopped reading"
 )
 
 // ErrTunnelTimeout reports that the server sent no data, ping or pong within
@@ -43,8 +44,9 @@ var ErrTunnelTimeout = errors.New("tunnel closed: no response from the server")
 // default. Tests inject short values.
 type TunnelOptions struct {
 	Keepalive KeepaliveTimings
-	// DrainTimeout is how long the tunnel still reads server data after the
-	// local client closed its side (default 2 s).
+	// DrainTimeout is how long the tunnel waits for more server data after
+	// the local client closed its side (default 2 s). Server data restarts
+	// the wait.
 	DrainTimeout time.Duration
 }
 
@@ -104,13 +106,17 @@ type localPumpResult struct {
 // one side closes, ctx ends or the server stops answering. It closes ws and
 // local before it returns and leaves no goroutine behind.
 //
+// After a local EOF the tunnel still copies server data to local, because
+// the server has no half-close. It sends close 1000 when the server closes,
+// a local write fails, or DrainTimeout passes without server data.
+//
 // A server close 1000, a local close and a cancelled ctx give a nil error. A
 // server close with another code gives a *StreamClosedError (Fatal for 1008);
 // a silent server gives ErrTunnelTimeout.
 func (c *Client) Tunnel(ctx context.Context, ws *websocket.Conn, local net.Conn, opts TunnelOptions) (TunnelStats, error) {
 	opts = opts.withDefaults()
 	start := time.Now()
-	var in, out atomic.Int64
+	var in, out, lastIn atomic.Int64
 	stats := func(code int, reason string) TunnelStats {
 		return TunnelStats{
 			BytesIn: in.Load(), BytesOut: out.Load(), Duration: time.Since(start),
@@ -121,36 +127,38 @@ func (c *Client) Tunnel(ctx context.Context, ws *websocket.Conn, local net.Conn,
 	extend := setKeepalive(ws, opts.Keepalive)
 	readDone := make(chan error, 1)
 	writeDone := make(chan localPumpResult, 1)
+	stopPing := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		readDone <- c.serverToLocal(ws, local, extend, &in)
+		readDone <- c.serverToLocal(ws, local, extend, opts.Keepalive.ReadTimeout, &in, &lastIn)
 	}()
 	go func() {
 		defer wg.Done()
 		writeDone <- localToServer(ws, local, opts.Keepalive.ReadTimeout, &out)
 	}()
+	go func() {
+		defer wg.Done()
+		pingLoop(ws, opts.Keepalive, stopPing)
+	}()
 	teardown := func() {
+		close(stopPing)
 		_ = ws.Close()
 		_ = local.Close()
 		wg.Wait()
 	}
 
-	ticker := time.NewTicker(opts.Keepalive.PingInterval)
-	defer ticker.Stop()
 	var drain <-chan time.Time
 	var wsWriteErr error
-	localDone := false
+	var localEOF time.Time
+	localDone, closeSent := false, false
 	for {
 		select {
 		case <-ctx.Done():
 			_ = sendClose(ws, CloseNormal, interruptCloseTimeout)
 			teardown()
 			return stats(CloseNormal, TunnelReasonInterrupted), nil
-
-		case <-ticker.C:
-			_ = sendPing(ws, opts.Keepalive)
 
 		case r := <-writeDone:
 			writeDone = nil
@@ -161,29 +169,61 @@ func (c *Client) Tunnel(ctx context.Context, ws *websocket.Conn, local net.Conn,
 				continue
 			}
 			localDone = true
-			_ = sendClose(ws, CloseNormal, opts.Keepalive.WriteTimeout)
+			localEOF = time.Now()
 			drain = time.After(opts.DrainTimeout)
 
 		case <-drain:
-			teardown()
 			if wsWriteErr != nil {
+				teardown()
 				return stats(0, "connection lost"), fmt.Errorf("tunnel connection lost: %w", wsWriteErr)
 			}
+			if !closeSent {
+				last := localEOF
+				if t := time.Unix(0, lastIn.Load()); t.After(last) {
+					last = t
+				}
+				if idle := time.Since(last); idle < opts.DrainTimeout {
+					drain = time.After(opts.DrainTimeout - idle)
+					continue
+				}
+				_ = sendClose(ws, CloseNormal, opts.Keepalive.WriteTimeout)
+				closeSent = true
+				drain = time.After(min(opts.DrainTimeout, interruptCloseTimeout))
+				continue
+			}
+			teardown()
 			return stats(CloseNormal, TunnelReasonLocalClosed), nil
 
 		case err := <-readDone:
 			code, reason, tErr := c.tunnelEnd(ctx, err, localDone, opts)
+			var ce *websocket.CloseError
+			gotCloseFrame := errors.As(err, &ce) && ce.Code != websocket.CloseAbnormalClosure
 			switch {
 			case reason == TunnelReasonServerClosed:
 				// Pass the EOF of the server to the local client.
 				if cw, ok := local.(interface{ CloseWrite() error }); ok {
 					_ = cw.CloseWrite()
 				}
-			case reason == TunnelReasonLocalClosed && !localDone:
+			case (reason == TunnelReasonLocalClosed || reason == TunnelReasonLocalStalled) && !closeSent && !gotCloseFrame:
 				_ = sendClose(ws, CloseNormal, opts.Keepalive.WriteTimeout)
 			}
 			teardown()
 			return stats(code, reason), tErr
+		}
+	}
+}
+
+// pingLoop sends the keepalive pings until stop is closed. It runs apart
+// from Tunnel, so a ping that waits for the write lock cannot delay a cancel.
+func pingLoop(ws *websocket.Conn, k KeepaliveTimings, stop <-chan struct{}) {
+	t := time.NewTicker(k.PingInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			_ = sendPing(ws, k)
 		}
 	}
 }
@@ -209,6 +249,9 @@ func (c *Client) tunnelEnd(ctx context.Context, err error, localDone bool, opts 
 		return ce.Code, CloseCodeText(ce.Code, reason, c.APIKey != ""),
 			&StreamClosedError{Subject: "tunnel", Code: ce.Code, Reason: reason, APIKey: c.APIKey != ""}
 	case errors.As(err, &lw):
+		if errors.As(lw.err, &ne) && ne.Timeout() {
+			return CloseNormal, TunnelReasonLocalStalled, nil
+		}
 		return CloseNormal, TunnelReasonLocalClosed, nil
 	case localDone:
 		// The server dropped the connection after our close frame.
@@ -221,8 +264,10 @@ func (c *Client) tunnelEnd(ctx context.Context, err error, localDone bool, opts 
 }
 
 // serverToLocal copies the binary frames of ws to local. Each read moves the
-// read deadline. Text frames are ignored (their content is never logged).
-func (c *Client) serverToLocal(ws *websocket.Conn, local net.Conn, extend func(), n *atomic.Int64) error {
+// read deadline. Text frames are ignored (their content is never logged). A
+// local write that takes longer than writeTimeout ends the copy, so a local
+// client that stops reading cannot hold the tunnel open.
+func (c *Client) serverToLocal(ws *websocket.Conn, local net.Conn, extend func(), writeTimeout time.Duration, n, last *atomic.Int64) error {
 	buf := make([]byte, maxTunnelFrame)
 	for {
 		extend()
@@ -241,6 +286,8 @@ func (c *Client) serverToLocal(ws *websocket.Conn, local net.Conn, extend func()
 			k, rerr := r.Read(buf)
 			if k > 0 {
 				extend()
+				last.Store(time.Now().UnixNano())
+				_ = local.SetWriteDeadline(time.Now().Add(writeTimeout))
 				if _, werr := local.Write(buf[:k]); werr != nil {
 					return &localWriteError{err: werr}
 				}

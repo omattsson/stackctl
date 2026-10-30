@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -29,7 +30,13 @@ const (
 	portForwardTries = 20
 	// portForwardShutdownWait bounds the wait for open tunnels at the end.
 	portForwardShutdownWait = 3 * time.Second
+	// portForwardMaxConns is the default limit of open tunnels. Each tunnel
+	// uses a tunnel slot, the API rate limit and an audit row on the server.
+	portForwardMaxConns = 16
 )
+
+// portForwardConnLimit is the limit of open tunnels (tests lower it).
+var portForwardConnLimit = portForwardMaxConns
 
 var stackPortForwardCmd = &cobra.Command{
 	Use:   "port-forward <name|id> <service> [LOCAL:]REMOTE",
@@ -48,16 +55,23 @@ port). LOCAL is the local port:
   - An explicit LOCAL port that is in use stops the command.
 
 Each local connection opens its own tunnel, so one failed connection does
-not stop the others. stdout shows the address, for example
+not stop the others. At most 16 tunnels are open at the same time: the
+command closes a further local connection at once and writes a line to
+stderr. stdout shows the address, for example
 "Forwarding from 127.0.0.1:3306 -> mysql:3306"; -q prints only
 "host:port". stderr shows one line when a connection opens and one when it
-closes (bytes, duration, close reason). -o is ignored. Ctrl-C closes all
-connections and exits 0.
+closes (bytes, duration, close reason). -o is ignored. Ctrl-C or SIGTERM
+closes all connections and exits 0.
+
+When the local client closes its side, the tunnel still passes server data
+to it until the server closes, or 2 s pass without server data. A local
+client that reads no data for 75 s loses its connection.
 
 Errors that stop the command (exit 1): no access (401 after a session
 renewal, 403), an unknown stack, service or port, the feature or the
 cluster switch turned off (404, 403), a stack that is not deployed (409),
-and a revoked session or permission during a tunnel (close 1008). API keys
+and a close 1008 during a tunnel: a revoked session ('stackctl login'), or
+a stack that was stopped, deleted or cleaned, or access that changed. API keys
 are not allowed by default: run 'stackctl login' and use a login session.
 Errors that close only one connection: the tunnel limit (429), no ready pod
 (503), a failed pod dial (502), the server time limit (4001), the idle
@@ -72,8 +86,9 @@ Security:
   - --address with an address that is not loopback (for example 0.0.0.0)
     opens the port to the network. The command writes a warning.
   - --insecure is refused: without TLS verification, a man in the middle
-    can read the tunnel data (for example database passwords). Add
-    --allow-insecure-stream to accept that risk.
+    can read the tunnel data (for example database passwords). An http://
+    API URL is refused for the same reason, except for localhost,
+    127.0.0.1 and [::1]. Add --allow-insecure-stream to accept that risk.
 
 Examples:
   # Forward a database, then connect with the client
@@ -91,7 +106,7 @@ Examples:
 		if parent == nil {
 			parent = context.Background()
 		}
-		ctx, stop := signal.NotifyContext(parent, os.Interrupt)
+		ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return runPortForward(ctx, cmd, args)
 	},
@@ -99,7 +114,7 @@ Examples:
 
 func init() {
 	stackPortForwardCmd.Flags().String("address", "127.0.0.1", "Local addresses to listen on (comma-separated IP addresses or localhost)")
-	stackPortForwardCmd.Flags().Bool("allow-insecure-stream", false, "Allow port-forward with --insecure (the tunnel data is not protected against a man in the middle)")
+	stackPortForwardCmd.Flags().Bool("allow-insecure-stream", false, "Allow port-forward with --insecure or an http:// API URL (the tunnel data is not protected against a man in the middle)")
 	stackCmd.AddCommand(stackPortForwardCmd)
 }
 
@@ -153,6 +168,16 @@ func parseAddresses(raw string) ([]string, error) {
 		return nil, errors.New("--address must name at least one address")
 	}
 	return addrs, nil
+}
+
+// plaintextRemoteURL reports whether apiURL is http:// to a host that is not
+// loopback: the tunnel would then go over the network without TLS.
+func plaintextRemoteURL(apiURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil || !strings.EqualFold(u.Scheme, "http") {
+		return false
+	}
+	return !isLoopback(strings.ToLower(u.Hostname()))
 }
 
 func isLoopback(addr string) bool {
@@ -298,22 +323,21 @@ func runPortForward(ctx context.Context, cmd *cobra.Command, args []string) erro
 	}
 	stderr := &syncWriter{w: cmd.ErrOrStderr()}
 
-	if streamInsecure() {
-		allow, _ := cmd.Flags().GetBool("allow-insecure-stream")
-		if !allow {
-			return errors.New("port-forward refuses --insecure: without TLS verification a man in the middle can read the tunnel data; add --allow-insecure-stream to accept that risk")
-		}
-		fmt.Fprintln(stderr, "Warning: --allow-insecure-stream: the tunnel data is not protected against a man in the middle")
-	}
-	for _, a := range addrs {
-		if !isLoopback(a) {
-			fmt.Fprintf(stderr, "Warning: %s is not a loopback address: anyone who can reach it uses your access to the stack\n", a)
-		}
-	}
-
 	c, err := newClient()
 	if err != nil {
 		return err
+	}
+	insecure, plaintext := streamInsecure(), plaintextRemoteURL(c.BaseURL)
+	if insecure || plaintext {
+		allow, _ := cmd.Flags().GetBool("allow-insecure-stream")
+		switch {
+		case allow:
+			fmt.Fprintln(stderr, "Warning: --allow-insecure-stream: the tunnel data is not protected against a man in the middle")
+		case insecure:
+			return errors.New("port-forward refuses --insecure: without TLS verification a man in the middle can read the tunnel data; add --allow-insecure-stream to accept that risk")
+		default:
+			return errors.New("port-forward refuses an http:// API URL to a host that is not loopback: a man in the middle can read the tunnel data; use https, or add --allow-insecure-stream to accept that risk")
+		}
 	}
 	c.WarnWriter = stderr
 	id, err := resolveStackID(c, args[0])
@@ -325,6 +349,7 @@ func runPortForward(ctx context.Context, cmd *cobra.Command, args []string) erro
 	if err != nil {
 		return err
 	}
+	warnNonLoopback(stderr, listeners)
 	for _, l := range listeners {
 		hostPort := l.Addr().String()
 		if printer.Quiet {
@@ -337,8 +362,20 @@ func runPortForward(ctx context.Context, cmd *cobra.Command, args []string) erro
 	pf := &portForwarder{
 		client: c, id: id, service: service, port: spec.remote,
 		stderr: stderr, fatal: make(chan error, 1),
+		slots: make(chan struct{}, portForwardConnLimit),
 	}
 	return pf.serve(ctx, listeners)
+}
+
+// warnNonLoopback warns for each listener on an address that is not
+// loopback. It checks the bound address, so a "localhost" that resolves to
+// another address is caught too.
+func warnNonLoopback(w io.Writer, listeners []net.Listener) {
+	for _, l := range listeners {
+		if a, ok := l.Addr().(*net.TCPAddr); ok && !a.IP.IsLoopback() {
+			fmt.Fprintf(w, "Warning: %s is not a loopback address: anyone who can reach it uses your access to the stack\n", a.IP)
+		}
+	}
 }
 
 // portForwarder runs the accept loops and the tunnels of one command.
@@ -349,7 +386,9 @@ type portForwarder struct {
 	port    int
 	stderr  io.Writer
 	fatal   chan error
-	conns   atomic.Int64
+	// slots limits the open tunnels of all listeners.
+	slots chan struct{}
+	conns atomic.Int64
 }
 
 // serve accepts connections until ctx ends or an error stops the command.
@@ -404,9 +443,17 @@ func (pf *portForwarder) acceptLoop(ctx context.Context, l net.Listener, tunnels
 			}
 			continue
 		}
+		select {
+		case pf.slots <- struct{}{}:
+		default:
+			fmt.Fprintf(pf.stderr, "Connection from %s refused: %d tunnels are open (the limit)\n", conn.RemoteAddr(), cap(pf.slots))
+			_ = conn.Close()
+			continue
+		}
 		tunnels.Add(1)
 		go func() {
 			defer tunnels.Done()
+			defer func() { <-pf.slots }()
 			pf.handle(ctx, conn)
 		}()
 	}
@@ -438,13 +485,18 @@ func (pf *portForwarder) handle(ctx context.Context, local net.Conn) {
 	}
 	fmt.Fprintf(pf.stderr, "Connection %d from %s opened\n", n, local.RemoteAddr())
 	stats, err := pf.client.Tunnel(ctx, ws, local, portForwardTunnelOptions)
+	fatal := err != nil && portForwardFatal(err)
 	reason := stats.CloseReason
-	if err != nil {
+	switch {
+	case fatal:
+		// The returned error of the command prints the text.
+		reason = "the command stops"
+	case err != nil:
 		reason = err.Error()
 	}
 	fmt.Fprintf(pf.stderr, "Connection %d closed: %d bytes in, %d bytes out, %s (%s)\n",
 		n, stats.BytesIn, stats.BytesOut, stats.Duration.Round(time.Millisecond), reason)
-	if err != nil && portForwardFatal(err) {
+	if fatal {
 		pf.stop(err)
 	}
 }
