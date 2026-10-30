@@ -256,6 +256,10 @@ stackctl stack port-forward my-app mysql 3306     # then: mysql -h 127.0.0.1 -P 
 stackctl stack port-forward my-app frontend 80    # local port 10080
 stackctl stack port-forward my-app mysql 0:3306 -q   # any free port; stdout: 127.0.0.1:<port>
 
+# Run one command in a container of a chart (exit code: the code of the command)
+stackctl stack exec my-app backend -- bin/console cache:clear
+stackctl stack exec my-app backend -c php -- sh -c 'ls -la /var/www | head'
+
 # Custom actions of the hooks config (for example a database refresh)
 stackctl stack action list my-app
 stackctl stack action run my-app refresh-db --param market=dk --yes --wait
@@ -309,6 +313,13 @@ stackctl stack rollback my-app --target-log <log-id>
 - Errors that close only one connection: the rate limit or the tunnel limit (429), no ready pod (503), a failed pod dial (502), the server time limit (close 4001), the idle timeout (4002), a pod stream error (4502) and network errors. 3 refusals with 429 in a row, with no successful tunnel between them, stop the command (exit 1): wait and try again.
 - The server can refuse API keys for port-forward: then run `stackctl login` and remove the API key from the context or the environment.
 - Security: anyone who can reach the local port uses your access to the stack. On a shared machine, other local users can connect to it. Web pages in your browser can reach a forwarded HTTP service through DNS rebinding: stop the command when you do not need it. An address that is not loopback opens the port to the network (stackctl writes a warning). `--insecure` is refused, because a man in the middle could read the tunnel data. An `http://` API URL is refused for the same reason, except for `localhost`, `127.0.0.1` and `[::1]`. `--allow-insecure-stream` accepts that risk.
+
+`stack exec <name|id> <chart> [-c CONTAINER] -- COMMAND [ARGS...]` runs one command in a container of a chart of the stack through the server (`GET /api/v1/stack-instances/:id/exec`). You need no kubeconfig. The server chooses the pod (the first running and ready pod of the chart) and, without `-c`, the first container that allows exec. The `--` is required: the words after it are the command and its arguments, sent as a list without a shell (stackctl reads no flags after it). Use `-- sh -c '...'` for pipes, variables or globs. The command gets no stdin and no TTY; its stdout and stderr go unchanged to stdout and stderr. `-o` and `-q` are ignored. stackctl never connects again: a lost connection ends stackctl (exit 255). The server must enable exec, and the cluster of the stack must allow it: an admin runs `stackctl cluster update <id> --allow-exec` (the same for port-forward with `--allow-port-forward`); `cluster get` shows both switches.
+
+- Exit codes: the exit code of the remote command (0 to 255, no message); 124 when the server time limit ends the command (close 4001); 130 for Ctrl-C or SIGTERM; 255 for an error of stackctl or the server (stack, chart or container not found, no access, no ready pod, a refused command, a lost connection, the refusal of `--insecure` or of an `http://` API URL, an exit code outside 0 to 255, an exit frame without a valid `exit_code`; the message is on stderr); 1 for invalid flags or arguments (no `--`, no command, more than 256 arguments, an empty program, a NUL byte). A remote command can return any code, including 1, 124, 130 and 255; stackctl's own codes come with a stackctl message on stderr (remote stderr goes to the same stream, so read the message, not just its presence). stackctl itself uses 1 only for invalid flags or arguments.
+- Ctrl-C closes the connection and exits 130 within a few seconds (a second Ctrl-C exits at once); when the command had already ended, stderr names its exit code. The remote process can keep running. Ctrl-C before the server started the command says "interrupted before the command started".
+- Errors: a 403 names the reason (the container does not allow exec, the cluster does not allow exec, the container holds a service-account token, the server may not check the pod for one, API keys not allowed: run `stackctl login`); 400 a chart or container name that is not valid; 404 an unknown chart or container, or exec turned off on the server; 503 no ready pod; 429 too many open exec sessions. A close of the server before the command started ends with "the server did not start the command". Close 4400: the server refused the command (too long or not valid; the length limit is a server setting). A 404 without an error code means that the server has no exec route: upgrade the server to k8s-stack-manager v0.15.0 or later.
+- Security: the output can show secrets, for example from the environment of the container, and can end up in the terminal history or in CI logs. The output is passed through unchanged, so it can hold terminal escape sequences (colors, cursor moves, changes of the window title or the clipboard (OSC 52), hyperlinks); when you do not trust the container, pipe it through `| cat -v` or write it to a file. The server writes each command with its arguments to the audit log. `--insecure` is refused, because a man in the middle could read the commands and their output. An `http://` API URL is refused for the same reason, except for `localhost`, `127.0.0.1` and `[::1]`. `--allow-insecure-stream` accepts that risk.
 
 `stack action list` and `stack action run` see the actions that apply to the stack: a server can limit an action to some templates, template categories, definitions or clusters (`applies_to`). An action of another stack gives "unknown action" with the actions of this stack. When the server could not check where an action applies, `stack action list` ends with "Some actions are not shown: the server could not check where they apply. Try again.", and `-o json` has `"scope_incomplete": true`.
 
@@ -635,6 +646,15 @@ stackctl stack list --cluster 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e -q | xargs -n
 stackctl cluster list
 stackctl cluster get 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
 
+# Register a cluster: with a kubeconfig and the API server URL as the server reaches it,
+# or the cluster that the server runs in (its service account, no kubeconfig)
+stackctl cluster create --name prod --api-server-url https://prod.example.com:6443 --kubeconfig-path ~/.kube/prod.yaml
+stackctl cluster create --name local --use-in-cluster
+
+# Per-cluster switches of stack port-forward and stack exec (admin; off by default)
+stackctl cluster update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --allow-exec --allow-port-forward
+stackctl cluster update 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --allow-exec=false
+
 # Cluster-level shared Helm values (applied to all deploys on a cluster)
 stackctl cluster shared-values list 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e
 stackctl cluster shared-values set 5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e --name "local-dev-defaults" --file values.yaml
@@ -682,6 +702,7 @@ These groups have no section above. Run `stackctl <group> --help` for the flags.
 | `--stop-at`, `stack extend --until`, the TTL limit of `server info` and of the local check (an older server ignores `--stop-at` and `--until`: stackctl shows the result and exits with code 1; it uses 30 days as the limit) | v0.12.0 or later |
 | Actions limited to some stacks (`applies_to`) and the `scope_incomplete` hint of `stack action list` (an older server lists every action for every stack) | the release after v0.14.0 (omattsson/k8s-stack-manager#720) |
 | `stack port-forward` (an older server answers 404 without an error code: stackctl says "upgrade the server to k8s-stack-manager v0.15.0 or later") | v0.15.0 or later (omattsson/k8s-stack-manager#722) |
+| `stack exec` (an older server answers 404 without an error code: stackctl says "upgrade the server to k8s-stack-manager v0.15.0 or later") | v0.15.0 or later (omattsson/k8s-stack-manager#723) |
 
 ## Output Formats
 

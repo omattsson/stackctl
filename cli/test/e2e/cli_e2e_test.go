@@ -2996,3 +2996,123 @@ func TestE2E_PluginGlobalFlags(t *testing.T) {
 	assert.Contains(t, out, "api_url=http://plugin.example\n")
 	assert.Contains(t, out, "config_dir="+dir+"\n")
 }
+
+// startE2EExecMockServer serves the stack list (the name my-stack is
+// instance 42) and the exec WebSocket of instance 42. refuse, when set,
+// answers the exec route without an upgrade. Otherwise the server sends
+// started, one stdout and one stderr frame and exit code 7.
+func startE2EExecMockServer(t *testing.T, refuse func(w http.ResponseWriter)) (*httptest.Server, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var command []string
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/stack-instances":
+			data := []map[string]interface{}{}
+			if r.URL.Query().Get("name") == "my-stack" {
+				data = append(data, map[string]interface{}{"id": "42", "name": "my-stack", "status": "running"})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": data, "total": len(data), "page": 1, "pageSize": 25})
+			return
+		case "/api/v1/stack-instances/42/exec":
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		if refuse != nil {
+			refuse(w)
+			return
+		}
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+		_, raw, err := ws.ReadMessage()
+		if err != nil {
+			return
+		}
+		var start types.ExecStartMessage
+		if json.Unmarshal(raw, &start) != nil {
+			return
+		}
+		mu.Lock()
+		command = start.Command
+		mu.Unlock()
+		send := func(v interface{}) {
+			b, _ := json.Marshal(v)
+			_ = ws.WriteMessage(websocket.TextMessage, b)
+		}
+		send(map[string]interface{}{"type": "started", "pod": "backend-0", "container": "php"})
+		_ = ws.WriteMessage(websocket.BinaryMessage, append([]byte{1}, "remote stdout\n"...))
+		_ = ws.WriteMessage(websocket.BinaryMessage, append([]byte{2}, "remote stderr\n"...))
+		send(map[string]interface{}{"type": "exit", "exit_code": 7})
+		_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return command
+	}
+}
+
+// TestE2E_StackExecExitCodes runs the binary: main.go exits with the code
+// of an ExitError (stackctl#179).
+func TestE2E_StackExecExitCodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	t.Run("remote exit code 7", func(t *testing.T) {
+		server, command := startE2EExecMockServer(t, nil)
+		dir := t.TempDir()
+		setupE2EStackContext(t, dir, server.URL)
+
+		stdout, stderr, err := runStackctl(t, dir, "stack", "exec", "my-stack", "backend", "--", "bin/console", "-v", "--help")
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr, "stderr=%q", stderr)
+		assert.Equal(t, 7, exitErr.ExitCode())
+		assert.Equal(t, "remote stdout\n", stdout)
+		assert.Equal(t, "remote stderr\n", stderr, "no message of stackctl for a remote exit code")
+		assert.Equal(t, []string{"bin/console", "-v", "--help"}, command())
+	})
+
+	t.Run("403 exits 255 with the message", func(t *testing.T) {
+		server, _ := startE2EExecMockServer(t, func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Container does not allow exec", "code": "container_not_allowed"})
+		})
+		dir := t.TempDir()
+		setupE2EStackContext(t, dir, server.URL)
+
+		stdout, stderr, err := runStackctl(t, dir, "stack", "exec", "my-stack", "backend", "-c", "php", "--", "ls")
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, 255, exitErr.ExitCode())
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, "exec refused by the server (HTTP 403): Container does not allow exec")
+		assert.Contains(t, stderr, `Container "php" does not allow exec`)
+	})
+
+	t.Run("usage error exits 1", func(t *testing.T) {
+		server, _ := startE2EExecMockServer(t, nil)
+		dir := t.TempDir()
+		setupE2EStackContext(t, dir, server.URL)
+
+		stdout, stderr, err := runStackctl(t, dir, "stack", "exec", "my-stack", "backend", "ls")
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr)
+		assert.Equal(t, 1, exitErr.ExitCode())
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, "missing '--' before the command")
+	})
+}

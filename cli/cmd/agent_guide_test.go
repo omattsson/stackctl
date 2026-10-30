@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,6 +102,13 @@ func TestAgentGuide_CommandsExist(t *testing.T) {
 			require.NoError(t, err)
 			args, err := positionalArgs(cmd, rest)
 			require.NoError(t, err)
+			if slices.Contains(rest, "--") {
+				// A validator that reads ArgsLenAtDash (stack exec) needs
+				// parsed flags.
+				require.NoError(t, cmd.ParseFlags(rest))
+				t.Cleanup(func() { resetParsedFlags(cmd) })
+				args = cmd.Flags().Args()
+			}
 			assert.NoError(t, cmd.ValidateArgs(args), "arguments of %s", cmd.CommandPath())
 		})
 	}
@@ -124,6 +132,7 @@ func TestPositionalArgs(t *testing.T) {
 		{"value flag takes the next word", stackCreateCmd, []string{"x", "--definition", "d", "--branch=b"}, []string{"x"}, ""},
 		{"bool and global flags", stackDeleteCmd, []string{"--dry-run", "x", "-o", "json", "-q", "--help"}, []string{"x"}, ""},
 		{"unknown flag", stackCreateCmd, []string{"--nope"}, nil, "stackctl stack create has no flag --nope"},
+		{"words after -- are arguments", stackExecCmd, []string{"x", "web", "-c", "php", "--", "ls", "-la", "--nope"}, []string{"x", "web", "ls", "-la", "--nope"}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -249,6 +258,10 @@ func positionalArgs(cmd *cobra.Command, args []string) ([]string, error) {
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			// The words after "--" are arguments, not flags.
+			return append(positional, args[i+1:]...), nil
+		}
 		if !strings.HasPrefix(arg, "-") || arg == "-" {
 			positional = append(positional, arg)
 			continue
@@ -267,6 +280,25 @@ func positionalArgs(cmd *cobra.Command, args []string) ([]string, error) {
 		}
 	}
 	return positional, nil
+}
+
+// resetParsedFlags undoes cmd.ParseFlags: the flag values and the "--"
+// position (pflag keeps ArgsLenAtDash from an earlier parse).
+//
+// Only scalar flags are reset correctly: Value.Set(DefValue) appends to a
+// slice or array flag (StringSlice, StringArray, ...) and parses "[]" as a
+// value, instead of clearing it. The commands reset here (stack exec and the
+// root command) have no changed slice flags today; reset a slice flag
+// through pflag.SliceValue.Replace if one is added.
+func resetParsedFlags(cmd *cobra.Command) {
+	fs := cmd.Flags()
+	fs.VisitAll(func(f *pflag.Flag) {
+		if f.Changed {
+			_ = f.Value.Set(f.DefValue)
+			f.Changed = false
+		}
+	})
+	fs.Init(fs.Name(), pflag.ContinueOnError)
 }
 
 // lookupFlag finds a local or inherited flag by name, or by shorthand for a

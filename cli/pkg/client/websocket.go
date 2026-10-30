@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -304,30 +305,12 @@ func (c *Client) dialWSOpts(ctx context.Context, path string, warnWriter io.Writ
 		}
 	}
 
+	if opts.stream {
+		return c.dialStream(ctx, dialer, wsURL, header, token, opts.op)
+	}
 	conn, resp, err := dialer.DialContext(ctx, wsURL, header)
 	if err == nil {
 		return conn, nil
-	}
-	if opts.stream {
-		if resp != nil && resp.StatusCode == http.StatusUnauthorized && c.APIKey == "" && token != "" {
-			renewed, rerr := c.renewSession(token)
-			if rerr != nil {
-				return nil, rerr
-			}
-			if renewed {
-				c.debugf("↻ session renewed after a WebSocket 401; dialing %s again\n", opts.op)
-				header.Set("Authorization", "Bearer "+c.currentToken())
-				conn, resp, err = dialer.DialContext(ctx, wsURL, header)
-				if err == nil {
-					return conn, nil
-				}
-			}
-		}
-		if hsErr := handshakeError(resp, err, c.APIKey != ""); hsErr != nil {
-			hsErr.Op = opts.op
-			return nil, hsErr
-		}
-		return nil, fmt.Errorf("connecting to the %s WebSocket: %w", opts.op, err)
 	}
 	// 401 → fall back to ?token= query param when a JWT is configured.
 	// The retry is gated on c.Token because an API-key-only caller has no
@@ -370,6 +353,110 @@ const wsAuthRequiredMessage = "Authentication required"
 // port-forward route (k8s-stack-manager#722).
 const PortForwardServerVersion = "k8s-stack-manager v0.15.0 or later"
 
+// ExecServerVersion is the first server release with the exec route
+// (k8s-stack-manager#723, PR #725), the same release as port-forward.
+const ExecServerVersion = "k8s-stack-manager v0.15.0 or later"
+
+// streamServerVersion returns the server release that has the stream route
+// of op.
+func streamServerVersion(op string) string {
+	if op == execOp {
+		return ExecServerVersion
+	}
+	return PortForwardServerVersion
+}
+
+// dialStream dials a stream route (port-forward, exec): header auth only,
+// one renewal and one more dial after a 401, and a cancel of ctx ends the
+// dial.
+func (c *Client) dialStream(ctx context.Context, dialer *websocket.Dialer, wsURL string, header http.Header, token, op string) (*websocket.Conn, error) {
+	// Ctrl-C must end a dial that a server or proxy holds.
+	dialer, release, err := closeOnCancel(ctx, dialer)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	dialed := func(conn *websocket.Conn) (*websocket.Conn, error) {
+		release()
+		if ctx.Err() != nil {
+			// The cancel can have closed the connection.
+			_ = conn.Close()
+			return nil, ctx.Err()
+		}
+		return conn, nil
+	}
+	conn, resp, err := dialer.DialContext(ctx, wsURL, header)
+	if err == nil {
+		return dialed(conn)
+	}
+	if resp != nil && resp.StatusCode == http.StatusUnauthorized && c.APIKey == "" && token != "" {
+		renewed, rerr := c.renewSession(token)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if renewed {
+			c.debugf("↻ session renewed after a WebSocket 401; dialing %s again\n", op)
+			header.Set("Authorization", "Bearer "+c.currentToken())
+			conn, resp, err = dialer.DialContext(ctx, wsURL, header)
+			if err == nil {
+				return dialed(conn)
+			}
+		}
+	}
+	if ctx.Err() != nil {
+		// Not the text of the connection that the cancel closed.
+		return nil, ctx.Err()
+	}
+	if hsErr := handshakeError(resp, err, c.APIKey != ""); hsErr != nil {
+		hsErr.Op = op
+		return nil, hsErr
+	}
+	return nil, fmt.Errorf("connecting to the %s WebSocket: %w", op, err)
+}
+
+// closeOnCancel returns a copy of d whose connections are closed when ctx
+// ends, until release is called. gorilla/websocket v1.5.3 uses only the
+// deadline of ctx during the handshake, not its cancel: without this, a
+// Ctrl-C waits up to the handshake timeout (45 s) while a server or a proxy
+// holds the upgrade. Call release when the dial has returned; after a
+// successful dial, check ctx.Err(): the cancel can have closed the
+// connection.
+//
+// Only NetDialContext is wrapped. gorilla uses NetDialTLSContext instead of
+// it for wss, and the wrapper would hide a NetDial of d, so a dialer with
+// either set is refused: the cancel must never be skipped silently.
+func closeOnCancel(ctx context.Context, d *websocket.Dialer) (dialer *websocket.Dialer, release func(), err error) {
+	if d.NetDial != nil || d.NetDialTLSContext != nil {
+		return nil, nil, errors.New("websocket dialer: NetDial and NetDialTLSContext are not supported for stream routes (the cancel of the dial would be skipped)")
+	}
+	cp := *d
+	base := d.NetDialContext
+	if base == nil {
+		base = (&net.Dialer{}).DialContext
+	}
+	var mu sync.Mutex
+	var stops []func() bool
+	cp.NetDialContext = func(dctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := base(dctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+		mu.Lock()
+		stops = append(stops, stop)
+		mu.Unlock()
+		return conn, nil
+	}
+	return &cp, func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, stop := range stops {
+			stop()
+		}
+		stops = nil
+	}, nil
+}
+
 // maxHandshakeBody is the number of response body bytes that
 // handshakeError reads. gorilla/websocket keeps at most 1024 bytes.
 const maxHandshakeBody = 4096
@@ -391,7 +478,10 @@ type WSHandshakeError struct {
 	// APIKey is true when the refused request used an API key (no JWT
 	// fallback).
 	APIKey bool
-	err    error
+	// Container is the container that an exec asked for; empty when the
+	// server chooses it. Only used in the message.
+	Container string
+	err       error
 }
 
 // Error codes of the stream routes (port-forward, exec) of
@@ -418,6 +508,17 @@ const (
 	StreamCodeShuttingDown        = "shutting_down"
 	StreamCodeDialFailed          = "dial_failed"
 	StreamCodeInternal            = "internal"
+
+	// Error codes of the exec route only.
+	StreamCodeInvalidChart        = "invalid_chart"
+	StreamCodeInvalidContainer    = "invalid_container"
+	StreamCodeClusterExecDisabled = "cluster_exec_disabled"
+	StreamCodeContainerNotAllowed = "container_not_allowed"
+	StreamCodeServiceAccountToken = "service_account_token" // #nosec G101 -- an error code, not a credential
+	StreamCodeTokenCheckForbidden = "token_check_forbidden" // #nosec G101 -- an error code, not a credential
+	StreamCodeChartNotFound       = "chart_not_found"
+	StreamCodeContainerNotFound   = "container_not_found"
+	StreamCodeExecLimit           = "exec_limit"
 )
 
 // Error returns a message for the user, for example "WebSocket refused by
@@ -445,7 +546,7 @@ func (e *WSHandshakeError) streamError() string {
 		return fmt.Sprintf("%s failed: the server answered HTTP %d without a WebSocket upgrade; a proxy between stackctl and the server probably dropped the upgrade", e.Op, e.StatusCode)
 	}
 	if e.NoRoute() {
-		return fmt.Sprintf("%s failed: the server has no %s route (HTTP 404); upgrade the server to %s", e.Op, e.Op, PortForwardServerVersion)
+		return fmt.Sprintf("%s failed: the server has no %s route (HTTP 404); upgrade the server to %s", e.Op, e.Op, streamServerVersion(e.Op))
 	}
 	msg := fmt.Sprintf("%s refused by the server (HTTP %d): %s", e.Op, e.StatusCode, e.Message)
 	switch {
@@ -466,7 +567,45 @@ func (e *WSHandshakeError) streamError() string {
 	case StreamCodeTunnelLimit:
 		return msg + ". Close other connections, then try again."
 	}
+	if e.Op == execOp {
+		return msg + e.execHint()
+	}
 	return msg
+}
+
+// execHint is the advice for a refused exec upgrade, or "".
+func (e *WSHandshakeError) execHint() string {
+	container := sanitizeServerMessage(e.Container)
+	switch e.Code {
+	case StreamCodeContainerNotAllowed:
+		if container != "" {
+			return fmt.Sprintf(". Container %q does not allow exec; choose another container, or ask an administrator.", container)
+		}
+		return ". No container of the chart allows exec; ask an administrator."
+	case StreamCodeServiceAccountToken:
+		return ". The container holds a service-account token, so the server refuses exec into it; ask an administrator."
+	case StreamCodeTokenCheckForbidden:
+		return ". The server may not check the pod for a service-account token; ask an administrator."
+	case StreamCodeClusterExecDisabled:
+		return ". The cluster of the stack does not allow exec; ask an administrator."
+	case StreamCodeInvalidChart:
+		// The server checks the name (DNS-1123); stackctl does not repeat it.
+		return ". Check the chart name (the Helm release name): the CHART column of 'stackctl stack pods'."
+	case StreamCodeInvalidContainer:
+		return ". Check the container name."
+	case StreamCodeChartNotFound:
+		return ". Check the chart name: the CHART column of 'stackctl stack pods'."
+	case StreamCodeContainerNotFound:
+		if container != "" {
+			return fmt.Sprintf(". No ready pod of the chart runs container %q; check the container name.", container)
+		}
+		return ". No ready pod of the chart runs an allowed container."
+	case StreamCodeNoReadyPod:
+		return ". The chart has no running and ready pod; check 'stackctl stack pods', then try again."
+	case StreamCodeExecLimit:
+		return ". Too many of your exec sessions are open; wait until one ends, then try again."
+	}
+	return ""
 }
 
 // Unwrap returns the dialer error (websocket.ErrBadHandshake).
@@ -772,6 +911,8 @@ const (
 	CloseMaxDuration    = 4001                             // server time limit
 	CloseIdleTimeout    = 4002                             // no data in either direction
 	ClosePodStreamError = 4502                             // the reason holds the error
+	CloseBadStart       = 4400                             // exec: the start message is not valid
+	CloseStartTimeout   = 4408                             // exec: no start message in time
 	closeNoStatus       = websocket.CloseNoStatusReceived  // 1005: close frame without a code
 )
 
@@ -838,6 +979,13 @@ func CloseCodeText(code int, reason string, apiKey bool) string {
 		return "server time limit reached"
 	case CloseIdleTimeout:
 		return "idle timeout (no data in either direction)"
+	case CloseBadStart:
+		if reason == "" {
+			return "the server refused the command (too long or not valid)"
+		}
+		return "the server refused the command (too long or not valid): " + reason
+	case CloseStartTimeout:
+		return "the server received no command in time"
 	case ClosePodStreamError:
 		if reason == "" {
 			return "pod stream error"
