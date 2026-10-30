@@ -8,7 +8,7 @@ Run `stackctl <command> --help` for the flags of a command. This guide covers wh
 
 1. **Read with `-o json`.** stdout then holds only JSON: the resource, the list or the server response. Messages, warnings, notes and the deployment log of `--follow` go to stderr. A command without data (for example `stack delete` or `--dry-run`) leaves stdout empty. The default table output is for people and can change.
 2. **`-q` prints IDs, one per line**, for pipes and `$(...)`. On `stack create`, `clone` and `template quick-deploy` it is the stack ID; on `stack deploy`, `stop`, `clean` and `rollback` it is the ID of the deployment log.
-3. **Exit code 0 means no error, 1 means an error.** The error text is on stderr. Do not parse table output to detect errors. Exceptions: for operations that run on the server, exit 0 means that the server accepted the operation, not that it ended (see "Long-running operations"); `bulk` commands exit 0 even when some items fail (check `failed` and `results` in `-o json`); a plugin (`stackctl <plugin>`) returns its own exit code.
+3. **Exit code 0 means no error, 1 means an error.** The error text is on stderr. Do not parse table output to detect errors. Exceptions: for operations that run on the server, exit 0 means that the server accepted the operation, not that it ended (see "Long-running operations"); `bulk` commands exit 0 even when some items fail (check `failed` and `results` in `-o json`); a plugin (`stackctl <plugin>`) returns its own exit code; `stack exec` returns the exit code of the remote command, 124 at the server time limit, 130 when interrupted and 255 for an error of stackctl or the server (also the refusal of `--insecure` or of an `http://` API URL, an exit code outside 0..255, and an exit frame without a valid `exit_code`). A remote command can return any code, including 1, 124, 130 and 255; stackctl's own codes come with a stackctl message on stderr (remote stderr goes to the same stream, so read the message, not just its presence). stackctl itself uses 1 only for invalid flags or arguments.
 4. **Destructive commands ask for confirmation.** A command with a `--yes` flag (see its `--help`) reads the answer from stdin. Any answer other than `y` exits 1 with `aborted: not confirmed, nothing changed`; a closed stdin fails with `use --yes to confirm`; an open stdin without input waits forever. Pass `--yes` only when the user asked for that change, and run commands with `< /dev/null` so a missing `--yes` fails instead of hanging.
 5. **`--dry-run` does not check anything.** It prints the action and the name you gave and contacts no server: a misspelled name still "succeeds". To check the target, run `stackctl stack get <name> -o json` first.
 6. **Do not retry an operation that is still running.** See "Long-running operations".
@@ -74,6 +74,20 @@ stackctl stack port-forward my-app mysql 0:3306 -q   # stdout: 127.0.0.1:<port>;
 # 3 refusals with 429 in a row end it with exit 1: wait and try again.
 # Needs k8s-stack-manager v0.15.0 or later (an older server: "upgrade the server to k8s-stack-manager v0.15.0 or later").
 # An http:// API URL to a host that is not loopback is refused (add --allow-insecure-stream to accept the risk).
+
+# Run one command in a container of a chart (no stdin, no TTY, no shell; for a shell: -- sh -c '...')
+stackctl stack exec my-app backend -c php -- bin/console cache:clear
+# stdout and stderr are the output of the command, unchanged; -o and -q are ignored. The output can hold secrets
+# and terminal escape sequences (colors, cursor moves, title or clipboard (OSC 52) changes, hyperlinks): when the
+# container is not trusted, pipe it through `| cat -v` or write it to a file before you show it.
+# Exit code: the code of the command; 124 server time limit; 130 interrupted; 255 a client or server error
+# (not found, 403, 503 no ready pod, a lost connection ends stackctl: the message is on stderr). Ctrl-C closes
+# the connection and exits 130 within a few seconds (a second Ctrl-C exits at once); when the command had already
+# ended, stderr names its exit code.
+# The remote process can keep running. Never retried: after 124, 130 or a lost connection the command can still
+# run on the server, so check its effect before you run it again ("the server did not start the command" and
+# "interrupted before the command started" mean that it did not run).
+# Needs k8s-stack-manager v0.15.0 or later (an older server: "upgrade the server to k8s-stack-manager v0.15.0 or later").
 
 # Change values, then deploy again
 stackctl override set my-app my-chart --set image.tag=1.2.3

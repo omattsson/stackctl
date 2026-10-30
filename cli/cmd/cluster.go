@@ -160,6 +160,8 @@ Examples:
 				{Key: "Status", Value: printer.StatusColor(cluster.Status)},
 				{Key: "Default", Value: isDefault},
 				{Key: "Region", Value: cluster.Region},
+				{Key: "Port-forward", Value: strconv.FormatBool(cluster.AllowPortForward)},
+				{Key: "Exec", Value: strconv.FormatBool(cluster.AllowExec)},
 			}
 			if health != nil {
 				fields = append(fields,
@@ -573,6 +575,8 @@ func printCluster(cluster *types.Cluster) error {
 			{Key: "Status", Value: printer.StatusColor(cluster.Status)},
 			{Key: "Default", Value: isDefault},
 			{Key: "Region", Value: cluster.Region},
+			{Key: "Port-forward", Value: strconv.FormatBool(cluster.AllowPortForward)},
+			{Key: "Exec", Value: strconv.FormatBool(cluster.AllowExec)},
 		}
 		return printer.PrintSingle(cluster, fields)
 	}
@@ -585,9 +589,15 @@ var clusterCreateCmd = &cobra.Command{
 
 Provide either --from-file with a JSON/YAML file, or use --name and --kubeconfig-data / --kubeconfig-path.
 
+--allow-port-forward and --allow-exec turn on the per-cluster switches of
+'stackctl stack port-forward' and 'stackctl stack exec' (off by default; the
+server must also enable the feature). Servers before k8s-stack-manager v0.15.0
+ignore them: check the Port-forward and Exec rows of the output.
+
 Examples:
   stackctl cluster create --from-file cluster.json
-  stackctl cluster create --name prod --kubeconfig-path ~/.kube/config`,
+  stackctl cluster create --name prod --kubeconfig-path ~/.kube/config
+  stackctl cluster create --name dev --kubeconfig-path ~/.kube/config --allow-exec`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fromFile, _ := cmd.Flags().GetString("from-file")
@@ -647,6 +657,8 @@ Examples:
 			}
 			req.Name = name
 			req.Description, _ = cmd.Flags().GetString("description")
+			req.AllowPortForward, _ = cmd.Flags().GetBool("allow-port-forward")
+			req.AllowExec, _ = cmd.Flags().GetBool("allow-exec")
 			req.KubeconfigData = kubeconfigData
 			if kubeconfigPath != "" {
 				content, err := os.ReadFile(kubeconfigPath)
@@ -688,9 +700,11 @@ var clusterUpdateCmd = &cobra.Command{
 		kubeconfigDataChanged := cmd.Flags().Changed("kubeconfig-data")
 		kubeconfigPathChanged := cmd.Flags().Changed("kubeconfig-path")
 		defaultChanged := cmd.Flags().Changed("default")
+		portForwardChanged := cmd.Flags().Changed("allow-port-forward")
+		execChanged := cmd.Flags().Changed("allow-exec")
 
-		if fromFile == "" && !nameChanged && !descChanged && !kubeconfigDataChanged && !kubeconfigPathChanged && !defaultChanged {
-			return fmt.Errorf("at least one of --name, --description, --kubeconfig-data, --kubeconfig-path, --default, or --from-file must be specified")
+		if fromFile == "" && !nameChanged && !descChanged && !kubeconfigDataChanged && !kubeconfigPathChanged && !defaultChanged && !portForwardChanged && !execChanged {
+			return fmt.Errorf("at least one of --name, --description, --kubeconfig-data, --kubeconfig-path, --default, --allow-port-forward, --allow-exec, or --from-file must be specified")
 		}
 
 		var req types.UpdateClusterRequest
@@ -770,6 +784,14 @@ var clusterUpdateCmd = &cobra.Command{
 			if defaultChanged {
 				v, _ := cmd.Flags().GetBool("default")
 				req.IsDefault = &v
+			}
+			if portForwardChanged {
+				v, _ := cmd.Flags().GetBool("allow-port-forward")
+				req.AllowPortForward = &v
+			}
+			if execChanged {
+				v, _ := cmd.Flags().GetBool("allow-exec")
+				req.AllowExec = &v
 			}
 		}
 
@@ -1322,6 +1344,8 @@ func init() {
 	clusterCreateCmd.Flags().String("description", "", "Cluster description")
 	clusterCreateCmd.Flags().String("kubeconfig-data", "", "Raw kubeconfig data (base64 or YAML string)")
 	clusterCreateCmd.Flags().String("kubeconfig-path", "", "Path to kubeconfig file")
+	clusterCreateCmd.Flags().Bool("allow-port-forward", false, "Allow 'stackctl stack port-forward' to stacks on this cluster (k8s-stack-manager v0.15.0 or later)")
+	clusterCreateCmd.Flags().Bool("allow-exec", false, "Allow 'stackctl stack exec' in stacks on this cluster (k8s-stack-manager v0.15.0 or later)")
 
 	// cluster update flags
 	clusterUpdateCmd.Flags().String("from-file", "", "JSON or YAML file with update payload")
@@ -1330,6 +1354,8 @@ func init() {
 	clusterUpdateCmd.Flags().String("kubeconfig-data", "", "New kubeconfig data")
 	clusterUpdateCmd.Flags().String("kubeconfig-path", "", "New path to kubeconfig file")
 	clusterUpdateCmd.Flags().Bool("default", false, "Mark cluster as default")
+	clusterUpdateCmd.Flags().Bool("allow-port-forward", false, "Allow 'stackctl stack port-forward' to stacks on this cluster (--allow-port-forward=false turns it off)")
+	clusterUpdateCmd.Flags().Bool("allow-exec", false, "Allow 'stackctl stack exec' in stacks on this cluster (--allow-exec=false turns it off)")
 
 	// cluster delete flags
 	clusterDeleteCmd.Flags().BoolP("yes", "y", false, flagDescSkipConfirm)

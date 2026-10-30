@@ -836,6 +836,8 @@ func resetClusterCreateFlags(t *testing.T) {
 	clusterCreateCmd.Flags().Set("description", "")
 	clusterCreateCmd.Flags().Set("kubeconfig-data", "")
 	clusterCreateCmd.Flags().Set("kubeconfig-path", "")
+	clusterCreateCmd.Flags().Set("allow-port-forward", "false")
+	clusterCreateCmd.Flags().Set("allow-exec", "false")
 }
 
 func TestClusterCreateCmd_TableOutput(t *testing.T) {
@@ -1001,6 +1003,10 @@ func resetClusterUpdateFlags(t *testing.T) {
 	clusterUpdateCmd.Flags().Lookup("kubeconfig-data").Changed = false
 	clusterUpdateCmd.Flags().Lookup("kubeconfig-path").Changed = false
 	clusterUpdateCmd.Flags().Lookup("default").Changed = false
+	clusterUpdateCmd.Flags().Set("allow-port-forward", "false")
+	clusterUpdateCmd.Flags().Set("allow-exec", "false")
+	clusterUpdateCmd.Flags().Lookup("allow-port-forward").Changed = false
+	clusterUpdateCmd.Flags().Lookup("allow-exec").Changed = false
 }
 
 func TestClusterUpdateCmd_TableOutput(t *testing.T) {
@@ -1075,6 +1081,112 @@ func TestClusterUpdateCmd_SetDefault(t *testing.T) {
 	err := clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "true")
+}
+
+func TestClusterCreateCmd_StreamSwitches(t *testing.T) {
+	cl := sampleCluster()
+	cl.AllowExec = true
+	var body map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	clusterCreateCmd.Flags().Set("name", "dev-cluster")
+	clusterCreateCmd.Flags().Set("allow-exec", "true")
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	err := clusterCreateCmd.RunE(clusterCreateCmd, nil)
+	require.NoError(t, err)
+	assert.Equal(t, true, body["allow_exec"])
+	_, sent := body["allow_port_forward"]
+	assert.False(t, sent, "an unset switch is not sent")
+	assert.Regexp(t, `Exec:\s+true`, buf.String())
+	assert.Regexp(t, `Port-forward:\s+false`, buf.String())
+}
+
+func TestClusterCreateCmd_FromFileStreamSwitches(t *testing.T) {
+	var body map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(sampleCluster())
+	}))
+	defer server.Close()
+
+	file := filepath.Join(t.TempDir(), "cluster.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("name: dev\nuse_in_cluster: true\nallow_exec: true\nallow_port_forward: true\n"), 0o600))
+	_ = setupClusterTestCmd(t, server.URL)
+	clusterCreateCmd.Flags().Set("from-file", file)
+	t.Cleanup(func() { resetClusterCreateFlags(t) })
+
+	require.NoError(t, clusterCreateCmd.RunE(clusterCreateCmd, nil))
+	assert.Equal(t, true, body["allow_exec"])
+	assert.Equal(t, true, body["allow_port_forward"])
+}
+
+func TestClusterUpdateCmd_StreamSwitches(t *testing.T) {
+	tests := []struct {
+		name  string
+		flags map[string]string
+		want  map[string]interface{}
+	}{
+		{name: "exec on", flags: map[string]string{"allow-exec": "true"}, want: map[string]interface{}{"allow_exec": true}},
+		{name: "exec off is sent", flags: map[string]string{"allow-exec": "false"}, want: map[string]interface{}{"allow_exec": false}},
+		{name: "both", flags: map[string]string{"allow-exec": "true", "allow-port-forward": "false"}, want: map[string]interface{}{"allow_exec": true, "allow_port_forward": false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]interface{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, http.MethodPut, r.Method)
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(sampleCluster())
+			}))
+			defer server.Close()
+
+			_ = setupClusterTestCmd(t, server.URL)
+			for k, v := range tt.flags {
+				require.NoError(t, clusterUpdateCmd.Flags().Set(k, v))
+			}
+			t.Cleanup(func() { resetClusterUpdateFlags(t) })
+
+			require.NoError(t, clusterUpdateCmd.RunE(clusterUpdateCmd, []string{"1"}))
+			assert.Equal(t, tt.want, body)
+		})
+	}
+}
+
+func TestClusterGetCmd_StreamSwitches(t *testing.T) {
+	cl := sampleCluster()
+	cl.AllowPortForward = true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/clusters/1" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(cl)
+	}))
+	defer server.Close()
+
+	buf := setupClusterTestCmd(t, server.URL)
+	require.NoError(t, clusterGetCmd.RunE(clusterGetCmd, []string{"1"}))
+	assert.Regexp(t, `Port-forward:\s+true`, buf.String())
+	assert.Regexp(t, `Exec:\s+false`, buf.String())
+
+	buf.Reset()
+	printer.Format = output.FormatJSON
+	require.NoError(t, clusterGetCmd.RunE(clusterGetCmd, []string{"1"}))
+	assert.Contains(t, buf.String(), `"allow_port_forward": true`)
+	assert.NotContains(t, buf.String(), `"allow_exec"`, "a switch that is off is left out, like the other bool fields")
 }
 
 func TestClusterUpdateCmd_PathTraversal(t *testing.T) {
@@ -1294,7 +1406,6 @@ func TestClusterSetDefaultCmd_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cluster not found")
 }
-
 
 // ---------- cluster test-connection ----------
 

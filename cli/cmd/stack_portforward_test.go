@@ -724,3 +724,33 @@ func TestPortForwardCmd_SuccessResets429Count(t *testing.T) {
 	assert.Equal(t, int32(2), srv.upgrades.Load())
 	assert.Equal(t, 4, strings.Count(stderr.String(), "HTTP 429"))
 }
+
+func TestPortForwardCmd_InsecureTextsUnchanged(t *testing.T) {
+	// The check moved to checkStreamTransport; the port-forward texts stay.
+	t.Run("--insecure", func(t *testing.T) {
+		srv := newPFTestServer(t, nil)
+		_, _ = setupPortForwardTest(t, srv.URL)
+		flagInsecure = true
+		err := waitDone(t, startPortForward(context.Background(), "42", "mysql", "0:3306"))
+		require.Error(t, err)
+		assert.Equal(t, "port-forward refuses --insecure: without TLS verification a man in the middle can read the tunnel data; add --allow-insecure-stream to accept that risk", err.Error())
+	})
+	t.Run("http remote", func(t *testing.T) {
+		_, _ = setupPortForwardTest(t, "http://stacks.invalid")
+		err := waitDone(t, startPortForward(context.Background(), "42", "mysql", "0:3306"))
+		require.Error(t, err)
+		assert.Equal(t, "port-forward refuses an http:// API URL to a host that is not loopback: a man in the middle can read the tunnel data; use https, or add --allow-insecure-stream to accept that risk", err.Error())
+	})
+	t.Run("warning", func(t *testing.T) {
+		srv := newPFTestServer(t, nil)
+		stdout, stderr := setupPortForwardTest(t, srv.URL)
+		flagInsecure = true
+		require.NoError(t, stackPortForwardCmd.Flags().Set("allow-insecure-stream", "true"))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := startPortForward(ctx, "42", "mysql", "0:3306")
+		waitForwarding(t, stdout, done)
+		cancel()
+		require.NoError(t, waitDone(t, done))
+		assert.Contains(t, stderr.String(), "Warning: --allow-insecure-stream: the tunnel data is not protected against a man in the middle\n")
+	})
+}

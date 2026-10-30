@@ -359,6 +359,8 @@ type Cluster struct {
 	MaxNamespaces       int        `json:"max_namespaces,omitempty" yaml:"max_namespaces,omitempty"`
 	MaxInstancesPerUser int        `json:"max_instances_per_user,omitempty" yaml:"max_instances_per_user,omitempty"`
 	UseInCluster        bool       `json:"use_in_cluster,omitempty" yaml:"use_in_cluster,omitempty"`
+	AllowPortForward    bool       `json:"allow_port_forward,omitempty" yaml:"allow_port_forward,omitempty"`
+	AllowExec           bool       `json:"allow_exec,omitempty" yaml:"allow_exec,omitempty"`
 	RegistryURL         string     `json:"registry_url,omitempty" yaml:"registry_url,omitempty"`
 	RegistryUsername    string     `json:"registry_username,omitempty" yaml:"registry_username,omitempty"`
 	ImagePullSecretName string     `json:"image_pull_secret_name,omitempty" yaml:"image_pull_secret_name,omitempty"`
@@ -376,6 +378,8 @@ type CreateClusterRequest struct {
 	MaxInstancesPerUser int    `json:"max_instances_per_user,omitempty" yaml:"max_instances_per_user,omitempty"`
 	IsDefault           bool   `json:"is_default,omitempty" yaml:"is_default,omitempty"`
 	UseInCluster        bool   `json:"use_in_cluster,omitempty" yaml:"use_in_cluster,omitempty"`
+	AllowPortForward    bool   `json:"allow_port_forward,omitempty" yaml:"allow_port_forward,omitempty"`
+	AllowExec           bool   `json:"allow_exec,omitempty" yaml:"allow_exec,omitempty"`
 	RegistryURL         string `json:"registry_url,omitempty" yaml:"registry_url,omitempty"`
 	RegistryUsername    string `json:"registry_username,omitempty" yaml:"registry_username,omitempty"`
 	RegistryPassword    string `json:"registry_password,omitempty" yaml:"registry_password,omitempty"`
@@ -395,6 +399,8 @@ type UpdateClusterRequest struct {
 	MaxInstancesPerUser *int    `json:"max_instances_per_user,omitempty" yaml:"max_instances_per_user,omitempty"`
 	IsDefault           *bool   `json:"is_default,omitempty" yaml:"is_default,omitempty"`
 	UseInCluster        *bool   `json:"use_in_cluster,omitempty" yaml:"use_in_cluster,omitempty"`
+	AllowPortForward    *bool   `json:"allow_port_forward,omitempty" yaml:"allow_port_forward,omitempty"`
+	AllowExec           *bool   `json:"allow_exec,omitempty" yaml:"allow_exec,omitempty"`
 	RegistryURL         *string `json:"registry_url,omitempty" yaml:"registry_url,omitempty"`
 	RegistryUsername    *string `json:"registry_username,omitempty" yaml:"registry_username,omitempty"`
 	RegistryPassword    *string `json:"registry_password,omitempty" yaml:"registry_password,omitempty"`
@@ -1549,6 +1555,26 @@ type WSDeploymentStatus struct {
 	Status       string `json:"status"`
 	LogID        string `json:"log_id"`
 	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// ExecStartMessage is the first client message of an exec WebSocket
+// (GET /api/v1/stack-instances/:id/exec): {"type":"start","command":[...]}.
+// The type field leaves room for later client messages (stdin, resize).
+type ExecStartMessage struct {
+	Type    string   `json:"type"`
+	Command []string `json:"command"`
+}
+
+// ExecServerMessage is a text frame of the server on an exec WebSocket:
+// "started" (Pod, Container), "exit" (ExitCode) or "error" (Message).
+// ExitCode is a pointer so that an exit frame without exit_code is
+// detectable.
+type ExecServerMessage struct {
+	Type      string `json:"type"`
+	Pod       string `json:"pod,omitempty"`
+	Container string `json:"container,omitempty"`
+	ExitCode  *int   `json:"exit_code,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 // StreamResult is the outcome of a WebSocket log-streaming session.

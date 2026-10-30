@@ -70,11 +70,7 @@ AI agents and scripts: run 'stackctl agent-guide' first.`,
 		}
 
 		// Warn when TLS verification is disabled
-		insecure := flagInsecure
-		if !insecure && cfg.CurrentCtx() != nil {
-			insecure = cfg.CurrentCtx().Insecure
-		}
-		if insecure {
+		if effectiveInsecure() {
 			fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: TLS certificate verification is disabled")
 		}
 
@@ -237,13 +233,22 @@ func resolveAPIKey() string {
 	return ""
 }
 
-// applyInsecureTLS configures the client to skip TLS verification if the insecure flag is set.
-func applyInsecureTLS(c *client.Client) {
-	insecure := flagInsecure
-	if !insecure && cfg.CurrentCtx() != nil {
-		insecure = cfg.CurrentCtx().Insecure
+// effectiveInsecure reports whether TLS verification is off: --insecure, or
+// the insecure setting of the current context. The warning, the transport
+// (applyInsecureTLS) and the stream check (checkStreamTransport) all use it,
+// so they cannot disagree.
+func effectiveInsecure() bool {
+	if flagInsecure {
+		return true
 	}
-	if insecure {
+	ctx := cfg.CurrentCtx()
+	return ctx != nil && ctx.Insecure
+}
+
+// applyInsecureTLS configures the client to skip TLS verification when
+// effectiveInsecure reports true (the flag or the context setting).
+func applyInsecureTLS(c *client.Client) {
+	if effectiveInsecure() {
 		// Clone the default transport to preserve proxies, timeouts, and keep-alives.
 		if t, ok := http.DefaultTransport.(*http.Transport); ok {
 			clone := t.Clone()

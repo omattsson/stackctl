@@ -286,13 +286,38 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	return s.w.Write(p)
 }
 
-// streamInsecure reports whether TLS verification is off (flag or context).
-func streamInsecure() bool {
-	if flagInsecure {
-		return true
+// streamRisk describes what a stream command (port-forward, exec) exposes
+// without TLS, for checkStreamTransport.
+type streamRisk struct {
+	// op names the command in the error, for example "port-forward".
+	op string
+	// data is what a man in the middle can read, for example "the tunnel
+	// data".
+	data string
+	// warning is the text of the warning when --allow-insecure-stream is set.
+	warning string
+}
+
+// checkStreamTransport refuses a stream command when TLS verification is off
+// (--insecure or the insecure setting of the context) or the API URL is
+// http:// to a host that is not loopback, unless the command has
+// --allow-insecure-stream; then it writes a warning to stderr. Call it before
+// any request.
+func checkStreamTransport(cmd *cobra.Command, c *client.Client, stderr io.Writer, risk streamRisk) error {
+	insecure, plaintext := effectiveInsecure(), plaintextRemoteURL(c.BaseURL)
+	if !insecure && !plaintext {
+		return nil
 	}
-	ctx := cfg.CurrentCtx()
-	return ctx != nil && ctx.Insecure
+	allow, _ := cmd.Flags().GetBool("allow-insecure-stream")
+	switch {
+	case allow:
+		fmt.Fprintln(stderr, "Warning: --allow-insecure-stream: "+risk.warning)
+		return nil
+	case insecure:
+		return fmt.Errorf("%s refuses --insecure: without TLS verification a man in the middle can read %s; add --allow-insecure-stream to accept that risk", risk.op, risk.data)
+	default:
+		return fmt.Errorf("%s refuses an http:// API URL to a host that is not loopback: a man in the middle can read %s; use https, or add --allow-insecure-stream to accept that risk", risk.op, risk.data)
+	}
 }
 
 // portForwardFatal reports whether err stops the command: every later
@@ -341,17 +366,12 @@ func runPortForward(ctx context.Context, cmd *cobra.Command, args []string) erro
 	if err != nil {
 		return err
 	}
-	insecure, plaintext := streamInsecure(), plaintextRemoteURL(c.BaseURL)
-	if insecure || plaintext {
-		allow, _ := cmd.Flags().GetBool("allow-insecure-stream")
-		switch {
-		case allow:
-			fmt.Fprintln(stderr, "Warning: --allow-insecure-stream: the tunnel data is not protected against a man in the middle")
-		case insecure:
-			return errors.New("port-forward refuses --insecure: without TLS verification a man in the middle can read the tunnel data; add --allow-insecure-stream to accept that risk")
-		default:
-			return errors.New("port-forward refuses an http:// API URL to a host that is not loopback: a man in the middle can read the tunnel data; use https, or add --allow-insecure-stream to accept that risk")
-		}
+	if err := checkStreamTransport(cmd, c, stderr, streamRisk{
+		op:      "port-forward",
+		data:    "the tunnel data",
+		warning: "the tunnel data is not protected against a man in the middle",
+	}); err != nil {
+		return err
 	}
 	c.WarnWriter = stderr
 	id, err := resolveStackID(c, args[0])
