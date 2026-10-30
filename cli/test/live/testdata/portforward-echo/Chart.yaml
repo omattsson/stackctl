@@ -1,0 +1,5 @@
+apiVersion: v2
+name: portforward-echo
+description: TCP echo server for the port-forward live test
+version: 0.1.0
+appVersion: "1.0"
