@@ -6,7 +6,7 @@ COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE       ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS     = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-STATICCHECK_VERSION ?= 2026.1
+STATICCHECK_VERSION ?= 2026.2.2
 
 # Detect Windows for .exe extension
 ifdef GOOS
