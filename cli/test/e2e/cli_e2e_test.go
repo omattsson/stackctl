@@ -3089,7 +3089,7 @@ func TestE2E_StackExecExitCodes(t *testing.T) {
 		server, _ := startE2EExecMockServer(t, func(w http.ResponseWriter) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Container does not allow exec", "code": "container_not_allowed"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "The container is not allowed for exec", "code": "container_not_allowed"})
 		})
 		dir := t.TempDir()
 		setupE2EStackContext(t, dir, server.URL)
@@ -3099,8 +3099,7 @@ func TestE2E_StackExecExitCodes(t *testing.T) {
 		require.ErrorAs(t, err, &exitErr)
 		assert.Equal(t, 255, exitErr.ExitCode())
 		assert.Empty(t, stdout)
-		assert.Contains(t, stderr, "exec refused by the server (HTTP 403): Container does not allow exec")
-		assert.Contains(t, stderr, `Container "php" does not allow exec`)
+		assert.Contains(t, stderr, `exec refused by the server (HTTP 403): The container is not allowed for exec: "php". Use -c with a container that allows exec, or ask an administrator which containers do.`)
 	})
 
 	t.Run("usage error exits 1", func(t *testing.T) {

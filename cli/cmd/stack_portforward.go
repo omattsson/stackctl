@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/spf13/cobra"
 )
@@ -33,10 +34,19 @@ const (
 	// portForwardMaxConns is the default limit of open tunnels. Each tunnel
 	// uses a tunnel slot, the API rate limit and an audit row on the server.
 	portForwardMaxConns = 16
-	// portForwardMax429 is the number of 429 handshakes in a row, with no
-	// successful upgrade between them, that stops the command.
+	// portForwardMax429 is the number of connections in a row that the
+	// server refused with 429 (after the retries of portForward429Delays),
+	// each while no other connection of the command was open, that stops
+	// the command.
 	portForwardMax429 = 3
 )
+
+// portForward429Delays are the waits before the dial retries of one local
+// connection that the server refused with 429 tunnel_limit (its tunnel
+// limit per user; the API rate limiter's 429 is not retried). A tunnel of
+// this command that ends or drains (up to client.DrainTimeout after its
+// local client closed) frees a server slot within them. Tests shorten them.
+var portForward429Delays = []time.Duration{500 * time.Millisecond, time.Second, 2 * time.Second}
 
 // portForwardSignals end the command like Ctrl-C.
 var portForwardSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
@@ -80,10 +90,11 @@ and a close 1008 during a tunnel: a revoked session ('stackctl login'), or
 a stack that was stopped, deleted or cleaned, or access that changed. API keys
 are not allowed by default: run 'stackctl login' and use a login session.
 Errors that close only one connection: the rate limit or the tunnel limit
-(429), no ready pod (503), a failed pod dial (502), the server time limit
-(4001), the idle timeout (4002), a pod stream error (4502) and network
-errors. 3 refusals with 429 in a row, with no successful tunnel between
-them, stop the command.
+(429; the tunnel limit gets 3 dial retries within 3.5 s first), no ready
+pod (503), a failed pod dial (502), the server time limit (4001), the idle
+timeout (4002), a pod stream error (4502) and network errors. The open
+tunnels stay open. 3 connections in a row refused with 429 while no other
+connection of the command is open stop the command.
 
 Security:
   - Anyone who can reach the local port uses your access to the stack.
@@ -337,6 +348,12 @@ func portForwardFatal(err error) bool {
 		(apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden)
 }
 
+// isTunnelLimit reports a handshake refused with 429 tunnel_limit.
+func isTunnelLimit(err error) bool {
+	var hs *client.WSHandshakeError
+	return errors.As(err, &hs) && hs.StatusCode == http.StatusTooManyRequests && hs.Code == client.StreamCodeTunnelLimit
+}
+
 // isRateLimited reports a handshake refused with 429.
 func isRateLimited(err error) bool {
 	var hs *client.WSHandshakeError
@@ -423,9 +440,11 @@ type portForwarder struct {
 	// slots limits the open tunnels of all listeners.
 	slots chan struct{}
 	conns atomic.Int64
-	// rateLimited counts the 429 handshakes since the last successful
-	// upgrade of any tunnel.
+	// rateLimited counts the connections in a row refused with 429 while
+	// no other connection was active.
 	rateLimited atomic.Int32
+	// active counts the connections that dial or tunnel.
+	active atomic.Int32
 }
 
 // serve accepts connections until ctx ends or an error stops the command.
@@ -504,11 +523,45 @@ func (pf *portForwarder) stop(err error) {
 	}
 }
 
+// dial opens the tunnel of one connection. A 429 refusal gets the retries
+// of portForward429Delays; the local client waits meanwhile.
+func (pf *portForwarder) dial(ctx context.Context) (*websocket.Conn, error) {
+	ws, err := pf.client.DialPortForward(ctx, pf.id, pf.service, pf.port)
+	for _, d := range portForward429Delays {
+		if err == nil || !isTunnelLimit(err) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(d):
+		}
+		ws, err = pf.client.DialPortForward(ctx, pf.id, pf.service, pf.port)
+	}
+	return ws, err
+}
+
 // handle opens one tunnel for one local connection.
 func (pf *portForwarder) handle(ctx context.Context, local net.Conn) {
 	n := pf.conns.Add(1)
-	ws, err := pf.client.DialPortForward(ctx, pf.id, pf.service, pf.port)
+	pf.active.Add(1)
+	ws, err := pf.dial(ctx)
 	if err != nil {
+		// Before the local close: a client that connects again after the
+		// close must not count this connection as active.
+		others := pf.active.Add(-1)
+		limited := isRateLimited(err)
+		stopNow := false
+		if limited {
+			// A refusal while other connections of this command dial or
+			// tunnel closes only this one: those hold (or wait for) the
+			// server slots and keep working.
+			if others > 0 {
+				pf.rateLimited.Store(0)
+			} else {
+				stopNow = pf.rateLimited.Add(1) >= portForwardMax429
+			}
+		}
 		_ = local.Close()
 		if ctx.Err() != nil {
 			return
@@ -517,13 +570,14 @@ func (pf *portForwarder) handle(ctx context.Context, local net.Conn) {
 			pf.stop(err)
 			return
 		}
-		if isRateLimited(err) && pf.rateLimited.Add(1) >= portForwardMax429 {
-			pf.stop(fmt.Errorf("port-forward stopped: the server rate limit or tunnel limit was hit %d times in a row; wait and try again (last error: %w)", portForwardMax429, err))
+		if stopNow {
+			pf.stop(fmt.Errorf("port-forward stopped: the server refused %d connections in a row with 429 (rate limit or tunnel limit) while no other connection was open; wait and try again (last error: %w)", portForwardMax429, err))
 			return
 		}
 		fmt.Fprintf(pf.stderr, "Connection %d from %s failed: %v\n", n, local.RemoteAddr(), err)
 		return
 	}
+	defer pf.active.Add(-1)
 	pf.rateLimited.Store(0)
 	fmt.Fprintf(pf.stderr, "Connection %d from %s opened\n", n, local.RemoteAddr())
 	stats, err := pf.client.Tunnel(ctx, ws, local, portForwardTunnelOptions)

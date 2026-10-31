@@ -481,7 +481,10 @@ type WSHandshakeError struct {
 	// Container is the container that an exec asked for; empty when the
 	// server chooses it. Only used in the message.
 	Container string
-	err       error
+	// noServerText is true when the body had no error text and Message is
+	// the HTTP status text: a hint then says what the code means.
+	noServerText bool
+	err          error
 }
 
 // Error codes of the stream routes (port-forward, exec) of
@@ -573,37 +576,59 @@ func (e *WSHandshakeError) streamError() string {
 	return msg
 }
 
-// execHint is the advice for a refused exec upgrade, or "".
+// execMeaning is what an exec refusal code means, for a body without an
+// error text (the server message usually says it).
+var execMeaning = map[string]string{
+	StreamCodeServiceAccountToken: "The container holds a service-account token",
+	StreamCodeTokenCheckForbidden: "The server may not read the service account or secrets of the pod",
+	StreamCodeClusterExecDisabled: "The cluster of the stack does not allow exec",
+	StreamCodeContainerNotFound:   "No ready pod of the chart runs the container",
+	StreamCodeNoReadyPod:          "The chart has no running and ready pod",
+	StreamCodeExecLimit:           "Too many of your exec sessions are open",
+}
+
+// execHint is the advice for a refused exec upgrade, or "". The server
+// message comes first, so a hint does not repeat it; without a server text
+// the hint first says what the code means.
 func (e *WSHandshakeError) execHint() string {
+	hint := e.execAdvice()
+	if meaning, ok := execMeaning[e.Code]; ok && e.noServerText && hint != "" {
+		return ". " + meaning + hint
+	}
+	return hint
+}
+
+// execAdvice is the advice part of execHint.
+func (e *WSHandshakeError) execAdvice() string {
 	container := sanitizeServerMessage(e.Container)
 	switch e.Code {
 	case StreamCodeContainerNotAllowed:
 		if container != "" {
-			return fmt.Sprintf(". Container %q does not allow exec; choose another container, or ask an administrator.", container)
+			return fmt.Sprintf(": %q. Use -c with a container that allows exec, or ask an administrator which containers do.", container)
 		}
 		return ". No container of the chart allows exec; ask an administrator."
 	case StreamCodeServiceAccountToken:
-		return ". The container holds a service-account token, so the server refuses exec into it; ask an administrator."
+		return ". The server refuses exec into such a container; ask an administrator."
 	case StreamCodeTokenCheckForbidden:
-		return ". The server may not check the pod for a service-account token; ask an administrator."
+		return ". Without that right the server cannot check the container for a service-account token and refuses exec; ask an administrator."
 	case StreamCodeClusterExecDisabled:
-		return ". The cluster of the stack does not allow exec; ask an administrator."
+		return ". Ask an administrator."
 	case StreamCodeInvalidChart:
 		// The server checks the name (DNS-1123); stackctl does not repeat it.
-		return ". Check the chart name (the Helm release name): the CHART column of 'stackctl stack pods'."
+		return ". The CHART column of 'stackctl stack pods' shows the chart names."
 	case StreamCodeInvalidContainer:
 		return ". Check the container name."
 	case StreamCodeChartNotFound:
 		return ". Check the chart name: the CHART column of 'stackctl stack pods'."
 	case StreamCodeContainerNotFound:
 		if container != "" {
-			return fmt.Sprintf(". No ready pod of the chart runs container %q; check the container name.", container)
+			return fmt.Sprintf(": %q. Check the container name and 'stackctl stack pods'.", container)
 		}
-		return ". No ready pod of the chart runs an allowed container."
+		return ". Check 'stackctl stack pods'."
 	case StreamCodeNoReadyPod:
-		return ". The chart has no running and ready pod; check 'stackctl stack pods', then try again."
+		return ". Check 'stackctl stack pods', then try again."
 	case StreamCodeExecLimit:
-		return ". Too many of your exec sessions are open; wait until one ends, then try again."
+		return ". Wait until one of your exec sessions ends, then try again."
 	}
 	return ""
 }
@@ -682,6 +707,7 @@ func handshakeError(resp *http.Response, err error, apiKey bool) *WSHandshakeErr
 		}
 	}
 	if hsErr.Message == "" {
+		hsErr.noServerText = true
 		hsErr.Message = http.StatusText(resp.StatusCode)
 	}
 	if hsErr.Message == "" {

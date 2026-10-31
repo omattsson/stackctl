@@ -1052,30 +1052,45 @@ func (c *Client) InstantiateTemplate(id string, req *types.InstantiateTemplateRe
 // The server answers {"instance": {...}, "definition": {...}, "log_id": "..."};
 // a body without "instance" is read as the instance itself.
 func (c *Client) QuickDeployTemplate(id string, req *types.QuickDeployRequest) (*types.StackInstance, error) {
+	instance, _, err := c.QuickDeployTemplateLog(id, req)
+	return instance, err
+}
+
+// QuickDeployTemplateLog is QuickDeployTemplate that also returns the
+// log_id of the response: "" when the server created the stack but did not
+// start its deploy, nil when the response has no log_id (an older server
+// that sends only the instance).
+func (c *Client) QuickDeployTemplateLog(id string, req *types.QuickDeployRequest) (*types.StackInstance, *string, error) {
 	var raw json.RawMessage
 	err := c.Post(fmt.Sprintf("/api/v1/templates/%s/quick-deploy", id), req, &raw)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, fmt.Errorf("decoding quick-deploy response: %w", err)
+		return nil, nil, fmt.Errorf("decoding quick-deploy response: %w", err)
 	}
 	if inst, ok := fields["instance"]; ok {
 		var instance *types.StackInstance
 		if err := json.Unmarshal(inst, &instance); err != nil {
-			return nil, fmt.Errorf("decoding quick-deploy response: %w", err)
+			return nil, nil, fmt.Errorf("decoding quick-deploy response: %w", err)
 		}
 		if instance == nil {
-			return nil, fmt.Errorf("decoding quick-deploy response: the instance is null")
+			return nil, nil, fmt.Errorf("decoding quick-deploy response: the instance is null")
 		}
-		return instance, nil
+		var logID *string
+		if rawLog, ok := fields["log_id"]; ok {
+			if err := json.Unmarshal(rawLog, &logID); err != nil {
+				return nil, nil, fmt.Errorf("decoding quick-deploy response: %w", err)
+			}
+		}
+		return instance, logID, nil
 	}
 	var instance types.StackInstance
 	if err := json.Unmarshal(raw, &instance); err != nil {
-		return nil, fmt.Errorf("decoding quick-deploy response: %w", err)
+		return nil, nil, fmt.Errorf("decoding quick-deploy response: %w", err)
 	}
-	return &instance, nil
+	return &instance, nil, nil
 }
 
 // GetUIConfig returns the public UI config of the server (GET

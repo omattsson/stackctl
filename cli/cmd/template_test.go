@@ -504,6 +504,87 @@ func TestTemplateQuickDeployCmd_JSONOutput(t *testing.T) {
 	assert.Equal(t, "deploying", result.Status)
 }
 
+func TestTemplateQuickDeployCmd_DeployNotStarted(t *testing.T) {
+	instance := types.StackInstance{
+		Base: types.Base{ID: "61"}, Name: "quick-stack", Status: "error",
+		ErrorMessage: "Deployment failed: namespace \"stack-quick-stack-admin\" is still terminating; wait for it to be fully removed, then retry",
+	}
+	tests := []struct {
+		name   string
+		format output.Format
+		quiet  bool
+		check  func(t *testing.T, stdout string)
+	}{
+		{name: "table", format: output.FormatTable, check: func(t *testing.T, stdout string) {
+			assert.Contains(t, stdout, "quick-stack")
+			assert.Contains(t, stdout, "error")
+		}},
+		{name: "json", format: output.FormatJSON, check: func(t *testing.T, stdout string) {
+			var got types.StackInstance
+			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+			assert.Equal(t, "error", got.Status)
+		}},
+		{name: "yaml", format: output.FormatYAML, check: func(t *testing.T, stdout string) {
+			assert.Contains(t, stdout, "status: error")
+		}},
+		{name: "quiet", format: output.FormatTable, quiet: true, check: func(t *testing.T, stdout string) {
+			assert.Equal(t, "61\n", stdout)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				json.NewEncoder(w).Encode(map[string]any{"instance": instance, "log_id": ""})
+			}))
+			defer server.Close()
+
+			buf := setupStackTestCmd(t, server.URL)
+			printer.Format = tt.format
+			printer.Quiet = tt.quiet
+			templateQuickDeployCmd.Flags().Set("name", "quick-stack")
+			t.Cleanup(func() { templateQuickDeployCmd.Flags().Set("name", "") })
+
+			err := templateQuickDeployCmd.RunE(templateQuickDeployCmd, []string{"10"})
+			require.Error(t, err)
+			assert.Equal(t, `the stack quick-stack (61) was created, but its deploy did not start: Deployment failed: namespace "stack-quick-stack-admin" is still terminating; wait for it to be fully removed, then retry; fix the cause, then run 'stackctl stack deploy 61'`, err.Error())
+			tt.check(t, buf.String())
+		})
+	}
+}
+
+func TestQuickDeployStartError(t *testing.T) {
+	t.Parallel()
+	empty, started := "", "log-1"
+	tests := []struct {
+		name  string
+		inst  types.StackInstance
+		logID *string
+		want  string
+	}{
+		{name: "deploying", inst: types.StackInstance{Status: "deploying"}, logID: &started},
+		{name: "not started, older server without log_id", inst: types.StackInstance{Base: types.Base{ID: "7"}, Name: "a\x1b[31mb", Status: "error"},
+			want: "the stack a [31mb (7) was created, but its deploy did not start: the server gave no reason; fix the cause, then run 'stackctl stack deploy 7'"},
+		{name: "not started, empty log_id", inst: types.StackInstance{Base: types.Base{ID: "7\u202e"}, Name: "a", Status: "error", ErrorMessage: "Deployment failed"}, logID: &empty,
+			want: "the stack a (7) was created, but its deploy did not start: Deployment failed; fix the cause, then run 'stackctl stack deploy 7'"},
+		{name: "started and failed at once", inst: types.StackInstance{Base: types.Base{ID: "7"}, Name: "a", Status: "error", ErrorMessage: "pre-deploy hook denied"}, logID: &started,
+			want: "the deploy of stack a (7) failed: pre-deploy hook denied; see 'stackctl stack logs 7'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := quickDeployStartError(&tt.inst, tt.logID)
+			if tt.want == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, tt.want, err.Error())
+		})
+	}
+}
+
 // ---------- template list auth error ----------
 
 func TestTemplateListCmd_Unauthorized(t *testing.T) {

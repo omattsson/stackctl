@@ -71,7 +71,8 @@ stackctl stack history my-app
 stackctl stack port-forward my-app mysql 0:3306 -q   # stdout: 127.0.0.1:<port>; exit 1 on 403/404/409
 # SIGTERM or Ctrl-C ends it with exit 0. At most 16 open connections; more are closed at once.
 # After a local EOF the tunnel passes server data until the server closes or 2 s pass without data.
-# 3 refusals with 429 in a row end it with exit 1: wait and try again.
+# A 429 closes only that connection (the server tunnel limit is retried 3 times first).
+# 3 refused connections in a row while no other connection is open end it with exit 1: wait and try again.
 # Needs k8s-stack-manager v0.15.0 or later (an older server: "upgrade the server to k8s-stack-manager v0.15.0 or later").
 # An http:// API URL to a host that is not loopback is refused (add --allow-insecure-stream to accept the risk).
 
@@ -109,7 +110,7 @@ Paged lists (`stack list`, `definition list`, `template list`) return one page a
 
 ## Long-running operations
 
-`stack deploy`, `stop`, `clean`, `rollback`, `template quick-deploy` and the `bulk` commands return when the server has accepted the operation; the work continues on the server (a `bulk` result `success` means that the operation started). To wait for the result:
+`stack deploy`, `stop`, `clean`, `rollback`, `template quick-deploy` and the `bulk` commands return when the server has accepted the operation; the work continues on the server (a `bulk` result `success` means that the operation started). When `template quick-deploy` creates the stack but its deploy cannot start (for example the namespace of an earlier stack with the same name is still terminating), it prints the stack (status `error`) and exits 1 with the reason: fix the cause, then run `stackctl stack deploy <id>`; do not run the quick deploy again (the stack exists). To wait for the result:
 
 - add `--follow` (`-f`, only `stack deploy`, `stop`, `clean` and `rollback`): stackctl streams the log and exits when the stack reaches a final status. With `-o json` the log goes to stderr and stdout gets the stack after the operation (also after a failed one);
 - or run `stackctl stack watch --id <id>[,<id>...]`, which exits when every listed stack reaches a final status;
