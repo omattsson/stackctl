@@ -813,11 +813,15 @@ type ConflictResponse struct {
 }
 
 // UIConfig is the response of the public GET /api/v1/ui-config. Servers
-// before k8s-stack-manager v0.12.0 do not send MaxInstanceTTLDays (0).
+// before k8s-stack-manager v0.12.0 do not send MaxInstanceTTLDays (0);
+// servers before v0.15.0 do not send StreamAPIKeysAllowed (nil).
 type UIConfig struct {
 	Title                     string `json:"title" yaml:"title"`
 	DefaultInstanceTTLMinutes int    `json:"default_instance_ttl_minutes" yaml:"default_instance_ttl_minutes"`
 	MaxInstanceTTLDays        int    `json:"max_instance_ttl_days" yaml:"max_instance_ttl_days"`
+	// StreamAPIKeysAllowed is whether the stream routes (port-forward, exec)
+	// accept an API key (STACK_STREAM_ALLOW_API_KEYS); nil: an older server.
+	StreamAPIKeysAllowed *bool `json:"stream_api_keys_allowed,omitempty" yaml:"stream_api_keys_allowed,omitempty"`
 }
 
 // LoginRequest is the request body for POST /api/v1/auth/login.
@@ -1299,6 +1303,12 @@ type InstanceStatus struct {
 	Charts      []ChartStatus `json:"charts" yaml:"charts"`
 	Ingresses   []IngressInfo `json:"ingresses,omitempty" yaml:"ingresses,omitempty"`
 	Events      []PodEvent    `json:"events,omitempty" yaml:"events,omitempty"`
+	// ExecHints is true when the server checked exec for the caller (only
+	// with ?exec_hints=true, k8s-stack-manager v0.15.0 or later). Then a
+	// chart without ExecContainers has no container that the server lists
+	// for exec: none accepts exec, or the server could not check them (for
+	// example a failed read or a check over 3 s).
+	ExecHints bool `json:"exec_hints,omitempty" yaml:"exec_hints,omitempty"`
 }
 
 // ChartStatus is the status of one Helm release (k8s.ChartStatus).
@@ -1309,6 +1319,15 @@ type ChartStatus struct {
 	Deployments []DeploymentInfo `json:"deployments" yaml:"deployments"`
 	Pods        []PodStatus      `json:"pods" yaml:"pods"`
 	Services    []ServiceInfo    `json:"services" yaml:"services"`
+	// ExecContainers are the containers that "stack exec -c <name>" is
+	// accepted for, in the order of the server. Only with exec hints; the
+	// list can leave out a container that works, never lists a refused one.
+	// Kept as received: the table and the exec advice show only valid
+	// container names (client.ExecContainerNames).
+	ExecContainers []string `json:"exec_containers,omitempty" yaml:"exec_containers,omitempty"`
+	// ExecDefaultContainer is the container that "stack exec" uses without
+	// -c. Set only when that call would be accepted.
+	ExecDefaultContainer string `json:"exec_default_container,omitempty" yaml:"exec_default_container,omitempty"`
 }
 
 // PodStatus is the status of one Kubernetes pod (k8s.PodInfo).

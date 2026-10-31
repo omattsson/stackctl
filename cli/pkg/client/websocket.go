@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -481,6 +482,11 @@ type WSHandshakeError struct {
 	// Container is the container that an exec asked for; empty when the
 	// server chooses it. Only used in the message.
 	Container string
+	// ExecHints are the containers of the chart that accept exec, added by
+	// the caller after a refusal (ExecHintsForChart); nil: unknown. The
+	// advice of container_not_allowed, container_not_found and
+	// service_account_token then names them.
+	ExecHints *ExecChartHints
 	// noServerText is true when the body had no error text and Message is
 	// the HTTP status text: a hint then says what the code means.
 	noServerText bool
@@ -524,6 +530,10 @@ const (
 	StreamCodeExecLimit           = "exec_limit"
 )
 
+// StreamAPIKeyAdvice is the advice for a stream command (port-forward,
+// exec) that the server does not allow with an API key.
+const StreamAPIKeyAdvice = "run 'stackctl login' and remove the API key (--api-key, STACKCTL_API_KEY or the api-key of the context)"
+
 // Error returns a message for the user, for example "WebSocket refused by
 // the server (HTTP 401): Invalid or expired token. Run 'stackctl login'."
 func (e *WSHandshakeError) Error() string {
@@ -562,7 +572,7 @@ func (e *WSHandshakeError) streamError() string {
 	case StreamCodeFeatureDisabled:
 		return msg + ". The server has " + e.Op + " turned off; ask an administrator."
 	case StreamCodeAPIKeyNotAllowed:
-		return msg + ". API keys are not allowed for this command: run 'stackctl login' and remove the API key (--api-key, STACKCTL_API_KEY or the api-key of the context)."
+		return msg + ". API keys are not allowed for this command: " + StreamAPIKeyAdvice + "."
 	case StreamCodeServiceNotFound, StreamCodePortNotFound:
 		return msg + ". Check the service name and the service port (not the container port)."
 	case StreamCodeInstanceNotDeployed:
@@ -601,6 +611,9 @@ func (e *WSHandshakeError) execHint() string {
 // execAdvice is the advice part of execHint.
 func (e *WSHandshakeError) execAdvice() string {
 	container := sanitizeServerMessage(e.Container)
+	if advice := e.execHintAdvice(container); advice != "" {
+		return advice
+	}
 	switch e.Code {
 	case StreamCodeContainerNotAllowed:
 		if container != "" {
@@ -631,6 +644,161 @@ func (e *WSHandshakeError) execAdvice() string {
 		return ". Wait until one of your exec sessions ends, then try again."
 	}
 	return ""
+}
+
+// execHintMax is the number of containers that the advice of a refused
+// exec names at most.
+const execHintMax = 8
+
+// execHintAdvice is the advice from the exec hints of the chart for
+// container_not_allowed, container_not_found and service_account_token, or ""
+// (the hints are unknown, or name no container but the one asked for).
+// container is the sanitized container that the exec asked for. Only valid
+// container names (ValidContainerName) are named, so the advice is safe to
+// copy into a shell.
+func (e *WSHandshakeError) execHintAdvice(container string) string {
+	if e.ExecHints == nil {
+		return ""
+	}
+	// As the advice without hints: the codes about the container name it.
+	prefix := "."
+	switch e.Code {
+	case StreamCodeContainerNotAllowed, StreamCodeContainerNotFound:
+		if container != "" {
+			prefix = fmt.Sprintf(": %q.", container)
+		}
+	case StreamCodeServiceAccountToken:
+	default:
+		return ""
+	}
+	valid := ExecContainerNames(e.ExecHints.Containers)
+	if len(valid) == 0 {
+		// The server checks within a budget of reads, so it can leave out a
+		// container that works: say what it lists, not what is possible.
+		return prefix + " The server lists no container of chart " + sanitizeServerMessage(e.ExecHints.Chart) + " that accepts exec; ask an administrator."
+	}
+	names := make([]string, 0, len(valid))
+	for _, name := range valid {
+		if name != e.Container {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return prefix + " Use " + execContainerChoice(names) + "."
+}
+
+// execContainerChoice joins container names to "-c a, -c b or -c c", with at
+// most execHintMax names.
+func execContainerChoice(names []string) string {
+	shown := names
+	if len(names) > execHintMax {
+		shown = names[:execHintMax]
+	}
+	flags := make([]string, len(shown))
+	for i, name := range shown {
+		flags[i] = "-c " + name
+	}
+	if more := len(names) - len(shown); more > 0 {
+		return strings.Join(flags, ", ") + fmt.Sprintf(" or one of %d more (see 'stackctl stack pods')", more)
+	}
+	if len(flags) == 1 {
+		return flags[0]
+	}
+	return strings.Join(flags[:len(flags)-1], ", ") + " or " + flags[len(flags)-1]
+}
+
+// containerNameMax is the longest Kubernetes container name (a DNS-1123
+// label).
+const containerNameMax = 63
+
+// ValidContainerName reports whether name is a Kubernetes container name: a
+// DNS-1123 label (lower-case letters, digits and '-', starting and ending
+// with a letter or a digit, at most 63 characters). The exec hints show only
+// such names (the EXEC column of 'stack pods', the advice of a refused
+// exec): they need no quoting after -c in a shell and cannot look like a
+// flag, a list separator or the default marker.
+func ValidContainerName(name string) bool {
+	if name == "" || len(name) > containerNameMax {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		b := name[i]
+		switch {
+		case b >= 'a' && b <= 'z', b >= '0' && b <= '9':
+		case b == '-' && i > 0 && i < len(name)-1:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// ExecContainerNames returns the valid container names (ValidContainerName)
+// of an exec_containers list of the server, in its order and without
+// duplicates; every other name is dropped. The result is empty, not nil,
+// when no valid name remains.
+func ExecContainerNames(list []string) []string {
+	names := make([]string, 0, len(list))
+	for _, name := range list {
+		if ValidContainerName(name) && !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// ExecChartHints are the exec hints of the chart of a refused exec (see
+// ExecHintsForChart).
+type ExecChartHints struct {
+	// Chart is the chart that the exec asked for.
+	Chart string
+	// Containers are the containers of the chart that the server lists as
+	// accepting exec (only valid names, ExecContainerNames), in the order
+	// of the server. Empty: the server checked the stack, and lists no
+	// container of the chart.
+	Containers []string
+}
+
+// ExecHintsForChart returns the exec hints of chart from a pod status read
+// with exec hints (GetStackPods), or nil when they are unknown: no
+// exec_hints, the chart is not in the status, or no chart has a list (no
+// container accepts exec, or the server could not compute the hints; the
+// response does not tell which). Names that are not valid container names
+// (ValidContainerName) are dropped first: a chart with only such names
+// counts as a chart without a list. The chart is found by release name (the
+// name that the exec route takes), else by chart name.
+func ExecHintsForChart(status *types.InstanceStatus, chart string) *ExecChartHints {
+	if status == nil || !status.ExecHints {
+		return nil
+	}
+	var found *types.ChartStatus
+	computed := false
+	for i := range status.Charts {
+		ch := &status.Charts[i]
+		if len(ExecContainerNames(ch.ExecContainers)) > 0 {
+			computed = true
+		}
+		if found == nil && ch.ReleaseName == chart {
+			found = ch
+		}
+	}
+	if found == nil {
+		// Defensive: the server sets chart_name to the release name, so the
+		// release lookup above finds the chart. This only matters for a
+		// response without release_name or with another chart_name.
+		for i := range status.Charts {
+			if status.Charts[i].ChartName == chart {
+				found = &status.Charts[i]
+				break
+			}
+		}
+	}
+	if found == nil || !computed {
+		return nil
+	}
+	return &ExecChartHints{Chart: chart, Containers: ExecContainerNames(found.ExecContainers)}
 }
 
 // Unwrap returns the dialer error (websocket.ErrBadHandshake).

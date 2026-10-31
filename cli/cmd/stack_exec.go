@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/omattsson/stackctl/cli/pkg/client"
+	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,13 @@ stack and chooses the pod (the first running and ready pod of the chart).
 CHART is the chart (Helm release) name, as in the CHART column of
 'stackctl stack pods'. -c selects the container; without it the server
 uses the first container that allows exec. The server decides which
-containers allow exec.
+containers allow exec; the EXEC column of 'stackctl stack pods' shows
+them when the server sends exec hints. When the server refuses the
+container (container_not_allowed, container_not_found,
+service_account_token), stackctl reads these hints once and the error
+names the containers that accept exec (for example: Use -c web or -c
+worker), or says that the server lists no container of the chart that
+accepts exec.
 
 The '--' is required. Everything after it is the command and its
 arguments, passed as a list without a shell: stackctl does not read flags
@@ -67,7 +74,11 @@ Security:
     can read the commands and their output. An http:// API URL is refused
     for the same reason, except for localhost, 127.0.0.1 and [::1]. Add
     --allow-insecure-stream to accept that risk.
-  - API keys are not allowed by default: run 'stackctl login'.
+  - API keys are not allowed by default: run 'stackctl login'. With an
+    API key, stackctl first reads the public /api/v1/ui-config (without
+    credentials) and stops at once (exit 255) when the server does not
+    allow API keys for exec (k8s-stack-manager v0.15.0 or later); when
+    that read fails, the server decides.
 
 Examples:
   # Clear a cache
@@ -197,6 +208,7 @@ func runStackExec(parent context.Context, cmd *cobra.Command, args []string, sig
 func interruptedExit(res *client.ExecResult, err error) *ExitError {
 	var canceled *client.ExecCanceledError
 	var closed *client.ExecClosedError
+	var refused *client.WSHandshakeError
 	switch {
 	case res != nil:
 		return &ExitError{Code: exitInterrupted, Err: fmt.Errorf("interrupted; the command ended with exit code %d", res.ExitCode)}
@@ -206,6 +218,11 @@ func interruptedExit(res *client.ExecResult, err error) *ExitError {
 		// A close frame of the server without started before it (it can
 		// come before the cancel): the command did not run. Keep the text
 		// of the server.
+		return &ExitError{Code: exitInterrupted, Err: fmt.Errorf("interrupted before the command started: %w", err)}
+	case errors.As(err, &refused):
+		// The server refused the upgrade (an interrupt during the exec
+		// hints call after the refusal): the command did not run. Keep the
+		// text of the server.
 		return &ExitError{Code: exitInterrupted, Err: fmt.Errorf("interrupted before the command started: %w", err)}
 	}
 	return &ExitError{Code: exitInterrupted, Err: errors.New("interrupted; the command can still run on the server")}
@@ -259,6 +276,13 @@ func execOnce(ctx context.Context, cmd *cobra.Command, stack, chart, container s
 		// The same writer as the remote stderr, so the lines do not mix.
 		c.DebugWriter = stderr
 	}
+	if err := checkStreamAPIKey(ctx, c, "exec"); err != nil {
+		return nil, beforeDial(err)
+	}
+	if ctx.Err() != nil {
+		// Ctrl-C during the API-key check: no stack lookup, no dial.
+		return nil, errExecNotStarted
+	}
 	id, err := resolveStackID(c, stack)
 	if err != nil {
 		return nil, beforeDial(err)
@@ -266,10 +290,40 @@ func execOnce(ctx context.Context, cmd *cobra.Command, stack, chart, container s
 	if ctx.Err() != nil {
 		return nil, errExecNotStarted
 	}
-	return c.Exec(ctx, id, client.ExecRequest{
+	res, err := c.Exec(ctx, id, client.ExecRequest{
 		Chart: chart, Container: container, Command: command,
 		Keepalive: execKeepalive, CancelWait: execCancelWait,
 	}, cmd.OutOrStdout(), stderr)
+	if err != nil {
+		addExecHints(ctx, c, id, chart, err)
+	}
+	return res, err
+}
+
+// addExecHints adds the exec hints of the chart to a refusal that they
+// answer (container_not_allowed, container_not_found,
+// service_account_token): one best-effort GET /pods?exec_hints=true. Without
+// hints, or after an interrupt, the error stays as it is.
+func addExecHints(ctx context.Context, c *client.Client, id, chart string, err error) {
+	var hs *client.WSHandshakeError
+	if !errors.As(err, &hs) || ctx.Err() != nil {
+		return
+	}
+	switch hs.Code {
+	case client.StreamCodeContainerNotAllowed, client.StreamCodeContainerNotFound, client.StreamCodeServiceAccountToken:
+	default:
+		return
+	}
+	// Build the client before the goroutine: after an interrupt
+	// bestEffortCtx returns while the call still runs, and that call must
+	// not read c then.
+	q := bestEffortClient(c)
+	status, ok := bestEffortCtx(ctx, func() (*types.InstanceStatus, error) {
+		return q.GetStackPods(id, true)
+	})
+	if ok {
+		hs.ExecHints = client.ExecHintsForChart(status, chart)
+	}
 }
 
 // remoteExit maps the exit code of the remote command to the exit code of

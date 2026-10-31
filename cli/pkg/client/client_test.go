@@ -5232,6 +5232,7 @@ func TestSanitizeServerMessage_ControlAndBidi(t *testing.T) {
 		{"bidi override", "file\u202Etxt.exe", "filetxt.exe"},
 		{"bidi isolates", "\u2066a\u2067b\u2068c\u2069", "abc"},
 		{"LRM RLM", "a\u200Eb\u200F", "ab"},
+		{"ALM (arabic letter mark)", "a\u061Cb", "ab"},
 		{"plain unicode kept", "Åre – ok", "Åre – ok"},
 	}
 	for _, tt := range tests {

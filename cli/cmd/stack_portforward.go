@@ -89,6 +89,10 @@ cluster switch turned off (404, 403), a stack that is not deployed (409),
 and a close 1008 during a tunnel: a revoked session ('stackctl login'), or
 a stack that was stopped, deleted or cleaned, or access that changed. API keys
 are not allowed by default: run 'stackctl login' and use a login session.
+With an API key, the command first reads the public /api/v1/ui-config
+(without credentials) and stops at once when the server does not allow
+API keys for port-forward (k8s-stack-manager v0.15.0 or later); when that
+read fails, the server decides at the dial.
 Errors that close only one connection: the rate limit or the tunnel limit
 (429; the tunnel limit gets 3 dial retries within 3.5 s first), no ready
 pod (503), a failed pod dial (502), the server time limit (4001), the idle
@@ -331,6 +335,23 @@ func checkStreamTransport(cmd *cobra.Command, c *client.Client, stderr io.Writer
 	}
 }
 
+// checkStreamAPIKey stops the stream command op (port-forward, exec) before
+// the dial when it uses an API key and the server does not allow API keys
+// for the stream routes (stream_api_keys_allowed false in the public GET
+// /api/v1/ui-config, sent without credentials). A missing field (an older
+// server) or a failed read lets the server decide at the dial. No call
+// without an API key.
+func checkStreamAPIKey(ctx context.Context, c *client.Client, op string) error {
+	if c.APIKey == "" {
+		return nil
+	}
+	cfg, ok := bestEffortCtx(ctx, publicBestEffortClient(c).GetUIConfig)
+	if !ok || cfg.StreamAPIKeysAllowed == nil || *cfg.StreamAPIKeysAllowed {
+		return nil
+	}
+	return fmt.Errorf("%s not started: the server does not allow API keys for %s; %s", op, op, client.StreamAPIKeyAdvice)
+}
+
 // portForwardFatal reports whether err stops the command: every later
 // connection would fail the same way.
 func portForwardFatal(err error) bool {
@@ -391,9 +412,20 @@ func runPortForward(ctx context.Context, cmd *cobra.Command, args []string) erro
 		return err
 	}
 	c.WarnWriter = stderr
+	if err := checkStreamAPIKey(ctx, c, "port-forward"); err != nil {
+		return err
+	}
+	// Ctrl-C ends port-forward with exit 0 (as serve does): stop before the
+	// stack lookup and before binding a port.
+	if ctx.Err() != nil {
+		return nil
+	}
 	id, err := resolveStackID(c, args[0])
 	if err != nil {
 		return err
+	}
+	if ctx.Err() != nil {
+		return nil
 	}
 
 	listeners, err := bindPortForward(addrs, spec)

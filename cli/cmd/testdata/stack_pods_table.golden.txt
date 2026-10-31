@@ -1,0 +1,8 @@
+CHART    POD        PHASE    READY  RESTARTS  AGE  REASON
+backend  backend-1  Running  2/2    0         1h   -
+backend  backend-2  Running  1/2    7         1h   CrashLoopBackOff
+
+Events:
+LAST SEEN  TYPE     REASON     OBJECT         COUNT  MESSAGE
+10m        Warning  BackOff    Pod/backend-2  18     Back-off [2J restarting
+20m        Warning  Evil ]0;x  Pod/ bad       1      
