@@ -59,8 +59,8 @@ func waitStackStatus(t *testing.T, c *client.Client, id string, want string, tim
 		if inst.Status == want {
 			return inst
 		}
-		if inst.Status == "error" {
-			t.Fatalf("stack entered status error: %s", inst.ErrorMessage)
+		if inst.Status != want && client.IsFailedStatus(inst.Status) {
+			t.Fatalf("stack entered status %s: %s", inst.Status, inst.ErrorMessage)
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("stack status %q after %s, want %q", inst.Status, timeout, want)

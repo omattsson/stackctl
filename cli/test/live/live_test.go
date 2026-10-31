@@ -3,6 +3,7 @@
 package live
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -74,16 +75,64 @@ func login(t *testing.T, c *client.Client) *types.LoginResponse {
 	return resp
 }
 
-// cleanupInstance registers a t.Cleanup that best-effort deletes the instance.
+// liveOpTimeout bounds the wait for one deploy, stop, clean or delete of a
+// heavy live test.
+const liveOpTimeout = 10 * time.Minute
+
+// cleanupInstance registers a t.Cleanup that best-effort deletes the
+// instance. It first waits until no operation runs (the server refuses a
+// delete during one); a delete of a deployed stack cleans it first.
 func cleanupInstance(t *testing.T, c *client.Client, id string) {
 	t.Helper()
 	t.Cleanup(func() {
-		// Best-effort: stop -> clean -> delete. Ignore errors because the
-		// instance may already be in a terminal state.
-		_, _ = c.StopStack(id)
-		_, _ = c.CleanStack(id)
-		_ = c.DeleteStack(id)
+		deadline := time.Now().Add(liveOpTimeout)
+		for time.Now().Before(deadline) {
+			inst, err := c.GetStack(id)
+			if isNotFound(err) {
+				return // already deleted
+			}
+			if err == nil && client.IsTerminalStatus(inst.Status) {
+				break
+			}
+			if err != nil {
+				t.Logf("cleanup: get stack %s: %v", id, err)
+			}
+			time.Sleep(2 * time.Second)
+		}
+		if err := c.DeleteStack(id); err != nil {
+			t.Logf("cleanup: delete stack %s: %v", id, err)
+			return
+		}
+		waitStackGone(t, c, id, liveOpTimeout)
 	})
+}
+
+// isNotFound reports a 404 of the API.
+func isNotFound(err error) bool {
+	var apiErr *client.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
+}
+
+// waitStackGone waits until GET of the instance returns 404 (deleted).
+// Other errors (a network error, a 5xx) are retried until the timeout.
+func waitStackGone(t *testing.T, c *client.Client, id string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		inst, err := c.GetStack(id)
+		if isNotFound(err) {
+			return
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Errorf("stack %s: no 404 after %s (last error: %v)", id, timeout, err)
+			} else {
+				t.Errorf("stack %s still exists after %s (status %q)", id, timeout, inst.Status)
+			}
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 // TestLiveWorkflow_FullLifecycle exercises the complete deploy-stop-clean-
@@ -91,7 +140,9 @@ func cleanupInstance(t *testing.T, c *client.Client, id string) {
 // instance. It pulls images, allocates PVs, and burns cluster quota — so
 // it's gated behind STACKCTL_LIVE_HEAVY=1 to keep it off the default
 // suite. CI smoke + per-endpoint wire-contract coverage lives in the
-// other *_live_test.go files in this package.
+// other *_live_test.go files in this package. Each operation is awaited
+// before the next one: the server refuses a clean during a stop and a
+// delete during an operation.
 func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	if os.Getenv("STACKCTL_LIVE_HEAVY") != "1" {
 		t.Skip("set STACKCTL_LIVE_HEAVY=1 to run real-workload lifecycle tests (~5–10 min, requires cluster capacity)")
@@ -115,17 +166,28 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	tmpl := templates.Data[0]
 	t.Logf("Using template %s (%s)", tmpl.ID, tmpl.Name)
 
-	// Step 3: Instantiate template
-	t.Log("Step 3: Instantiate template")
-	instance, err := c.InstantiateTemplate(tmpl.ID, &types.InstantiateTemplateRequest{
-		Name:   fmt.Sprintf("live-test-%d", time.Now().UnixMilli()),
+	// Step 3: Instantiate the template (a definition), then create a stack
+	// from the definition.
+	t.Log("Step 3: Instantiate template and create a stack")
+	name := fmt.Sprintf("live-test-%d", time.Now().UnixMilli())
+	def, err := c.InstantiateTemplate(tmpl.ID, &types.InstantiateTemplateRequest{
+		Name:   name,
 		Branch: "main",
 	})
 	require.NoError(t, err, "instantiate template")
+	require.NotEmpty(t, def.ID, "definition ID must be set")
+	deleteDefinitionIfExists(t, c, def.ID)
+	instance, err := c.CreateStack(&types.CreateStackRequest{
+		Name:              name,
+		StackDefinitionID: def.ID,
+		Branch:            "main",
+	})
+	require.NoError(t, err, "create stack")
 	require.NotEmpty(t, instance.ID, "instance ID must be set")
-	t.Logf("Created instance %s (%s)", instance.ID, instance.Name)
+	t.Logf("Created definition %s and instance %s (%s)", def.ID, instance.ID, instance.Name)
 
-	// Register cleanup so resources are removed even on failure.
+	// Register cleanup so resources are removed even on failure. It runs
+	// before the definition cleanup (t.Cleanup is last in, first out).
 	cleanupInstance(t, c, instance.ID)
 
 	// Step 4: Deploy
@@ -133,6 +195,7 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	deployLog, err := c.DeployStack(instance.ID)
 	require.NoError(t, err, "deploy stack")
 	assert.NotEmpty(t, deployLog.LogID, "deploy log ID must be set")
+	waitStackStatus(t, c, instance.ID, "running", liveOpTimeout)
 
 	// Step 5: Check status
 	t.Log("Step 5: Check status")
@@ -145,15 +208,18 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	}
 	t.Logf("Status: %s, charts: %d, pods: %d", status.Status, len(status.Charts), pods)
 
-	// Step 6–7: Set overrides and redeploy (only if template has charts).
-	// Note: templates.Data[0] from ListTemplates doesn't carry charts unless
-	// the backend includes them in the list response, so this branch usually
-	// gets skipped against the live backend (charts are populated by a
-	// per-template GET, not on the list endpoint).
-	if len(tmpl.Charts) == 0 {
-		t.Log("Step 6–7: Skipped — template list response carries no charts")
+	// Step 6–7: Set overrides and redeploy. Overrides are per chart config
+	// of the definition.
+	charts := def.Charts
+	if len(charts) == 0 {
+		full, err := c.GetDefinition(def.ID)
+		require.NoError(t, err, "get definition")
+		charts = full.Charts
+	}
+	if len(charts) == 0 {
+		t.Log("Step 6–7: Skipped — the definition has no charts")
 	} else {
-		chartID := tmpl.Charts[0].ID
+		chartID := charts[0].ID
 
 		t.Log("Step 6: Set overrides")
 		_, err = c.SetValueOverride(instance.ID, chartID, &types.SetValueOverrideRequest{
@@ -187,6 +253,7 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 		redeployLog, err := c.DeployStack(instance.ID)
 		require.NoError(t, err, "redeploy stack")
 		assert.NotEmpty(t, redeployLog.LogID, "redeploy log ID must be set")
+		waitStackStatus(t, c, instance.ID, "running", liveOpTimeout)
 	}
 
 	// Step 8: View logs
@@ -200,12 +267,14 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 	stopLog, err := c.StopStack(instance.ID)
 	require.NoError(t, err, "stop stack")
 	assert.NotEmpty(t, stopLog.LogID, "stop log ID must be set")
+	waitStackStatus(t, c, instance.ID, "stopped", liveOpTimeout)
 
 	// Step 10: Clean
 	t.Log("Step 10: Clean")
 	cleanLog, err := c.CleanStack(instance.ID)
 	require.NoError(t, err, "clean stack")
 	assert.NotEmpty(t, cleanLog.LogID, "clean log ID must be set")
+	waitStackStatus(t, c, instance.ID, "draft", liveOpTimeout)
 
 	// Step 11: Delete
 	t.Log("Step 11: Delete")
@@ -214,8 +283,7 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 
 	// Step 12: Verify deleted — GetStack should return an error.
 	t.Log("Step 12: Verify deleted")
-	_, err = c.GetStack(instance.ID)
-	assert.Error(t, err, "GetStack on deleted instance should fail")
+	waitStackGone(t, c, instance.ID, liveOpTimeout)
 }
 
 // TestLiveWorkflow_BulkOperations deploys 3 real stack instances and bulk-
@@ -223,7 +291,8 @@ func TestLiveWorkflow_FullLifecycle(t *testing.T) {
 // plus golden-db pulls. Wire-shape coverage for bulk lives in
 // TestLiveBulk_StackInstanceWireShape / TestLiveBulk_TemplateRoundTrip;
 // this test only adds the actual deploy/stop/clean assertions, so it's
-// gated behind STACKCTL_LIVE_HEAVY=1.
+// gated behind STACKCTL_LIVE_HEAVY=1. Each bulk operation is awaited on
+// every instance before the next one starts.
 func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	if os.Getenv("STACKCTL_LIVE_HEAVY") != "1" {
 		t.Skip("set STACKCTL_LIVE_HEAVY=1 to run real-workload bulk tests (creates 3 instances)")
@@ -262,6 +331,12 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	for _, id := range ids {
 		cleanupInstance(t, c, id)
 	}
+	waitAll := func(status string) {
+		t.Helper()
+		for _, id := range ids {
+			waitStackStatus(t, c, id, status, liveOpTimeout)
+		}
+	}
 
 	// Step 3: Bulk deploy
 	t.Log("Step 3: Bulk deploy")
@@ -271,6 +346,7 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	for _, r := range deployResp.Results {
 		assert.True(t, r.Success(), "deploy should succeed for id %s: %s", r.ID(), r.Error)
 	}
+	waitAll("running")
 
 	// Step 4: Bulk stop
 	t.Log("Step 4: Bulk stop")
@@ -280,6 +356,7 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	for _, r := range stopResp.Results {
 		assert.True(t, r.Success(), "stop should succeed for id %s: %s", r.ID(), r.Error)
 	}
+	waitAll("stopped")
 
 	// Step 5: Bulk clean
 	t.Log("Step 5: Bulk clean")
@@ -289,6 +366,7 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	for _, r := range cleanResp.Results {
 		assert.True(t, r.Success(), "clean should succeed for id %s: %s", r.ID(), r.Error)
 	}
+	waitAll("draft")
 
 	// Step 6: Bulk delete
 	t.Log("Step 6: Bulk delete")
@@ -302,7 +380,6 @@ func TestLiveWorkflow_BulkOperations(t *testing.T) {
 	// Step 7: Verify all deleted
 	t.Log("Step 7: Verify all deleted")
 	for _, id := range ids {
-		_, err := c.GetStack(id)
-		assert.Error(t, err, "GetStack on deleted instance %s should fail", id)
+		waitStackGone(t, c, id, liveOpTimeout)
 	}
 }

@@ -213,6 +213,13 @@ Examples:
   stackctl template quick-deploy 8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f --name my-stack --stop-at "2026-10-17 18:00"
 
 Without --ttl and --stop-at the stack gets the default TTL of the server.
+
+The command returns when the server has accepted the deploy; run
+'stackctl stack watch --id <id>' to wait for the result. When the server
+creates the stack but cannot start its deploy (for example the namespace
+of a stack with the same name is still terminating), the stack has status
+error: the command prints it and exits 1 with the reason. Fix the cause,
+then run 'stackctl stack deploy <id>'.
 ` + expiryFlagsHelp,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
@@ -246,7 +253,7 @@ Without --ttl and --stop-at the stack gets the default TTL of the server.
 			return err
 		}
 
-		instance, err := c.QuickDeployTemplate(id, req)
+		instance, logID, err := c.QuickDeployTemplateLog(id, req)
 		if err != nil {
 			return templateReleaseError(err, c, id, args[0])
 		}
@@ -254,8 +261,28 @@ Without --ttl and --stop-at the stack gets the default TTL of the server.
 		if err := printInstance(instance); err != nil {
 			return err
 		}
-		return checkStopApplied("stop-at", expiry.stopAt, instance)
+		return errors.Join(quickDeployStartError(instance, logID), checkStopApplied("stop-at", expiry.stopAt, instance))
 	},
+}
+
+// quickDeployStartError returns an error when the stack of a quick deploy
+// has status error in the response. Without a deployment log (log_id ""
+// or absent) the server created the stack but did not start its deploy;
+// with one, the deploy started and failed at once.
+func quickDeployStartError(inst *types.StackInstance, logID *string) error {
+	if inst.Status != "error" {
+		return nil
+	}
+	reason := client.SanitizeServerText(inst.ErrorMessage)
+	if reason == "" {
+		reason = "the server gave no reason"
+	}
+	name, id := client.SanitizeServerText(inst.Name), client.SanitizeServerText(inst.ID)
+	if logID != nil && *logID != "" {
+		return fmt.Errorf("the deploy of stack %s (%s) failed: %s; see 'stackctl stack logs %s'", name, id, reason, id)
+	}
+	return fmt.Errorf("the stack %s (%s) was created, but its deploy did not start: %s; fix the cause, then run 'stackctl stack deploy %s'",
+		name, id, reason, id)
 }
 
 var templateDeleteCmd = &cobra.Command{
