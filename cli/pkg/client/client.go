@@ -204,9 +204,9 @@ func sanitizeServerMessage(msg string) string {
 }
 
 // isBidiControl reports whether r is a bidirectional formatting character
-// (LRM, RLM, LRE..RLO, LRI..PDI).
+// (ALM, LRM, RLM, LRE..RLO, LRI..PDI).
 func isBidiControl(r rune) bool {
-	return r == '\u200E' || r == '\u200F' ||
+	return r == '\u061C' || r == '\u200E' || r == '\u200F' ||
 		(r >= '\u202A' && r <= '\u202E') ||
 		(r >= '\u2066' && r <= '\u2069')
 }
@@ -823,10 +823,17 @@ func (c *Client) GetDeployPreview(id string) (*types.DeployPreview, error) {
 
 // GetStackPods returns the live pod status of a stack namespace, with the
 // namespace events (GET /api/v1/stack-instances/:id/pods). Unlike
-// GetStackStatus, the server reads the cluster directly.
-func (c *Client) GetStackPods(id string) (*types.InstanceStatus, error) {
+// GetStackStatus, the server reads the cluster directly. execHints sends
+// ?exec_hints=true: a server that checks exec for the caller (v0.15.0 or
+// later) then adds the exec fields (InstanceStatus.ExecHints,
+// ChartStatus.ExecContainers); it costs extra cluster reads.
+func (c *Client) GetStackPods(id string, execHints bool) (*types.InstanceStatus, error) {
 	var status types.InstanceStatus
-	if err := c.Get(fmt.Sprintf("/api/v1/stack-instances/%s/pods", id), &status); err != nil {
+	var query map[string]string
+	if execHints {
+		query = map[string]string{"exec_hints": "true"}
+	}
+	if err := c.GetWithQuery(fmt.Sprintf("/api/v1/stack-instances/%s/pods", id), query, &status); err != nil {
 		return nil, err
 	}
 	return &status, nil

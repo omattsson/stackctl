@@ -869,12 +869,43 @@ func bestEffortClient(c *client.Client) *client.Client {
 	q.Token = c.Token
 	q.Debug = c.Debug
 	q.DebugWriter = c.DebugWriter
+	q.WarnWriter = c.WarnWriter
 	q.RetryBackoff = []time.Duration{} // non-nil and empty: no retry
 	q.HTTPClient = &http.Client{Timeout: bestEffortTimeout}
 	if c.HTTPClient != nil {
 		q.HTTPClient.Transport = c.HTTPClient.Transport
 	}
 	return q
+}
+
+// publicBestEffortClient is bestEffortClient without credentials, for an
+// optional call of a public route (for example GET /api/v1/ui-config).
+func publicBestEffortClient(c *client.Client) *client.Client {
+	q := bestEffortClient(c)
+	q.APIKey = ""
+	q.Token = ""
+	return q
+}
+
+// bestEffortCtx runs call (an optional extra call) and returns its result.
+// ok is false when the call fails or ctx ends first; the call then ends on
+// its own within its timeout.
+func bestEffortCtx[T any](ctx context.Context, call func() (T, error)) (res T, ok bool) {
+	type result struct {
+		val T
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		val, err := call()
+		done <- result{val, err}
+	}()
+	select {
+	case r := <-done:
+		return r.val, r.err == nil
+	case <-ctx.Done():
+		return res, false
+	}
 }
 
 // printStatusTable prints the per-chart pod table of a stack status.

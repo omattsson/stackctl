@@ -136,9 +136,24 @@ Unlike "stack status", the server reads the cluster directly (not its
 cache) and adds the events. The REASON column shows why a container waits
 or stopped, for example CrashLoopBackOff or ImagePullBackOff.
 
---all-events also shows the Normal events. -q prints the pod names. -o json
-and -o yaml print the full response, with the container states, the pod
-conditions and all events.
+The last column, EXEC, lists the containers of the chart that
+'stackctl stack exec' accepts with -c; "*" marks the container that it
+uses without -c (for example "web*, worker"). "-" means that no container
+is listed: none accepts exec, or the server could not check them (for
+example a failed read or a check over 3 s). The column appears only when
+the server sends exec hints: ` + client.ExecServerVersion + `,
+a user who may change the stack, exec turned on, a cluster that allows
+exec and, with an API key, a server that allows API keys for exec
+(STACK_STREAM_ALLOW_API_KEYS). The hint can leave out a container that
+works, but never lists one that the server refuses. Only Kubernetes
+container names (lower-case letters, digits and '-', at most 63
+characters) are shown; any other name from the server is left out.
+
+--all-events also shows the Normal events. -q prints the pod names (and
+does not ask for the exec hints). -o json and -o yaml print the full
+response, with the container states, the pod conditions, all events and
+the exec hints as received (exec_hints, exec_containers,
+exec_default_container).
 
 Examples:
   stackctl stack pods my-stack
@@ -158,7 +173,8 @@ Examples:
 			return err
 		}
 
-		status, err := c.GetStackPods(id)
+		// -q prints only the pod names: no exec hints (extra server reads).
+		status, err := c.GetStackPods(id, !printer.Quiet)
 		if err != nil {
 			return err
 		}
@@ -188,20 +204,29 @@ func printPodsTable(status *types.InstanceStatus, allEvents bool) error {
 	var rows [][]string
 	for _, ch := range status.Charts {
 		for _, p := range ch.Pods {
-			rows = append(rows, []string{
-				ch.ChartName,
-				p.Name,
-				printer.StatusColor(p.Phase),
+			row := []string{
+				client.SanitizeServerText(ch.ChartName),
+				client.SanitizeServerText(p.Name),
+				printer.StatusColor(client.SanitizeServerText(p.Phase)),
 				readyText(p),
 				strconv.Itoa(int(p.RestartCount)),
 				formatAge(p.StartTime, now),
 				client.SanitizeServerText(podReason(p)),
-			})
+			}
+			if status.ExecHints {
+				row = append(row, execContainersText(ch))
+			}
+			rows = append(rows, row)
 		}
 	}
+	// EXEC goes last, so the other columns keep their positions.
+	headers := []string{"CHART", "POD", "PHASE", "READY", "RESTARTS", "AGE", "REASON"}
+	if status.ExecHints {
+		headers = append(headers, "EXEC")
+	}
 	if len(rows) == 0 {
-		printer.PrintMessage("No pods found in namespace %s.", status.Namespace)
-	} else if err := printer.PrintTable([]string{"CHART", "POD", "PHASE", "READY", "RESTARTS", "AGE", "REASON"}, rows); err != nil {
+		printer.PrintMessage("No pods found in namespace %s.", client.SanitizeServerText(status.Namespace))
+	} else if err := printer.PrintTable(headers, rows); err != nil {
 		return err
 	}
 
@@ -231,6 +256,24 @@ func printPodsTable(status *types.InstanceStatus, allEvents bool) error {
 	printer.PrintMessage("")
 	printer.PrintMessage("Events:")
 	return printer.PrintTable([]string{"LAST SEEN", "TYPE", "REASON", "OBJECT", "COUNT", "MESSAGE"}, evRows)
+}
+
+// execContainersText returns the EXEC column of a chart: the containers
+// that accept exec, the default one with a trailing "*" (for example
+// "web*, worker"), or "-" without a list. Only valid container names
+// (client.ExecContainerNames) are shown: a chart with no valid name gets
+// "-", and a default container that is not valid gets no "*".
+func execContainersText(ch types.ChartStatus) string {
+	names := client.ExecContainerNames(ch.ExecContainers)
+	if len(names) == 0 {
+		return "-"
+	}
+	for i, name := range names {
+		if name == ch.ExecDefaultContainer {
+			names[i] += "*"
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 // readyText returns "ready/total" containers of a pod, or the pod Ready

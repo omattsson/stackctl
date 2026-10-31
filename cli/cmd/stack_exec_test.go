@@ -47,6 +47,11 @@ type execCmdServer struct {
 	command  []string
 	// listDelay delays the stack list answer.
 	listDelay time.Duration
+	// routes answer other paths (for example /pods, /ui-config); set by
+	// newExecCmdServerWith before the server starts.
+	routes map[string]http.HandlerFunc
+	// requestLog records every request (path, query, headers).
+	requestLog
 }
 
 func (s *execCmdServer) lastQuery() url.Values {
@@ -63,10 +68,21 @@ func (s *execCmdServer) lastCommand() []string {
 
 func newExecCmdServer(t *testing.T, refuse func(w http.ResponseWriter) bool, handler func(ws *websocket.Conn)) *execCmdServer {
 	t.Helper()
-	s := &execCmdServer{}
+	return newExecCmdServerWith(t, nil, refuse, handler)
+}
+
+// newExecCmdServerWith is newExecCmdServer with extra routes by path.
+func newExecCmdServerWith(t *testing.T, routes map[string]http.HandlerFunc, refuse func(w http.ResponseWriter) bool, handler func(ws *websocket.Conn)) *execCmdServer {
+	t.Helper()
+	s := &execCmdServer{routes: routes}
 	up := websocket.Upgrader{}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
+		s.record(r)
+		if h, ok := s.routes[r.URL.Path]; ok {
+			h(w, r)
+			return
+		}
 		switch r.URL.Path {
 		case "/api/v1/stack-instances":
 			s.lists.Add(1)
@@ -851,6 +867,9 @@ func TestInterruptedExit(t *testing.T) {
 		{name: "server refused the command",
 			err:  &client.ExecClosedError{Code: client.CloseBadStart, Reason: "command too long"},
 			want: "interrupted before the command started: exec failed: the server refused the command (too long or not valid): command too long"},
+		{name: "refused upgrade keeps the server text (interrupt during the exec hints call)",
+			err:  &client.WSHandshakeError{StatusCode: 403, Code: client.StreamCodeServiceAccountToken, Message: "The container holds a service-account token", Op: "exec"},
+			want: "interrupted before the command started: exec refused by the server (HTTP 403): The container holds a service-account token. The server refuses exec into such a container; ask an administrator."},
 		{name: "server close after started", err: &client.ExecClosedError{Code: client.CloseGoingAway, Reason: "server shutdown", Started: true},
 			want: "interrupted; the command can still run on the server"},
 		{name: "lost connection (no close frame)", err: &client.ExecClosedError{},
@@ -886,4 +905,419 @@ func TestExitError(t *testing.T) {
 	assert.Equal(t, 255, ee.Code)
 	assert.Equal(t, "boom", ee.Error())
 	assert.ErrorIs(t, wrapped, cause)
+}
+
+// ---------- exec hints after a refused container ----------
+
+const execPodsPath = "/api/v1/stack-instances/42/pods"
+
+// jsonRoute answers with status and body as JSON.
+func jsonRoute(status int, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}
+}
+
+// execHintsBody has hints for the releases web (web*, worker), tok (no
+// list) and db (no list, no pods).
+const execHintsBody = `{"namespace":"ns","exec_hints":true,"charts":[` +
+	`{"chart_name":"nginx","release_name":"web","pods":[{"name":"web-0","phase":"Running","ready":true}],"exec_containers":["web","worker"],"exec_default_container":"web"},` +
+	`{"chart_name":"ksm","release_name":"tok","pods":[{"name":"tok-0","phase":"Running","ready":true}]},` +
+	`{"chart_name":"mysql","release_name":"db"}]}`
+
+// execRefusals are the three refusals that the exec hints answer, as the
+// server sends them.
+var execRefusals = []struct {
+	code    string
+	status  int
+	message string
+	// today is the error text without hints for "-c php" (the text before
+	// the hints existed).
+	today string
+}{
+	{client.StreamCodeContainerNotAllowed, http.StatusForbidden, "The container is not allowed for exec",
+		`exec refused by the server (HTTP 403): The container is not allowed for exec: "php". Use -c with a container that allows exec, or ask an administrator which containers do.`},
+	{client.StreamCodeContainerNotFound, http.StatusNotFound, "No ready pod runs the container",
+		`exec refused by the server (HTTP 404): No ready pod runs the container: "php". Check the container name and 'stackctl stack pods'.`},
+	{client.StreamCodeServiceAccountToken, http.StatusForbidden, "The container holds a service-account token",
+		`exec refused by the server (HTTP 403): The container holds a service-account token. The server refuses exec into such a container; ask an administrator.`},
+}
+
+func TestStackExecCmd_RefusalWithExecHints(t *testing.T) {
+	type hintCase struct {
+		name string
+		args []string
+		// want maps the refusal code to the whole error text.
+		want map[string]string
+	}
+	cases := []hintCase{
+		{
+			name: "two containers, no -c",
+			args: []string{"42", "web", "--", "ls"},
+			want: map[string]string{
+				client.StreamCodeContainerNotAllowed: "exec refused by the server (HTTP 403): The container is not allowed for exec. Use -c web or -c worker.",
+				client.StreamCodeContainerNotFound:   "exec refused by the server (HTTP 404): No ready pod runs the container. Use -c web or -c worker.",
+				client.StreamCodeServiceAccountToken: "exec refused by the server (HTTP 403): The container holds a service-account token. Use -c web or -c worker.",
+			},
+		},
+		{
+			name: "another container with -c",
+			args: []string{"42", "web", "-c", "php", "--", "ls"},
+			want: map[string]string{
+				client.StreamCodeContainerNotAllowed: `exec refused by the server (HTTP 403): The container is not allowed for exec: "php". Use -c web or -c worker.`,
+				client.StreamCodeContainerNotFound:   `exec refused by the server (HTTP 404): No ready pod runs the container: "php". Use -c web or -c worker.`,
+				client.StreamCodeServiceAccountToken: "exec refused by the server (HTTP 403): The container holds a service-account token. Use -c web or -c worker.",
+			},
+		},
+		{
+			name: "the -c container is left out",
+			args: []string{"42", "web", "-c", "web", "--", "ls"},
+			want: map[string]string{
+				client.StreamCodeContainerNotAllowed: `exec refused by the server (HTTP 403): The container is not allowed for exec: "web". Use -c worker.`,
+				client.StreamCodeContainerNotFound:   `exec refused by the server (HTTP 404): No ready pod runs the container: "web". Use -c worker.`,
+				client.StreamCodeServiceAccountToken: "exec refused by the server (HTTP 403): The container holds a service-account token. Use -c worker.",
+			},
+		},
+		{
+			name: "chart without a list while another chart has one",
+			args: []string{"42", "tok", "--", "ls"},
+			want: map[string]string{
+				client.StreamCodeContainerNotAllowed: "exec refused by the server (HTTP 403): The container is not allowed for exec. The server lists no container of chart tok that accepts exec; ask an administrator.",
+				client.StreamCodeContainerNotFound:   "exec refused by the server (HTTP 404): No ready pod runs the container. The server lists no container of chart tok that accepts exec; ask an administrator.",
+				client.StreamCodeServiceAccountToken: "exec refused by the server (HTTP 403): The container holds a service-account token. The server lists no container of chart tok that accepts exec; ask an administrator.",
+			},
+		},
+		{
+			name: "chart by chart name",
+			args: []string{"42", "nginx", "-c", "worker", "--", "ls"},
+			want: map[string]string{
+				client.StreamCodeContainerNotAllowed: `exec refused by the server (HTTP 403): The container is not allowed for exec: "worker". Use -c web.`,
+				client.StreamCodeContainerNotFound:   `exec refused by the server (HTTP 404): No ready pod runs the container: "worker". Use -c web.`,
+				client.StreamCodeServiceAccountToken: "exec refused by the server (HTTP 403): The container holds a service-account token. Use -c web.",
+			},
+		},
+		{
+			name: "stack by name",
+			args: []string{"my-stack", "web", "--", "ls"},
+			want: map[string]string{
+				client.StreamCodeContainerNotAllowed: "exec refused by the server (HTTP 403): The container is not allowed for exec. Use -c web or -c worker.",
+				client.StreamCodeContainerNotFound:   "exec refused by the server (HTTP 404): No ready pod runs the container. Use -c web or -c worker.",
+				client.StreamCodeServiceAccountToken: "exec refused by the server (HTTP 403): The container holds a service-account token. Use -c web or -c worker.",
+			},
+		},
+	}
+	for _, rf := range execRefusals {
+		for _, tc := range cases {
+			t.Run(rf.code+"/"+tc.name, func(t *testing.T) {
+				srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{execPodsPath: jsonRoute(http.StatusOK, execHintsBody)},
+					jsonRefusal(rf.status, rf.code, rf.message), exitWith(0, "", ""))
+				e := setupExecTest(t, srv.URL)
+				err := e.run(t, tc.args...)
+				ee := requireExit(t, err, 255)
+				require.Error(t, ee.Err)
+				assert.Equal(t, tc.want[rf.code], err.Error())
+				assert.Equal(t, tc.want[rf.code], ee.Err.Error())
+				var hs *client.WSHandshakeError
+				require.ErrorAs(t, err, &hs, "the handshake error stays in the chain")
+				assert.Equal(t, rf.code, hs.Code)
+
+				pods := srv.requestsTo(execPodsPath)
+				require.Len(t, pods, 1, "exactly one hints request; requests: %v", srv.paths())
+				assert.Equal(t, url.Values{"exec_hints": {"true"}}, pods[0].Query)
+				assert.Equal(t, execCmdTestPath, srv.paths()[len(srv.paths())-2], "the hints request follows the refused dial")
+				assert.Equal(t, int32(0), srv.upgrades.Load())
+				assert.Empty(t, e.stdout.String())
+				assert.Empty(t, e.stderr.String(), "the advice is in the error, nothing else on stderr")
+			})
+		}
+	}
+}
+
+// unsafeContainerNames are exec_containers entries that are not Kubernetes
+// container names: stackctl must never print them as a -c suggestion (or in
+// the EXEC column), since a user may paste the advice into a shell.
+var unsafeContainerNames = []string{
+	"$(id)", "`id`", "-v", "web*, admin", "Web",
+	strings.Repeat("a", 31) + "-" + strings.Repeat("b", 32), // 64 characters
+	"a\x1b[2J", "a\u202eb", "a\u061cb", "$HOME", "a;rm -rf",
+}
+
+// validName63 is a valid container name of the maximum length.
+var validName63 = strings.Repeat("a", 31) + "-" + strings.Repeat("b", 31)
+
+// hintChart is one chart of execHintsJSON: the release name and its
+// exec_containers (nil: no list).
+type hintChart struct {
+	release    string
+	containers []string
+}
+
+// execHintsJSON returns a pods response with exec hints for the charts;
+// defaults maps a release name to its exec_default_container.
+func execHintsJSON(t *testing.T, defaults map[string]string, charts ...hintChart) string {
+	t.Helper()
+	list := make([]map[string]any, 0, len(charts))
+	for _, ch := range charts {
+		m := map[string]any{"chart_name": ch.release, "release_name": ch.release,
+			"pods": []map[string]any{{"name": ch.release + "-0", "phase": "Running", "ready": true}}}
+		if ch.containers != nil {
+			m["exec_containers"] = ch.containers
+		}
+		if d, ok := defaults[ch.release]; ok {
+			m["exec_default_container"] = d
+		}
+		list = append(list, m)
+	}
+	data, err := json.Marshal(map[string]any{"namespace": "ns", "exec_hints": true, "charts": list})
+	require.NoError(t, err)
+	return string(data)
+}
+
+func TestStackExecCmd_RefusalHintsOnlyValidNames(t *testing.T) {
+	require.Len(t, validName63, 63)
+	tests := []struct {
+		name string
+		body func(t *testing.T) string
+		// want maps the refusal code to the whole error text; nil: the text
+		// without hints (rf.today).
+		want map[string]string
+	}{
+		{
+			name: "unsafe names are dropped, valid ones kept",
+			body: func(t *testing.T) string {
+				return execHintsJSON(t, map[string]string{"web": "$(id)"},
+					hintChart{"web", append(append([]string{"ok-1"}, unsafeContainerNames...), validName63)})
+			},
+			want: map[string]string{
+				client.StreamCodeContainerNotAllowed: `exec refused by the server (HTTP 403): The container is not allowed for exec: "php". Use -c ok-1 or -c ` + validName63 + ".",
+				client.StreamCodeContainerNotFound:   `exec refused by the server (HTTP 404): No ready pod runs the container: "php". Use -c ok-1 or -c ` + validName63 + ".",
+				client.StreamCodeServiceAccountToken: "exec refused by the server (HTTP 403): The container holds a service-account token. Use -c ok-1 or -c " + validName63 + ".",
+			},
+		},
+		{
+			name: "only unsafe names while another chart has a list: as an empty list",
+			body: func(t *testing.T) string {
+				return execHintsJSON(t, nil, hintChart{"web", unsafeContainerNames}, hintChart{"db", []string{"mysql"}})
+			},
+			want: map[string]string{
+				client.StreamCodeContainerNotAllowed: `exec refused by the server (HTTP 403): The container is not allowed for exec: "php". The server lists no container of chart web that accepts exec; ask an administrator.`,
+				client.StreamCodeContainerNotFound:   `exec refused by the server (HTTP 404): No ready pod runs the container: "php". The server lists no container of chart web that accepts exec; ask an administrator.`,
+				client.StreamCodeServiceAccountToken: "exec refused by the server (HTTP 403): The container holds a service-account token. The server lists no container of chart web that accepts exec; ask an administrator.",
+			},
+		},
+		{
+			name: "only unsafe names on every chart: unknown, the advice without hints",
+			body: func(t *testing.T) string {
+				return execHintsJSON(t, nil, hintChart{"web", unsafeContainerNames}, hintChart{"db", []string{"-v"}})
+			},
+		},
+	}
+	for _, rf := range execRefusals {
+		for _, tt := range tests {
+			t.Run(rf.code+"/"+tt.name, func(t *testing.T) {
+				srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{execPodsPath: jsonRoute(http.StatusOK, tt.body(t))},
+					jsonRefusal(rf.status, rf.code, rf.message), exitWith(0, "", ""))
+				e := setupExecTest(t, srv.URL)
+				err := e.run(t, "42", "web", "-c", "php", "--", "ls")
+				ee := requireExit(t, err, 255)
+				want := rf.today
+				if tt.want != nil {
+					want = tt.want[rf.code]
+				}
+				assert.Equal(t, want, err.Error())
+				assert.Equal(t, want, ee.Err.Error())
+				for _, bad := range unsafeContainerNames {
+					assert.NotContains(t, err.Error(), bad)
+				}
+				assert.Empty(t, e.stdout.String())
+				assert.Empty(t, e.stderr.String())
+			})
+		}
+	}
+}
+
+func TestStackExecCmd_RefusalWithFailingHints(t *testing.T) {
+	hints := []struct {
+		name  string
+		route http.HandlerFunc
+	}{
+		{"500", jsonRoute(http.StatusInternalServerError, `{"error":"boom"}`)},
+		{"404", jsonRoute(http.StatusNotFound, `{"error":"not found"}`)},
+		{"403", jsonRoute(http.StatusForbidden, `{"error":"no access"}`)},
+		{"malformed JSON", jsonRoute(http.StatusOK, `{"exec_hints":true,"charts":[`)},
+		{"no exec_hints (older server or no rights)", jsonRoute(http.StatusOK,
+			`{"namespace":"ns","charts":[{"chart_name":"web","release_name":"web","exec_containers":["web","worker"]}]}`)},
+		{"exec_hints false", jsonRoute(http.StatusOK,
+			`{"namespace":"ns","exec_hints":false,"charts":[{"chart_name":"web","release_name":"web"}]}`)},
+		{"chart not in the response", jsonRoute(http.StatusOK,
+			`{"namespace":"ns","exec_hints":true,"charts":[{"chart_name":"other","release_name":"other","exec_containers":["x"]}]}`)},
+		{"no chart has a list (not computed)", jsonRoute(http.StatusOK,
+			`{"namespace":"ns","exec_hints":true,"charts":[{"chart_name":"web","release_name":"web"},{"chart_name":"db","release_name":"db"}]}`)},
+		{"only the -c container listed", jsonRoute(http.StatusOK,
+			`{"namespace":"ns","exec_hints":true,"charts":[{"chart_name":"web","release_name":"web","exec_containers":["php"]}]}`)},
+	}
+	for _, rf := range execRefusals {
+		for _, h := range hints {
+			t.Run(rf.code+"/"+h.name, func(t *testing.T) {
+				srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{execPodsPath: h.route},
+					jsonRefusal(rf.status, rf.code, rf.message), exitWith(0, "", ""))
+				e := setupExecTest(t, srv.URL)
+				err := e.run(t, "42", "web", "-c", "php", "--", "ls")
+				ee := requireExit(t, err, 255)
+				assert.Equal(t, rf.today, err.Error(), "the error stays as it was without hints")
+				assert.Equal(t, rf.today, ee.Err.Error())
+				assert.Len(t, srv.requestsTo(execPodsPath), 1, "one attempt, no retry")
+				assert.Empty(t, e.stdout.String())
+				assert.Empty(t, e.stderr.String())
+			})
+		}
+	}
+}
+
+func TestStackExecCmd_RefusalWithSlowHints(t *testing.T) {
+	// A hints call that does not answer in bestEffortTimeout leaves the
+	// error as it is.
+	prev := bestEffortTimeout
+	bestEffortTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { bestEffortTimeout = prev })
+	release := make(chan struct{})
+	rf := execRefusals[0]
+	srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{execPodsPath: func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second):
+		}
+		jsonRoute(http.StatusOK, execHintsBody)(w, r)
+	}}, jsonRefusal(rf.status, rf.code, rf.message), exitWith(0, "", ""))
+	t.Cleanup(func() { close(release) }) // before srv.Close
+	e := setupExecTest(t, srv.URL)
+	start := time.Now()
+	err := e.run(t, "42", "web", "-c", "php", "--", "ls")
+	requireExit(t, err, 255)
+	assert.Equal(t, rf.today, err.Error())
+	assert.Less(t, time.Since(start), 3*time.Second, "the timeout ends the hints call")
+}
+
+func TestStackExecCmd_InterruptDuringHints(t *testing.T) {
+	// Ctrl-C while the hints call runs ends the command at once with 130.
+	// The server refused the upgrade, so the command never started.
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	rf := execRefusals[2]
+	srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{execPodsPath: func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(reached) })
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second):
+		}
+		jsonRoute(http.StatusOK, execHintsBody)(w, r)
+	}}, jsonRefusal(rf.status, rf.code, rf.message), exitWith(0, "", ""))
+	t.Cleanup(func() { close(release) }) // before srv.Close
+	e := setupExecTest(t, srv.URL)
+	done := e.start("42", "web", "-c", "php", "--", "ls")
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the hints request did not reach the server")
+	}
+	start := time.Now()
+	e.signals <- os.Interrupt
+	ee := requireExit(t, waitDone(t, done), 130)
+	assert.Less(t, time.Since(start), 3*time.Second, "Ctrl-C does not wait for the hints")
+	assert.Equal(t, "interrupted before the command started: "+rf.today,
+		ee.Err.Error(), "a refused exec never ran; the refusal keeps its text, without hints")
+	assert.NotContains(t, ee.Err.Error(), "can still run")
+	var hs *client.WSHandshakeError
+	assert.ErrorAs(t, ee, &hs, "the refusal stays in the chain")
+	assert.Equal(t, int32(0), srv.upgrades.Load())
+}
+
+func TestStackExecCmd_HintsCarryCredentials(t *testing.T) {
+	rf := execRefusals[0]
+	t.Run("session token", func(t *testing.T) {
+		srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{execPodsPath: jsonRoute(http.StatusOK, execHintsBody)},
+			jsonRefusal(rf.status, rf.code, rf.message), exitWith(0, "", ""))
+		e := setupExecTest(t, srv.URL)
+		writeSessionConfig(t, srv.URL, "")
+		err := e.run(t, "42", "web", "--", "ls")
+		requireExit(t, err, 255)
+		assert.Contains(t, err.Error(), "Use -c web or -c worker.")
+		pods := srv.requestsTo(execPodsPath)
+		require.Len(t, pods, 1)
+		assert.Equal(t, "Bearer "+testSessionToken, pods[0].Header.Get("Authorization"))
+		assert.Empty(t, pods[0].Header.Get("X-API-Key"))
+	})
+	t.Run("api key", func(t *testing.T) {
+		srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{
+			execPodsPath:        jsonRoute(http.StatusOK, execHintsBody),
+			"/api/v1/ui-config": jsonRoute(http.StatusOK, `{"title":"x","stream_api_keys_allowed":true}`),
+		}, jsonRefusal(rf.status, rf.code, rf.message), exitWith(0, "", ""))
+		e := setupExecTest(t, srv.URL)
+		err := e.run(t, "--api-key", "sk_hints", "42", "web", "--", "ls")
+		requireExit(t, err, 255)
+		assert.Contains(t, err.Error(), "Use -c web or -c worker.")
+		pods := srv.requestsTo(execPodsPath)
+		require.Len(t, pods, 1)
+		assert.Equal(t, "sk_hints", pods[0].Header.Get("X-API-Key"))
+		assert.Empty(t, pods[0].Header.Get("Authorization"))
+	})
+}
+
+func TestStackExecCmd_NoHintsForOtherErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		refuse  func(w http.ResponseWriter) bool
+		handler func(ws *websocket.Conn)
+		code    int
+	}{
+		{name: "no_ready_pod", refuse: jsonRefusal(http.StatusServiceUnavailable, client.StreamCodeNoReadyPod, "No ready pod for the chart"), code: 255},
+		{name: "exec_limit", refuse: jsonRefusal(http.StatusTooManyRequests, client.StreamCodeExecLimit, "Too many exec sessions"), code: 255},
+		{name: "cluster_exec_disabled", refuse: jsonRefusal(http.StatusForbidden, client.StreamCodeClusterExecDisabled, "This cluster does not allow exec"), code: 255},
+		{name: "forbidden", refuse: jsonRefusal(http.StatusForbidden, "forbidden", "Forbidden"), code: 255},
+		{name: "token_check_forbidden", refuse: jsonRefusal(http.StatusForbidden, client.StreamCodeTokenCheckForbidden, "No right"), code: 255},
+		{name: "chart_not_found", refuse: jsonRefusal(http.StatusNotFound, client.StreamCodeChartNotFound, "Chart not found"), code: 255},
+		{name: "invalid_container", refuse: jsonRefusal(http.StatusBadRequest, client.StreamCodeInvalidContainer, "Invalid container"), code: 255},
+		{name: "feature_disabled", refuse: jsonRefusal(http.StatusNotFound, client.StreamCodeFeatureDisabled, "This feature is disabled"), code: 255},
+		{name: "api_key_not_allowed", refuse: jsonRefusal(http.StatusForbidden, client.StreamCodeAPIKeyNotAllowed, "API keys cannot open this stream"), code: 255},
+		{name: "401", refuse: jsonRefusal(http.StatusUnauthorized, "", "Invalid or expired token"), code: 255},
+		{name: "plain 404 (older server)", refuse: func(w http.ResponseWriter) bool {
+			http.NotFound(w, nil)
+			return true
+		}, code: 255},
+		{name: "500", refuse: jsonRefusal(http.StatusInternalServerError, "", "boom"), code: 255},
+		{name: "close after started", handler: closeWith(websocket.CloseInternalServerErr, "boom"), code: 255},
+		{name: "remote exit code", handler: exitWith(3, "", ""), code: 3},
+		{name: "time limit", handler: closeWith(client.CloseMaxDuration, "maximum duration reached"), code: 124},
+		{name: "unknown stack name", args: []string{"nope", "web", "--", "ls"}, code: 255},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := tt.handler
+			if handler == nil {
+				handler = exitWith(0, "", "")
+			}
+			srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{execPodsPath: jsonRoute(http.StatusOK, execHintsBody)}, tt.refuse, handler)
+			e := setupExecTest(t, srv.URL)
+			args := tt.args
+			if args == nil {
+				args = []string{"42", "web", "-c", "php", "--", "ls"}
+			}
+			err := e.run(t, args...)
+			requireExit(t, err, tt.code)
+			assert.Empty(t, srv.requestsTo(execPodsPath), "no hints request; requests: %v", srv.paths())
+			if err != nil {
+				assert.NotContains(t, err.Error(), "Use -c web")
+			}
+		})
+	}
+}
+
+func TestStackExecCmd_SuccessMakesNoExtraRequests(t *testing.T) {
+	srv := newExecCmdServerWith(t, map[string]http.HandlerFunc{execPodsPath: jsonRoute(http.StatusOK, execHintsBody)}, nil, exitWith(0, "ok", ""))
+	e := setupExecTest(t, srv.URL)
+	require.NoError(t, e.run(t, "42", "web", "--", "ls"))
+	assert.Equal(t, []string{execCmdTestPath}, srv.paths(), "only the dial: no /pods, no /ui-config without an API key")
 }

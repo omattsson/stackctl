@@ -62,6 +62,13 @@ stackctl template quick-deploy <template-id> --name my-app --ttl 480 -o json
 # Inspect
 stackctl stack status my-app              # pods
 stackctl stack pods my-app                # live pods and warning events
+# With exec hints from the server (k8s-stack-manager v0.15.0+, a user who may change the stack, exec on, the cluster
+# allows exec and, with an API key, the server allows API keys for exec: STACK_STREAM_ALLOW_API_KEYS) the table has a
+# last column EXEC: the containers that `stack exec -c` accepts, "*" marks the one used without -c ("web*, worker"),
+# "-" none listed (none accepts exec, or the server could not check them, for example a failed read or a check over
+# 3 s). Only Kubernetes container names are shown. Without hints there is no EXEC column; -q asks for no hints.
+# Agents: read `stackctl stack pods my-app -o json` instead: exec_hints (true), per chart exec_containers and
+# exec_default_container (as received from the server).
 stackctl stack logs my-app                # latest deployment log
 stackctl stack values my-app              # merged Helm values
 stackctl stack preview my-app             # values that the next deploy uses
@@ -75,6 +82,8 @@ stackctl stack port-forward my-app mysql 0:3306 -q   # stdout: 127.0.0.1:<port>;
 # 3 refused connections in a row while no other connection is open end it with exit 1: wait and try again.
 # Needs k8s-stack-manager v0.15.0 or later (an older server: "upgrade the server to k8s-stack-manager v0.15.0 or later").
 # An http:// API URL to a host that is not loopback is refused (add --allow-insecure-stream to accept the risk).
+# With an API key it first reads stream_api_keys_allowed of the public /api/v1/ui-config: false ends it at once with
+# exit 1 ("the server does not allow API keys for port-forward"): use `stackctl login` and no API key.
 
 # Run one command in a container of a chart (no stdin, no TTY, no shell; for a shell: -- sh -c '...')
 stackctl stack exec my-app backend -c php -- bin/console cache:clear
@@ -88,6 +97,12 @@ stackctl stack exec my-app backend -c php -- bin/console cache:clear
 # The remote process can keep running. Never retried: after 124, 130 or a lost connection the command can still
 # run on the server, so check its effect before you run it again ("the server did not start the command" and
 # "interrupted before the command started" mean that it did not run).
+# A refused container (container_not_allowed, container_not_found, service_account_token) names the containers that
+# accept exec when the server sends hints ("Use -c web or -c worker"; more than 8: "or one of N more (see 'stackctl
+# stack pods')"), or says "The server lists no container of chart X that accepts exec; ask an administrator.": pick a
+# -c from that list (or exec_containers / exec_default_container of `stack pods -o json`), do not guess (exit 255).
+# With an API key it first reads stream_api_keys_allowed of /api/v1/ui-config: false ends it at once with exit 255
+# ("the server does not allow API keys for exec"): use `stackctl login` and no API key.
 # Needs k8s-stack-manager v0.15.0 or later (an older server: "upgrade the server to k8s-stack-manager v0.15.0 or later").
 
 # Change values, then deploy again

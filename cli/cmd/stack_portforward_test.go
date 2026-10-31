@@ -56,14 +56,30 @@ type pfTestServer struct {
 	*httptest.Server
 	requests atomic.Int32
 	upgrades atomic.Int32
+	// routes answer other paths (for example /ui-config); set by
+	// newPFTestServerWith before the server starts.
+	routes map[string]http.HandlerFunc
+	// requestLog records every request (path, query, headers).
+	requestLog
 }
 
 func newPFTestServer(t *testing.T, refuse func(w http.ResponseWriter) bool) *pfTestServer {
 	t.Helper()
-	s := &pfTestServer{}
+	return newPFTestServerWith(t, nil, refuse)
+}
+
+// newPFTestServerWith is newPFTestServer with extra routes by path.
+func newPFTestServerWith(t *testing.T, routes map[string]http.HandlerFunc, refuse func(w http.ResponseWriter) bool) *pfTestServer {
+	t.Helper()
+	s := &pfTestServer{routes: routes}
 	up := websocket.Upgrader{}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.requests.Add(1)
+		s.record(r)
+		if h, ok := s.routes[r.URL.Path]; ok {
+			h(w, r)
+			return
+		}
 		if r.URL.Path != pfTestPath {
 			http.NotFound(w, r)
 			return

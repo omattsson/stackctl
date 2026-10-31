@@ -53,7 +53,7 @@ func TestGetDeployPreview(t *testing.T) {
 func TestGetStackPodsAndRecent(t *testing.T) {
 	t.Parallel()
 	st, err := oneRoute(t, http.MethodGet, "/api/v1/stack-instances/42/pods",
-		`{"namespace":"ns","charts":[{"chart_name":"api","pods":[{"name":"p1"}]}],"events":[{"type":"Warning","reason":"BackOff"}]}`).GetStackPods("42")
+		`{"namespace":"ns","charts":[{"chart_name":"api","pods":[{"name":"p1"}]}],"events":[{"type":"Warning","reason":"BackOff"}]}`).GetStackPods("42", false)
 	require.NoError(t, err)
 	assert.Equal(t, "p1", st.Charts[0].Pods[0].Name)
 	assert.Equal(t, "BackOff", st.Events[0].Reason)
@@ -66,6 +66,7 @@ func TestGetStackPodsAndRecent(t *testing.T) {
 func TestSanitizeLogText(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "a\tb\nc [2J d\n", SanitizeLogText("a\tb\r\nc\x1b[2J d\u202e\n"))
+	assert.Equal(t, "ab\n", SanitizeLogText("a\u061Cb\n"), "the arabic letter mark is a bidi control")
 }
 
 func TestRunStackActionAndJobLog(t *testing.T) {
