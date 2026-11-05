@@ -136,11 +136,18 @@ Unlike "stack status", the server reads the cluster directly (not its
 cache) and adds the events. The REASON column shows why a container waits
 or stopped, for example CrashLoopBackOff or ImagePullBackOff.
 
-The last column, EXEC, lists the containers of the chart that
+The last column, EXEC, lists the containers of the pod that
 'stackctl stack exec' accepts with -c; "*" marks the container that it
-uses without -c (for example "web*, worker"). "-" means that no container
-is listed: none accepts exec, or the server could not check them (for
-example a failed read or a check over 3 s). The column appears only when
+uses without -c (for example "web*, worker"). A container is shown only on
+the pod that 'stack exec' picks for it: the first pod by name that is
+Running and Ready and runs the container. A pod shows "-" when the command
+picks it for no container: for example a finished Job pod, a pod that is
+not ready, a pod without such a container, or a chart where no container
+accepts exec or the server could not check them (for example a failed read
+or a check over 3 s). A container that no listed pod gets is shown on a
+line under the table. The column can be wrong for a pod that is shutting
+down, or for an init container with the name of an exec container: the
+server does not send these details. The column appears only when
 the server sends exec hints: ` + client.ExecServerVersion + `,
 a user who may change the stack, exec turned on, a cluster that allows
 exec and, with an API key, a server that allows API keys for exec
@@ -202,8 +209,17 @@ Examples:
 func printPodsTable(status *types.InstanceStatus, allEvents bool) error {
 	now := nowFunc()
 	var rows [][]string
+	var unplaced []string
 	for _, ch := range status.Charts {
-		for _, p := range ch.Pods {
+		var execCells []string
+		if status.ExecHints {
+			var rest []string
+			execCells, rest = execColumn(ch)
+			if len(rest) > 0 && len(ch.Pods) > 0 {
+				unplaced = append(unplaced, "  "+client.SanitizeServerText(ch.ChartName)+": "+strings.Join(rest, ", "))
+			}
+		}
+		for i, p := range ch.Pods {
 			row := []string{
 				client.SanitizeServerText(ch.ChartName),
 				client.SanitizeServerText(p.Name),
@@ -214,7 +230,7 @@ func printPodsTable(status *types.InstanceStatus, allEvents bool) error {
 				client.SanitizeServerText(podReason(p)),
 			}
 			if status.ExecHints {
-				row = append(row, execContainersText(ch))
+				row = append(row, execCells[i])
 			}
 			rows = append(rows, row)
 		}
@@ -228,6 +244,13 @@ func printPodsTable(status *types.InstanceStatus, allEvents bool) error {
 		printer.PrintMessage("No pods found in namespace %s.", client.SanitizeServerText(status.Namespace))
 	} else if err := printer.PrintTable(headers, rows); err != nil {
 		return err
+	}
+	if len(unplaced) > 0 {
+		printer.PrintMessage("")
+		printer.PrintMessage("Exec containers on no listed pod ('stack exec -c' can still work):")
+		for _, l := range unplaced {
+			printer.PrintMessage("%s", l)
+		}
 	}
 
 	events := make([]types.PodEvent, 0, len(status.Events))
@@ -258,22 +281,69 @@ func printPodsTable(status *types.InstanceStatus, allEvents bool) error {
 	return printer.PrintTable([]string{"LAST SEEN", "TYPE", "REASON", "OBJECT", "COUNT", "MESSAGE"}, evRows)
 }
 
-// execContainersText returns the EXEC column of a chart: the containers
-// that accept exec, the default one with a trailing "*" (for example
-// "web*, worker"), or "-" without a list. Only valid container names
-// (client.ExecContainerNames) are shown: a chart with no valid name gets
-// "-", and a default container that is not valid gets no "*".
-func execContainersText(ch types.ChartStatus) string {
-	names := client.ExecContainerNames(ch.ExecContainers)
-	if len(names) == 0 {
-		return "-"
-	}
-	for i, name := range names {
-		if name == ch.ExecDefaultContainer {
-			names[i] += "*"
+// execColumn returns the EXEC cell of each pod of a chart, in the order of
+// ch.Pods, and the valid hint names that no pod gets. Each container goes
+// only to the pod that "stack exec -c <name>" picks (#186): the first pod by
+// name that is Running and Ready and runs the container. The default
+// container gets a trailing "*"; a pod without a container gets "-".
+func execColumn(ch types.ChartStatus) (cells, unplaced []string) {
+	ready := make([]int, 0, len(ch.Pods))
+	for i, p := range ch.Pods {
+		if podExecReady(p) {
+			ready = append(ready, i)
 		}
 	}
-	return strings.Join(names, ", ")
+	sort.SliceStable(ready, func(a, b int) bool { return ch.Pods[ready[a]].Name < ch.Pods[ready[b]].Name })
+
+	byPod := make([][]string, len(ch.Pods))
+	for _, name := range client.ExecContainerNames(ch.ExecContainers) {
+		if name == ch.ExecDefaultContainer {
+			name += "*"
+		}
+		placed := false
+		for _, i := range ready {
+			if podRunsContainer(ch.Pods[i], strings.TrimSuffix(name, "*")) {
+				byPod[i] = append(byPod[i], name)
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			unplaced = append(unplaced, name)
+		}
+	}
+	cells = make([]string, len(ch.Pods))
+	for i, names := range byPod {
+		cells[i] = "-"
+		if len(names) > 0 {
+			cells[i] = strings.Join(names, ", ")
+		}
+	}
+	return cells, unplaced
+}
+
+// podExecReady reports whether "stack exec" can pick the pod: phase Running
+// and the Ready condition True, as the server checks it.
+func podExecReady(p types.PodStatus) bool {
+	if p.Phase != "Running" {
+		return false
+	}
+	for _, c := range p.Conditions {
+		if c.Type == "Ready" {
+			return c.Status == "True"
+		}
+	}
+	return false
+}
+
+// podRunsContainer reports whether the pod has a container status of that name.
+func podRunsContainer(p types.PodStatus, name string) bool {
+	for _, cs := range p.ContainerStates {
+		if cs.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // readyText returns "ready/total" containers of a pod, or the pod Ready

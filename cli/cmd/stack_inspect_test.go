@@ -247,8 +247,10 @@ func podsBody(t *testing.T) string {
 			ChartName: "backend",
 			Pods: []types.PodStatus{
 				{Name: "backend-1", Phase: "Running", Ready: true, StartTime: &start,
+					Conditions:      []types.PodConditionInfo{{Type: "Ready", Status: "True"}},
 					ContainerStates: []types.ContainerStateInfo{{Name: "app", Ready: true}, {Name: "sidecar", Ready: true}}},
 				{Name: "backend-2", Phase: "Running", RestartCount: 7, StartTime: &start,
+					Conditions:      []types.PodConditionInfo{{Type: "Ready", Status: "False", Reason: "ContainersNotReady"}},
 					ContainerStates: []types.ContainerStateInfo{{Name: "app", Reason: "CrashLoopBackOff"}, {Name: "sidecar", Ready: true}}},
 			},
 		}},
@@ -325,31 +327,111 @@ func TestStackPodsCmd_NoPods(t *testing.T) {
 	assert.Equal(t, "No pods found in namespace stack-demo.\n", buf.String())
 }
 
-func TestExecContainersText(t *testing.T) {
+func TestExecColumn(t *testing.T) {
 	t.Parallel()
+	pod := func(name string, containers ...string) types.PodStatus {
+		p := types.PodStatus{Name: name, Phase: "Running", Ready: true,
+			Conditions: []types.PodConditionInfo{{Type: "Ready", Status: "True"}}}
+		for _, c := range containers {
+			p.ContainerStates = append(p.ContainerStates, types.ContainerStateInfo{Name: c, Ready: true})
+		}
+		return p
+	}
+	succeeded := pod("migrate-abc12", "app")
+	succeeded.Phase = "Succeeded"
+	succeeded.Ready = false
+	succeeded.Conditions = []types.PodConditionInfo{{Type: "Ready", Status: "False", Reason: "PodCompleted"}}
+	notReady := pod("app-0", "app")
+	notReady.Conditions = []types.PodConditionInfo{{Type: "Ready", Status: "False"}}
+	pending := pod("app-0", "app")
+	pending.Phase = "Pending"
+	readyFlagOnly := pod("app-0", "app")
+	readyFlagOnly.Conditions = nil
+	notReadyFlagOnly := pod("app-0", "app")
+	notReadyFlagOnly.Conditions = nil
+	notReadyFlagOnly.Ready = false
+	conditionTrueFlagFalse := pod("app-0", "app")
+	conditionTrueFlagFalse.Ready = false
+	unknownReady := pod("app-0", "app")
+	unknownReady.Conditions = []types.PodConditionInfo{{Type: "Ready", Status: "Unknown"}}
+	failed := pod("app-0", "app")
+	failed.Phase = "Failed"
+
 	tests := []struct {
-		name string
-		ch   types.ChartStatus
-		want string
+		name     string
+		ch       types.ChartStatus
+		want     []string
+		unplaced []string
 	}{
-		{name: "no list", want: "-"},
-		{name: "one container", ch: types.ChartStatus{ExecContainers: []string{"web"}}, want: "web"},
-		{name: "default marked", ch: types.ChartStatus{ExecContainers: []string{"web", "worker"}, ExecDefaultContainer: "web"}, want: "web*, worker"},
-		{name: "only names that are not container names", ch: types.ChartStatus{ExecContainers: unsafeContainerNames, ExecDefaultContainer: "$(id)"}, want: "-"},
-		{name: "unsafe names dropped, valid kept", ch: types.ChartStatus{
-			ExecContainers:       append(append([]string{"web"}, unsafeContainerNames...), validName63),
-			ExecDefaultContainer: "web",
-		}, want: "web*, " + validName63},
-		{name: "fake marker and separator", ch: types.ChartStatus{ExecContainers: []string{"web*, admin", "worker"}}, want: "worker"},
-		{name: "an invalid default gets no marker", ch: types.ChartStatus{ExecContainers: []string{"web", "Web"}, ExecDefaultContainer: "Web"}, want: "web"},
-		{name: "a default not in the list", ch: types.ChartStatus{ExecContainers: []string{"web"}, ExecDefaultContainer: "worker"}, want: "web"},
-		{name: "duplicates", ch: types.ChartStatus{ExecContainers: []string{"web", "web", "worker"}, ExecDefaultContainer: "web"}, want: "web*, worker"},
-		{name: "empty list", ch: types.ChartStatus{ExecContainers: []string{}}, want: "-"},
+		{name: "no hints", ch: types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "app"), pod("app-1", "app")}}, want: []string{"-", "-"}},
+		{name: "empty list", ch: types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "app")}, ExecContainers: []string{}}, want: []string{"-"}},
+		{name: "no pods", ch: types.ChartStatus{ExecContainers: []string{"app"}}, want: []string{}, unplaced: []string{"app"}},
+		{name: "one container with default",
+			ch:   types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "app")}, ExecContainers: []string{"app"}, ExecDefaultContainer: "app"},
+			want: []string{"app*"}},
+		{name: "pod without the container",
+			ch: types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "app"), pod("sidecar-0", "sidecar")},
+				ExecContainers: []string{"app"}, ExecDefaultContainer: "app"},
+			want: []string{"app*", "-"}},
+		{name: "succeeded job pod",
+			ch: types.ChartStatus{Pods: []types.PodStatus{succeeded, pod("app-0", "app")},
+				ExecContainers: []string{"app"}, ExecDefaultContainer: "app"},
+			want: []string{"-", "app*"}},
+		{name: "not-ready pod",
+			ch: types.ChartStatus{Pods: []types.PodStatus{notReady, pod("app-1", "app")},
+				ExecContainers: []string{"app"}, ExecDefaultContainer: "app"},
+			want: []string{"-", "app*"}},
+		{name: "pending pod", ch: types.ChartStatus{Pods: []types.PodStatus{pending}, ExecContainers: []string{"app"}},
+			want: []string{"-"}, unplaced: []string{"app"}},
+		{name: "two ready pods: only the first by name",
+			ch: types.ChartStatus{Pods: []types.PodStatus{pod("app-1", "app", "worker"), pod("app-0", "app", "worker")},
+				ExecContainers: []string{"app", "worker"}, ExecDefaultContainer: "app"},
+			want: []string{"-", "app*, worker"}},
+		{name: "each container on the first ready pod that runs it",
+			ch: types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "app"), pod("worker-0", "worker"), pod("worker-1", "worker")},
+				ExecContainers: []string{"app", "worker"}, ExecDefaultContainer: "app"},
+			want: []string{"app*", "worker", "-"}},
+		{name: "no ready pod runs the container", ch: types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "app")}, ExecContainers: []string{"web"}},
+			want: []string{"-"}, unplaced: []string{"web"}},
+		{name: "ready condition wins over the ready flag", ch: types.ChartStatus{Pods: []types.PodStatus{conditionTrueFlagFalse}, ExecContainers: []string{"app"}}, want: []string{"app"}},
+		{name: "ready flag without conditions", ch: types.ChartStatus{Pods: []types.PodStatus{readyFlagOnly}, ExecContainers: []string{"app"}},
+			want: []string{"-"}, unplaced: []string{"app"}},
+		{name: "not-ready flag without conditions", ch: types.ChartStatus{Pods: []types.PodStatus{notReadyFlagOnly}, ExecContainers: []string{"app"}},
+			want: []string{"-"}, unplaced: []string{"app"}},
+		{name: "ready condition unknown", ch: types.ChartStatus{Pods: []types.PodStatus{unknownReady, pod("app-1", "app")}, ExecContainers: []string{"app"}},
+			want: []string{"-", "app"}},
+		{name: "failed pod", ch: types.ChartStatus{Pods: []types.PodStatus{failed, pod("app-1", "app")}, ExecContainers: []string{"app"}},
+			want: []string{"-", "app"}},
+		{name: "default on no ready pod keeps its marker under the table",
+			ch:   types.ChartStatus{Pods: []types.PodStatus{notReady, pod("worker-0", "worker")}, ExecContainers: []string{"app", "worker"}, ExecDefaultContainer: "app"},
+			want: []string{"-", "worker"}, unplaced: []string{"app*"}},
+		// The client cannot tell init containers apart (#186): an init container counts.
+		{name: "init container of the same name counts",
+			ch:   types.ChartStatus{Pods: []types.PodStatus{pod("a-worker", "app", "worker"), pod("b-web", "app")}, ExecContainers: []string{"app", "worker"}},
+			want: []string{"app, worker", "-"}},
+		{name: "only names that are not container names",
+			ch:   types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "app")}, ExecContainers: unsafeContainerNames, ExecDefaultContainer: "$(id)"},
+			want: []string{"-"}},
+		{name: "unsafe names dropped, valid kept",
+			ch: types.ChartStatus{Pods: []types.PodStatus{pod("app-0", append([]string{"web", validName63}, unsafeContainerNames...)...)},
+				ExecContainers: append(append([]string{"web"}, unsafeContainerNames...), validName63), ExecDefaultContainer: "web"},
+			want: []string{"web*, " + validName63}},
+		{name: "fake marker and separator",
+			ch:   types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "web*, admin", "worker")}, ExecContainers: []string{"web*, admin", "worker"}},
+			want: []string{"worker"}},
+		{name: "an invalid default gets no marker",
+			ch:   types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "web", "Web")}, ExecContainers: []string{"web", "Web"}, ExecDefaultContainer: "Web"},
+			want: []string{"web"}},
+		{name: "duplicates",
+			ch:   types.ChartStatus{Pods: []types.PodStatus{pod("app-0", "web", "worker")}, ExecContainers: []string{"web", "web", "worker"}, ExecDefaultContainer: "web"},
+			want: []string{"web*, worker"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, execContainersText(tt.ch))
+			cells, unplaced := execColumn(tt.ch)
+			assert.Equal(t, tt.want, cells)
+			assert.Equal(t, tt.unplaced, unplaced)
 		})
 	}
 }
@@ -416,11 +498,18 @@ func podsTableRows(t *testing.T, out string) (header string, rows []string) {
 	return header, rows
 }
 
-// podsHintsPod is one pod of a chart in podsHintsBody, started an hour
-// before the test clock.
-func podsHintsPod(name string) string {
+// podsHintsPod is one Running and Ready pod of a chart, started an hour
+// before the test clock, that runs the containers (default "app").
+func podsHintsPod(name string, containers ...string) string {
+	if len(containers) == 0 {
+		containers = []string{"app"}
+	}
+	states := make([]string, len(containers))
+	for i, c := range containers {
+		states[i] = `{"name":"` + c + `","ready":true}`
+	}
 	return `{"name":"` + name + `","phase":"Running","ready":true,"restart_count":0,"start_time":"2026-10-15T11:00:00Z",` +
-		`"container_states":[{"name":"app","ready":true}]}`
+		`"conditions":[{"type":"Ready","status":"True"}],"container_states":[` + strings.Join(states, ",") + `]}`
 }
 
 func TestStackPodsCmd_ExecHints(t *testing.T) {
@@ -446,7 +535,7 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 		},
 		{
 			name:           "two containers, default marked",
-			charts:         `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0") + `],"exec_containers":["web","worker"],"exec_default_container":"web"}]`,
+			charts:         `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0", "web", "worker") + `],"exec_containers":["web","worker"],"exec_default_container":"web"}]`,
 			wantRows:       [][3]string{{"web", "web-0", "web*, worker"}},
 			wantContainers: [][]any{{"web", "worker"}},
 			wantDefault:    []any{"web"},
@@ -454,7 +543,7 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 		},
 		{
 			name:           "two containers, default is the second",
-			charts:         `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0") + `],"exec_containers":["web","worker"],"exec_default_container":"worker"}]`,
+			charts:         `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0", "web", "worker") + `],"exec_containers":["web","worker"],"exec_default_container":"worker"}]`,
 			wantRows:       [][3]string{{"web", "web-0", "web, worker*"}},
 			wantContainers: [][]any{{"web", "worker"}},
 			wantDefault:    []any{"worker"},
@@ -462,7 +551,7 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 		},
 		{
 			name:           "two containers without default",
-			charts:         `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0") + `],"exec_containers":["web","worker"]}]`,
+			charts:         `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0", "web", "worker") + `],"exec_containers":["web","worker"]}]`,
 			wantRows:       [][3]string{{"web", "web-0", "web, worker"}},
 			wantContainers: [][]any{{"web", "worker"}},
 			wantDefault:    []any{nil},
@@ -486,23 +575,23 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 		},
 		{
 			name: "several pods of one chart",
-			charts: `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0") + `,` + podsHintsPod("web-1") + `,` + podsHintsPod("web-2") +
-				`],"exec_containers":["web","worker"],"exec_default_container":"web"}]`,
-			wantRows:       [][3]string{{"web", "web-0", "web*, worker"}, {"web", "web-1", "web*, worker"}, {"web", "web-2", "web*, worker"}},
+			charts: `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-1", "web", "worker") + `,` + podsHintsPod("web-0", "web", "worker") +
+				`,` + podsHintsPod("web-2", "web", "worker") + `],"exec_containers":["web","worker"],"exec_default_container":"web"}]`,
+			wantRows:       [][3]string{{"web", "web-1", "-"}, {"web", "web-0", "web*, worker"}, {"web", "web-2", "-"}},
 			wantContainers: [][]any{{"web", "worker"}},
 			wantDefault:    []any{"web"},
-			wantPods:       []string{"web-0", "web-1", "web-2"},
+			wantPods:       []string{"web-1", "web-0", "web-2"},
 		},
 		{
 			name: "multi-chart mix",
 			charts: `[` +
-				`{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0") + `,` + podsHintsPod("web-1") + `],"exec_containers":["web","worker"],"exec_default_container":"web"},` +
+				`{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0", "web") + `,` + podsHintsPod("web-1", "worker") + `],"exec_containers":["web","worker"],"exec_default_container":"web"},` +
 				`{"chart_name":"mysql","release_name":"db","pods":[` + podsHintsPod("db-0") + `]},` +
-				`{"chart_name":"cache","release_name":"cache","pods":[` + podsHintsPod("cache-0") + `],"exec_containers":["redis"]},` +
+				`{"chart_name":"cache","release_name":"cache","pods":[` + podsHintsPod("cache-0", "redis") + `],"exec_containers":["redis"]},` +
 				`{"chart_name":"jobs","release_name":"jobs","pods":[]}` +
 				`]`,
 			wantRows: [][3]string{
-				{"web", "web-0", "web*, worker"}, {"web", "web-1", "web*, worker"},
+				{"web", "web-0", "web*"}, {"web", "web-1", "worker"},
 				{"mysql", "db-0", "-"}, {"cache", "cache-0", "redis"},
 			},
 			wantContainers: [][]any{{"web", "worker"}, nil, {"redis"}, nil},
@@ -524,7 +613,10 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 				require.GreaterOrEqual(t, len(f), 8, rows[i])
 				assert.Equal(t, want[0], f[0], "CHART of row %d", i)
 				assert.Equal(t, want[1], f[1], "POD of row %d", i)
-				assert.Equal(t, []string{"Running", "1/1", "0", "1h", "-"}, f[2:7], "the other columns keep their values")
+				assert.Equal(t, []string{"Running", "0", "1h", "-"}, append([]string{f[2]}, f[4:7]...), "the other columns keep their values")
+				ready := strings.Split(f[3], "/")
+				require.Len(t, ready, 2, f[3])
+				assert.Equal(t, ready[0], ready[1], "READY of row %d", i)
 				require.Greater(t, len(rows[i]), execCol, rows[i])
 				assert.Equal(t, want[2], rows[i][execCol:], "EXEC of row %d is aligned under the header and last", i)
 			}
@@ -647,10 +739,22 @@ func TestStackPodsCmd_ExecHintsWithEvents(t *testing.T) {
 	assert.Equal(t, "EXEC", strings.Fields(header)[7])
 	require.Len(t, rows, 2)
 	assert.True(t, strings.HasSuffix(rows[0], "app*, sidecar"), rows[0])
-	assert.True(t, strings.HasSuffix(rows[1], "app*, sidecar"), rows[1])
-	assert.Regexp(t, `backend\s+backend-2\s+Running\s+1/2\s+7\s+1h\s+CrashLoopBackOff\s+app\*, sidecar`, out)
+	assert.Regexp(t, `backend\s+backend-2\s+Running\s+1/2\s+7\s+1h\s+CrashLoopBackOff\s+-\n`, out, "a pod that is not ready gets no hint")
 	assert.Contains(t, out, "LAST SEEN")
 	assert.Regexp(t, `\n\s*LAST SEEN\s+TYPE\s+REASON\s+OBJECT\s+COUNT\s+MESSAGE\n`, out, "the events header has no EXEC")
+}
+
+func TestStackPodsCmd_ExecHintsUnplaced(t *testing.T) {
+	// A hinted container that no listed Ready pod runs goes under the table.
+	charts := `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0", "web") +
+		`],"exec_containers":["web","worker"],"exec_default_container":"worker"},` +
+		`{"chart_name":"idle","release_name":"idle","pods":[],"exec_containers":["app"]}]`
+	out, _ := runPods(t, `{"namespace":"stack-demo","exec_hints":true,"charts":`+charts+`}`, "table")
+	_, rows := podsTableRows(t, out)
+	require.Len(t, rows, 1)
+	assert.True(t, strings.HasSuffix(rows[0], " web"), rows[0])
+	assert.Contains(t, out, "\n\nExec containers on no listed pod ('stack exec -c' can still work):\n  web: worker*\n")
+	assert.NotContains(t, out, "idle:", "a chart without pods gets no line")
 }
 
 func TestStackPodsCmd_ExecHintsOnlyValidNames(t *testing.T) {
@@ -658,7 +762,7 @@ func TestStackPodsCmd_ExecHintsOnlyValidNames(t *testing.T) {
 	// are shown, so the column cannot carry shell syntax, a fake "*" or ", ",
 	// escapes or bidi controls.
 	charts := []map[string]any{
-		{"chart_name": "web", "release_name": "web", "pods": []any{json.RawMessage(podsHintsPod("web-0"))},
+		{"chart_name": "web", "release_name": "web", "pods": []any{json.RawMessage(podsHintsPod("web-0", "ok", validName63))},
 			"exec_containers":        append(append([]string{"ok"}, unsafeContainerNames...), validName63),
 			"exec_default_container": "a\x1b[2J"},
 		{"chart_name": "tok", "release_name": "tok", "pods": []any{json.RawMessage(podsHintsPod("tok-0"))},
@@ -716,7 +820,7 @@ func TestStackPodsCmd_ExecHintsByName(t *testing.T) {
 		case "/api/v1/stack-instances":
 			_, _ = io.WriteString(w, `{"data":[{"id":"42","name":"my-stack"}],"total":1,"page":1,"pageSize":25}`)
 		case "/api/v1/stack-instances/42/pods":
-			_, _ = io.WriteString(w, `{"namespace":"ns","exec_hints":true,"charts":[{"chart_name":"web","pods":[`+podsHintsPod("web-0")+`],"exec_containers":["web"]}]}`)
+			_, _ = io.WriteString(w, `{"namespace":"ns","exec_hints":true,"charts":[{"chart_name":"web","pods":[`+podsHintsPod("web-0", "web")+`],"exec_containers":["web"]}]}`)
 		default:
 			w.WriteHeader(http.StatusTeapot)
 		}
