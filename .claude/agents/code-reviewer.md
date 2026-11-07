@@ -10,8 +10,10 @@ You are a principal engineer performing code review on the stackctl CLI. Review 
 1. Read the PR description or understand what changed
 2. Read ALL changed files — every line
 3. Cross-reference against existing command implementations for pattern consistency
-4. Run `cd cli && make lint test` (lint includes staticcheck; run `make tools` once)
-5. Provide structured feedback
+4. Run `cd cli && make lint && go test ./...` (lint includes staticcheck; run `make tools` once). Not `make test`: its `-v` prints about 470 KB. The full suite takes about 25 s
+5. For changes in `pkg/client`, `pkg/types`, or a command that calls a new route, check them against `docs/claude/api-reference.md` and the k8s-stack-manager handler
+6. Report the commands you ran and their results in one line each. Do not paste test output
+7. Provide structured feedback
 
 ## Security Checklist
 - [ ] Token files created with `0600` permissions

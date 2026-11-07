@@ -6,86 +6,21 @@ Go CLI tool (Cobra + yaml.v3) for managing Kubernetes stack deployments. Pure AP
 
 Go version: see `cli/go.mod` (1.27.3 or later); the Dockerfile builder image may be newer.
 
-## Project Structure
+**Map.** The Go module root is `cli/`; run go commands there.
 
-```
-.github/
-  workflows/                  # ci.yml, docker.yml, live-tests.yml, release.yml, security.yml
-  instructions/               # Copilot path instructions
-.claude/agents/               # Claude Code agent definitions
-.goreleaser.yml               # Release config (GoReleaser)
-Dockerfile                    # Container image
-install.sh                    # Install script (honours INSTALL_DIR)
-LICENSE                       # MIT license
-README.md                     # Overview, install, quick start, documentation map (keep it short)
-CONTRIBUTING.md               # Development setup, structure, tests, pull requests
-docs/                         # installation.md, configuration.md, commands.md (examples per command group, output formats, flags), server-versions.md
-assets/                       # Terminal images of the README (made with `freeze --execute "stackctl --help" --theme dracula --window`)
-entities.json, mempalace.yaml # Mempalace mining config
-cli/                          # Go module root (github.com/omattsson/stackctl/cli); run go commands here
-  main.go                     # Entry point
-  Makefile                    # build, build-all, test, lint, coverage, install, clean, tools
-  cmd/
-    root.go                   # Root cobra command, global flags, config loading, flag > env > config (resolveAPIURL, resolveAPIKey)
-    config.go                 # config set/get/list/use-context/current-context/delete-context
-    version.go                # Version info (build-time ldflags)
-    agent_guide.go, .md       # agent-guide: embedded Markdown guide for agents and scripts ({{VERSION}} = build version); agent_guide_test.go checks every stackctl command and flag in it
-    login.go                  # login, logout (--all: logout-all first), whoami, auth register
-    token.go                  # Token helpers (save/load/delete session, fresh token for plugins)
-    stack.go                  # stack list/get/create/update/deploy/stop/clean/delete/status/logs/clone/extend/values/compare/history/rollback/history-values/watch
-    stack_inspect.go          # stack preview/pods/recent (deploy-preview, live pods and events with the EXEC column of the exec hints, recent)
-    stack_action.go           # stack action list/run/log (custom actions of the hooks config; job log polling with backoff)
-    stack_followers.go        # stack follow/unfollow (in-app notifications; not the --follow log flag)
-    stack_portforward.go      # stack port-forward (parsePortSpec, --address, listeners with port fallback, one tunnel per local connection); addrinuse_*.go: EADDRINUSE per OS
-    stack_exec.go             # stack exec (args after '--', -c, signals: execSignals/execForceExit, exit code mapping)
-    exitcode.go               # ExitError{Code, Err}: main.go exits with Code (stack exec); exit codes 124, 130, 255
-    ttl.go                    # --ttl/--stop-at/--until parsing, TTL limit check (GET /api/v1/ui-config, 30-day fallback), expiry text
-    server.go                 # server info (ping, ui-config; public routes, no credentials)
-    template.go               # template list/get/create/update/clone/publish/unpublish/versions/instantiate/quick-deploy/delete
-    definition.go             # definition list/get/create/update/delete/export/import/update-chart
-    chart_changes.go          # definition add-chart/remove-chart/check-upgrade/upgrade/link-template, template add-chart/remove-chart
-    override.go               # override list/get/set/unset/delete, branch overrides (list/get/set/delete), quota overrides (quota set merges with GET, --replace)
-    bulk.go                   # bulk deploy/stop/clean/delete, bulk template publish/unpublish/delete (--ids flag or positional args)
-    git.go                    # git providers/branches/validate
-    cluster.go                # cluster list/get/create/update/delete/set-default/test-connection/health/nodes/namespaces/utilization (create/update --allow-port-forward/--allow-exec: per-cluster stream switches; update sends false. --api-server-url is required with a kubeconfig flag; --use-in-cluster excludes the kubeconfig flags), quota get/set/delete, shared-values list/set/update/delete (update: GET list, merge, PUT the full record)
-    analytics.go              # analytics overview/templates/users
-    apikey.go                 # apikey list/create/revoke
-    audit.go                  # audit log list/export
-    cleanup_policy.go         # cleanup-policy list/get/create/update/delete/run
-    favorite.go               # favorite list/add/remove/check
-    dashboard.go              # dashboard (GET /api/v1/dashboard: failing, expiring, recent deployments, clusters)
-    notification.go           # notification list/count/read/read-all/prefs
-    notification_channel.go   # notification channel list/get/create/update/delete/events/subscriptions/subscribe/test/logs (webhook URL masked unless --show-url)
-    orphaned.go               # orphaned list/delete
-    user.go                   # user list/delete/disable/enable/reset-password/set-role
-    values.go                 # --set value parsing helpers (key paths, scalar types) for stack and override commands
-    browser.go                # Open a URL in the browser (SSO login)
-    paging.go                 # List paging helpers (page, pageSize, listAllIDs)
-    resolve.go                # Name-to-ID resolution
-    plugins.go                # Plugin discovery (stackctl-<name> on PATH) and exec
-    completion.go             # Shell completion generation (bash/zsh/fish/powershell)
-    testdata/                 # Golden files for cmd tests
-  pkg/
-    client/
-      client.go              # HTTP client wrapper (auth headers, base URL, error handling)
-      auth.go                # Session renewal (refresh token, 401 retry), login/refresh/logout calls
-      websocket.go           # WebSocket client (watch, deploy log streaming); stream dial without ?token= (dialWSOpts), handshake error codes, close codes, keepalive
-      portforward.go         # DialPortForward and Tunnel (byte copy, half-close handling, keepalive)
-      exec.go                # Exec (start message, stdout/stderr frames, exit frame, close codes), ValidateExecCommand
-    types/
-      types.go               # Client-side structs matching API responses
-    config/
-      config.go              # YAML config via yaml.v3 (config.yaml in the config dir)
-      token.go               # Token file store (tokens/<context>.json) + cross-process lock
-      lock_*.go              # flock (unix) / LockFileEx (windows) / no-op (other)
-    output/
-      output.go              # Table, JSON, YAML formatters
-  test/
-    e2e/                     # Binary execution end-to-end tests (cli_e2e_test.go)
-    integration/             # Integration tests against a mock API (*_integration_test.go)
-    contract/                # Swagger contract tests; refresh-swagger.sh refreshes testdata/swagger.json
-    live/                    # Live tests against a real backend (build tag `live`)
-```
+- `cli/cmd/`: Cobra commands, one file per command group. `root.go` holds the global flags and config resolution; `agent_guide.md` is the embedded guide for agents and scripts.
+- `cli/pkg/client/` (HTTP client, auth renewal, WebSocket), `pkg/config/` (config file, tokens), `pkg/output/` (table, JSON, YAML, quiet), `pkg/types/` (API structs).
+- `cli/test/`: `integration/`, `e2e/`, `contract/` (against `testdata/swagger.json`), `live/` (build tag `live`).
+- `docs/`: user docs. `.claude/agents/`, `.claude/skills/`: Claude Code agents and skills.
+
+## Reference Docs
+
+These files do not load on every request. Read the matching file before you work in its area.
+
+| Area | File |
+|---|---|
+| Server routes that stackctl calls, server behavior and minimum versions per endpoint (`pkg/client`, `pkg/types`, commands that call the API) | `docs/claude/api-reference.md` |
+| Full file tree with the role of each file | `docs/claude/structure.md` |
 
 ## Development Commands
 
@@ -93,7 +28,7 @@ cli/                          # Go module root (github.com/omattsson/stackctl/cl
 |------|---------|
 | Build | `cd cli && make build` (or `go build -o bin/stackctl .`) |
 | Build all platforms | `cd cli && make build-all` |
-| Run tests | `cd cli && make test` (`go test ./... -v`) |
+| Run tests | `cd cli && make test` (`go test ./... -v`). Agents run `cd cli && go test ./...` instead: same tests, but `-v` prints about 470 KB. Add `-run <Test> -v` only to look at one failing test |
 | Install lint tool | `cd cli && make tools` (installs staticcheck; run once before `make lint`) |
 | Lint | `cd cli && make lint` (`go vet` + `staticcheck`) |
 | Coverage | `cd cli && make coverage` (`go test ./... -coverprofile=coverage.out` + `go tool cover -func`) |
@@ -187,53 +122,6 @@ contexts:
 - Validate TLS certificates by default (allow `--insecure` flag for dev only)
 - Clear credentials from memory after use where possible
 
-## API Reference
-
-Backend: [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager)
-
-All API calls go to `/api/v1/*`. Key route groups:
-- `/api/v1/auth` — login, register, current user
-- `/api/v1/stack-instances` — CRUD + deploy/stop/clean/status/logs/clone/extend/values/compare
-  - `POST /:id/extend` with `{"minutes": N}` adds N minutes to the expiry (never earlier, TTL unchanged, capped at now + 30 days; N <= 0 or no TTL and no expiry → 400). `stack extend --minutes` uses this body and needs k8s-stack-manager v0.6.0 or later. After the call it checks that the new expiry is at least max(old expiry, server time) + N − 2 min (server time = `updated_at` of the response, else the local clock) or at the 30-day cap; if not (an older server ignored `minutes`), it prints the result and fails with "upgrade k8s-stack-manager to v0.6.0 or later". The deprecated `{"ttl_minutes": N}` resets the expiry to now + N and sets the TTL; the server adds a `Warning` header. Only `stack extend --reset-ttl` (deprecated) sends it. `--yes` on `stack extend` is hidden and has no effect (script compatibility).
-  - List paging (`cmd/paging.go`): instances, definitions and templates return `data`, `total`, `page`, `pageSize` (default 25, max 100; v0.7.0+ also pages `owner=me` and `name`). List commands write "Showing X of TOTAL" to stderr when `total` > rows. `-q` without `--page` loops pages with `pageSize=100` (`listAllIDs`: stops at `total`, a short page, or a page without new IDs). Name resolution errors add "(N matches, first M shown)".
-- `/api/v1/stack-instances/bulk` — bulk operations
-  - `GET /:id` returns `values_drift` (v0.6.0+, not on lists); the rollback response has `values_drift` (`*bool`, only for `target_log_id`) and `warning`; the clone response adds `warning` (quota override not copied; v0.7.0+). `stack rollback -o json|yaml` prints the response. `stack get`, `stack rollback` and `stack clone` write these warnings to stderr as `Warning: <text>` (`printServerWarning`, sanitized). `stack get` fills `warning` with `types.ValuesDriftWarning` when the server sends `values_drift` without text, so `-o json` has both fields.
-  - `owner_username`, `cluster_name`, `definition_name` (k8s-stack-manager#470, v0.7.0+) are optional; tables show the name (`displayName`) or "name (id)" (`displayNameWithID`), else the ID. No extra API calls.
-  - `PUT /:id/quota-overrides` replaces the whole override. `override quota set` does GET (only 404 "Instance quota override not found" = no override), applies the given flags (`""` clears a string field; pod_limit only via `--replace` or delete; `--pod-limit 0` = no limit) and PUTs; `--replace` skips the GET. An empty result is refused (points to `override quota delete`). GET and PUT are not atomic: a concurrent change is overwritten. Owners without admin/devops get 403 above the cluster quota (v0.7.0+); a value equal to the stored value passes.
-- `GET /api/v1/stack-instances/:id/exec?chart=&container=` — `stack exec` (omattsson/stackctl#179, k8s-stack-manager#723, server PR #725, merged; k8s-stack-manager v0.15.0 or later, `client.ExecServerVersion`). Same dial, header auth and `{"error","code"}` refusals as port-forward (`WSHandshakeError` with `Op` "exec" and `Container`; exec hints in `execHint`: `container_not_allowed`, `cluster_exec_disabled`, `chart_not_found`, `container_not_found`, `no_ready_pod`, `exec_limit`, `service_account_token`, `token_check_forbidden`, 400 `invalid_chart` / `invalid_container` (the server checks the names; no DNS-1123 check of the user's names in stackctl)). `container` is left out without `-c`. Refusal hints: for `container_not_allowed`, `container_not_found` and `service_account_token` (not after an interrupt) `addExecHints` (`stack_exec.go`) builds a `bestEffortClient` (before the goroutine) and makes one `GetStackPods(id, true)` with it inside `bestEffortCtx` (so Ctrl-C does not wait), and sets `WSHandshakeError.ExecHints` (`client.ExecHintsForChart`: nil = unknown, the error stays as before). Only Kubernetes container names from the server count (`client.ValidContainerName`: DNS-1123 label, at most 63 characters; `client.ExecContainerNames` drops every other name and duplicates), so a suggestion is safe to paste into a shell without quoting; a chart with no valid name counts as an empty list. `execHintAdvice` then replaces the advice of the code: ". Use -c a, -c b or -c c." (the `-c` container left out, at most 8, then "or one of N more (see 'stackctl stack pods')"; nothing left → the old advice) or, for an empty list while another chart has one, ". The server lists no container of chart X that accepts exec; ask an administrator." (the server checks within a read budget and can leave out a container that works). Exit code stays 255. API-key pre-check: with `c.APIKey` set, `checkStreamAPIKey` (`stack_portforward.go`, after `checkStreamTransport`, before `resolveStackID`) reads `GET /api/v1/ui-config` through `publicBestEffortClient` (no API key, no token); `stream_api_keys_allowed` false → "exec not started: the server does not allow API keys for exec; " + `client.StreamAPIKeyAdvice` (the same advice as the `api_key_not_allowed` refusal), exit 255 (`beforeDial` keeps an interrupt at 130); nil, true or a failed read → dial as before; Ctrl-C during the check → `errExecNotStarted` (130) without a stack lookup. The command goes only in the first text frame `{"type":"start","command":[...]}` (`types.ExecStartMessage`; the server closes 4408 without it in 10 s). Fixed rules checked before the dial (`client.ValidateExecCommand`): 1 to 256 arguments, first not empty, no NUL; the length limit (`STACK_EXEC_MAX_COMMAND_LENGTH`, default 4096) is not exposed, so a long command gets close 4400. Server frames (`types.ExecServerMessage`): `started` (pod, container; the only thing `--debug` logs), binary frames with stream byte 1 stdout / 2 stderr (written unbuffered; unknown bytes, empty frames and unknown types ignored), `exit` (`exit_code`) + close 1000, or `error` (`message`) + 4502 (pod stream) / 1011 (internal). One reader goroutine, read limit 1 MiB, the keepalive of port-forward. Close codes: 4001 → `ErrExecTimeLimit` (no exit frame); others → `*ExecClosedError` (1008 unwraps to `WSClosedError` but has its own text: "token expired" never says "run the command again" while it can still run; 4400 "the server refused the command (too long or not valid)"; 1009 "the command is too long for the server"). The server sends `started` before it runs the command and its frames arrive in order, so a close frame without `started` or output (a binary frame) before it ends with "; the server did not start the command"; with `started` or output, and for a lost connection (code 0, gorilla 1006: plain "exec: connection lost; the command can still run on the server", no gorilla text) it ends with "; the command can still run on the server". A frame over the 1 MiB read limit (`websocket.ErrReadLimit`) has its own text. Ctx cancel: close 1000, wait up to 2 s (`CancelWait`) for an exit frame, else `*ExecCanceledError{Started}` (`errors.Is` matches `ctx.Err()`; `Started` false only for a cancel before, during or right after the dial (checked before the start frame, so the command is never sent) or a server close frame without `started` or output; `stack exec` then says "interrupted before the command started" (also for an interrupted run that ends with an `*ExecClosedError` with a close code and without `Started`, with the server text: `interruptedExit`), else "interrupted; the command can still run on the server", both exit 130). Stream dials (`dialStream`, also port-forward) close the connection when ctx ends during the handshake (`closeOnCancel`: gorilla v1.5.3 honours only the ctx deadline, so a held upgrade would wait for the 45 s handshake timeout). The second Ctrl-C writes "interrupted" from a goroutine to the raw stderr (never through the `syncWriter`, which the reader can hold in a blocked remote stderr write) and waits at most 100 ms (`writeNoteNoWait`) before `execForceExit(130)`. Remote output is passed through unchanged, terminal escape sequences included (help, docs/commands.md and agent guide say so). Never reconnects. The route is in the vendored swagger, so the normal path contract check covers it. `pendingRoutes` in `test/contract/path_contract_test.go` is empty; it is for a route that exists only in an open backend PR (keyed by the literal, with the PR and the expected swagger path; the literal must match that path, and the test fails as soon as the vendored swagger has it).
-- `GET /api/v1/stack-instances/:id/pods?exec_hints=true` — `stack pods` and the exec refusal hints (`GetStackPods(id, execHints)`; never on `/status`: `GetStackStatus` does not send it, the hints cost server reads). k8s-stack-manager v0.15.0+ (#728) adds `exec_hints: true` and per chart `exec_containers` / `exec_default_container` (by `release_name`, the name the exec route takes; `ExecHintsForChart` falls back to `chart_name`, defensive: the server sets `chart_name` to the release name) only for a caller who may modify the stack, exec on, cluster `allow_exec` (API keys also need `STACK_STREAM_ALLOW_API_KEYS`); else the response is unchanged. A chart without a list while another chart has one: the server lists no container of it that accepts exec (it can still leave out one that works: the token check has a read budget). No list on any chart: ambiguous (none accepted, or not computed: not deployed, shared namespace, read failure, over 3 s). Conservative: may leave out a working container, never lists a refused one. `stack pods -q` sends no `exec_hints` (`GetStackPods(id, !printer.Quiet)`). The `stack pods` table adds `EXEC` as the last column only with `exec_hints` (`execContainersText`: `web*, worker`, only `client.ExecContainerNames`, `*` = a valid default, `-` = no valid name); the CHART, POD, PHASE and REASON cells and the namespace of "No pods found" are sanitized (`client.SanitizeServerText`).
-- `GET /api/v1/ui-config` (public) — `UIConfig.StreamAPIKeysAllowed *bool` (`stream_api_keys_allowed`, v0.15.0+; nil = older server) drives the API-key pre-check of `stack exec` and `stack port-forward`.
-- `/api/v1/audit-logs` — list/export; `--action` and `--entity-type` are exact matches (`deploy`, `stack_instance`, …; v0.7.0+, see `auditFilterValuesHelp`). Older servers: HTTP method + last route segment (`create` / `deploy`)
-- `/api/v1/users` — list/delete/disable/enable/password (admin). `PUT /:id/role` `{"role"}` (k8s-stack-manager v0.8.0+, `user set-role <user> <role>`, user by ID or username via `resolveUserID`): response `id`, `old_role`, `new_role`, `changed`; 403 own role / caller not admin, 409 SSO user / last admin, 400 invalid role; a plain 404 (no route) maps to the v0.8.0 upgrade hint (`setRoleError`)
-- `/ws` — the server closes a socket with code 1008 and reason `session revoked` or `token expired`. `Client.Watch` returns a `WatchStream`; `Err()` gives a `*WSClosedError` ("Connection closed by the server: <reason>. Log in again."). `stack watch` exits non-zero on it; for `token expired` it calls `Client.RenewSession` (forced renewal, false without refresh token) and reconnects, at most once per 30 s (`stackWatchMinReconnect`), then with `--id` GETs each pending instance (`watchCatchUp`) so a terminal status in the gap counts. Ctrl-C during renewal or dial exits 0. Another connection loss: `--id` with pending instances exits non-zero ("connection lost before all instances reached a terminal status"), else a stderr note and exit 0. `StreamDeploymentLogs` returns the same `WSClosedError`; `--follow` (`followLogsCtx`, op deploy/stop/clean/rollback, "" for `stack logs -f`) uses the same `renewAfterClose`; it reads the instance after the first connect (the server sets deploying/stopping/cleaning before the 202; not for `logs -f`) and after each reconnect (`StreamOptions.AfterSubscribe`). A normal close (code 1000, stream status `unknown`) reads the instance (`followEndError`): a final status counts, else it fails like a lost connection. When it cannot follow to the end it says that the operation continues on the server and points to `stack watch --id` / `stack status` (never "run again"); errors name the operation ("rollback failed (status error): ..."). Terminal statuses live in `client.IsTerminalStatus` (running, stopped, draft, error, partial, failed) and `client.IsFailedStatus` (error, partial, failed → exit 1)
-- `GET /api/v1/stack-instances/:id/port-forward?service=&port=` — `stack port-forward` (omattsson/stackctl#178, k8s-stack-manager#722). WebSocket upgrade, auth only by header (`dialWSOpts` with `stream`: no `?token=` retry, a 401 gets one forced `RenewSession` and one more dial; no `Origin` header). Refusals are HTTP statuses with `{"error","code"}` (`WSHandshakeError.Code`, `StreamCode*`): `FeatureDisabled()` (404 `feature_disabled`), `NoRoute()` (404 without a code: older server; hint `client.PortForwardServerVersion`), `UpgradeDropped()` (2xx, or 400 without a code or `upgrade_required`: a proxy), `Fatal()` (400, 401, 403, 404, 409 stop the command; 429, 5xx and network errors close one connection; a 429 `tunnel_limit` first gets 3 dial retries (`portForward429Delays`: 0.5, 1, 2 s, for tunnels that drain or close; the rate limiter's 429 is not retried); 3 connections in a row refused with 429, each while no other connection of the command dials or tunnels (`portForwarder.active`, decremented before the refused local connection closes; a refusal with others active resets `rateLimited`), stop the command (`portForwardMax429`), so a full server tunnel limit never closes working tunnels). After the upgrade: binary frames of at most 32 KiB both ways (server read limit 64 KiB), no half-close. `Client.Tunnel`: one reader and one writer goroutine, pings and the close through `WriteControl`; pings from their own goroutine every 30 s (a waiting ping cannot delay a cancel), read deadline 75 s moved by data, ping or pong; a local write deadline of 75 s; after a local EOF the tunnel copies server data to local until the server closes, a local write fails, or `DrainTimeout` (2 s) passes without server data, and only then sends close 1000; a server close 1000 does `CloseWrite` on the local socket. A 401 on the stream dial renews with the refused token (`renewSession(stale)`), so parallel 401s send one refresh. Close codes (`Close*` constants, `CloseCodeText`): 1001 shutdown, 1008 (`StreamClosedError.Fatal`, unwraps to `WSClosedError`; reason `session revoked` → login advice, `access revoked` (`CloseReasonAccessLost`) → stack stopped, deleted or cleaned, or access changed), 1011, 4001 time limit, 4002 idle, 4502 pod stream error. `--insecure`, and an `http://` API URL to a host that is not loopback (`plaintextRemoteURL`), are refused unless `--allow-insecure-stream` (`checkStreamTransport`, shared with `stack exec`; "insecure" is `effectiveInsecure()` in `root.go`, the same check as the TLS warning and `applyInsecureTLS`). With an API key, `checkStreamAPIKey` (shared with `stack exec`) stops before the stack lookup when `/ui-config` says `stream_api_keys_allowed: false` ("port-forward not started: ...", exit 1); no call without an API key. Ctrl-C during the check or the stack lookup returns nil (exit 0, as in `serve`) before `bindPortForward`. At most 16 open tunnels (`portForwardConnLimit`); a further connection is closed at once. The non-loopback warning checks the bound address (`warnNonLoopback`). SIGTERM ends the command like Ctrl-C (`portForwardSignals`; `stack_portforward_signal_test.go` sends a real SIGTERM to a subprocess, not on Windows). A fatal tunnel error is not repeated in the per-connection close line.
-- `/api/v1/admin/orphaned-namespaces` — `orphaned list [--details]`; `DELETE /:ns?confirm=<ns>` is needed for a namespace without the label managed-by=k8s-stack-manager (409 without it; `orphaned delete --confirm`). `test/contract/path_contract_test.go` checks every `/api/v1` literal of `pkg/client` and `cmd` against the vendored swagger
-- `POST /api/v1/auth/logout-all` — `logout --all`: uses the session token of the context when a token file exists (also when an API key is set), else the API key; a 401 gets one forced `RenewSession` and one retry. On failure the command stops and keeps the token file; on success the normal logout follows.
-- `GET /api/v1/dashboard` — `dashboard`: covers all users; `failing_instances` has status error only, `expiring_soon` the next hour. For the role `user`, `clusters` has ID and name only (no health): the table hides clusters without `health_status`.
-- `GET /api/v1/favorites/check?entity_type=&entity_id=` — `favorite check` prints yes or no (exit 0).
-- `PUT /api/v1/clusters/:id/shared-values/:valueId` replaces the full record (no GET for one entry): `shared-values update` reads the list, merges and sends name, description, values and priority. `--set` re-marshals the stored YAML (comments and key order are lost; a stderr note says so).
-- `/api/v1/admin/notification-channels` (devops or admin) — `notification channel ...`. The responses carry the full `webhook_url` (it can hold a token): every output mode masks it to scheme and host (`maskWebhookURL`) unless `--show-url`. The server never returns the secret; the CLI reads it from `--secret-env NAME` or `--secret-stdin` only. The URL can also come from `--url-env NAME`; error texts never contain the URL. `PUT /:id` changes only the fields sent (`secret: ""` removes the secret; `filters` replaces all filters, `{}` removes them). `PUT /:id/subscriptions` replaces all event types (400 for an unknown one). `POST /:id/test` answers 200 with `success`; the command exits 1 when it is false. Create and update return `warnings` (unknown filter IDs) → stderr.
-- `/api/v1/notifications` and `/count` — the server caps the counts (k8s-stack-manager #654): `total` is exact up to offset + 1000 (`total_capped`), `unread_count` up to 1000 (`unread_count_capped`); an older server sends neither flag (false). `notification list` prints "1000+" in the footer; `notification count` keeps stdout a bare integer and writes a note to stderr when capped; `-o json`/`-o yaml` carry the flags.
-- `/api/v1/notifications/preferences` — `notification prefs set` warns for an event type not in `notificationEventTypes` (`notifier.AllEventTypes()` of k8s-stack-manager); v0.8.0+ servers return 400
-- `/api/v1/stack-definitions` — CRUD + export/import
-  - `POST /:id/charts` and `DELETE /:id/charts/:chartId` (devops or admin; `definition add-chart`, `remove-chart`). A linked definition cannot lose a chart that the template requires (409 "Cannot delete required chart: X").
-  - `GET /:id/check-upgrade` sends only `{"upgrade_available": false}` when there is no upgrade (no source template, unpublished template, latest version). `printUpgradeCheck` reads the definition (`source_template_id`, `source_template_version`) for the reason. The server marks a chart `modified` only for other default values or another repository URL; the table also marks a chart with `has_differences` in `chart_diffs` as modified.
-  - `POST /:id/upgrade` (owner, devops or admin) replaces the default values of the template charts. `definition upgrade` shows the check on stderr and confirms unless `--yes`. 409 "Definition is already at the latest version" or "Template has no published version".
-  - `PUT /:id/template-link` `{"template_id","version"}` (k8s-stack-manager v0.11.0+, devops or admin; empty `template_id` removes the link). A plain 404 (no route) maps to the v0.11.0 upgrade hint (`linkTemplateError`).
-- `/api/v1/templates` — list/get/instantiate/quick-deploy/publish/versions
-  - Draft and release (k8s-stack-manager v0.6.0+): `PUT /:id` and the template chart routes change only the working copy. `POST /:id/charts` and `DELETE /:id/charts/:chartId` (`template add-chart`, `remove-chart`) write a note to stderr: publish with a new `--version` (the working-copy version already exists after a change). Users, quick deploy, instantiate and definition upgrades get the latest release. After `template update-chart`, run `template publish <name|id> --version <new>` so users get the change.
-  - `POST /:id/publish` takes an optional body `{"version", "change_summary"}`; `template publish` sends it only when `--version` or `--change-summary` is set. Without a version the server uses the working-copy version. 409 "Version x already exists" and 400 "Version is required to publish" map to messages with the next command. 200 with `snapshot_created: false` prints "No changes since version X; no new version created". With `--version` or `--change-summary`, the command first does GET `/:id`; when `has_unpublished_changes` is absent (older server, which ignores the body) it fails with the v0.6.0 upgrade hint before the publish.
-  - `PUT /:id`: v0.6.0+ changes only the fields sent (`PatchTemplateRequest`, pointer fields; `""` clears); older servers replace name/description/category/version/default_branch. `template update` does GET first: with `has_unpublished_changes` present it sends only the changed fields, else the full record (`UpdateTemplateRequest`). `--version` sets the working-copy version; `--description ""` clears.
-  - Name resolution (`resolveTemplateID`, used by `template publish` and bulk template commands): sends `?name=` (v0.5.0 ignores it), pages through the result with `pageSize=100`, and matches the exact name on the client. 0 → not found; more than 1 → "multiple templates named X: <ids>".
-  - `GET /:id` adds `published_version`, `published_version_id`, `published_charts`, `has_unpublished_changes` (absent on older servers; `StackTemplate.HasUnpublishedChanges == nil` means an older server). `template get` marks each chart against the release; `--released` lists the released charts.
-  - Instantiate and quick deploy of a template without a release: 409 "Template has no published version" (older quick deploy: 400 "Template is not published") map to "publish it first: stackctl template publish X --version ...". A best-effort GET picks a plain `stackctl template publish X` when the template has a release (or the server is older).
-  - `template get` labels the version "Working copy version" when `has_unpublished_changes` is present (managers); chart notes compare values after trimming trailing whitespace (like the server's `NormalizeValues`). An unpublished template with a release shows "(unpublished; quick deploy and use are blocked until published)".
-  - Version list/detail add `created_by_username` (fallback `created_by`). The diff accepts `working` for either side; sides carry id, change_summary, created_by(_username), created_at, is_working_copy.
-- `/api/v1/git` — branch listing, validation
-- `/api/v1/clusters` — list/get/health
-- `/api/v1/stack-instances/:id/overrides` — value overrides
-- `/api/v1/stack-instances/:id/branches` — branch overrides
-
 ## Adding a New Command
 
 1. Create command file in `cmd/` (or add subcommand to existing file)
@@ -244,3 +132,4 @@ All API calls go to `/api/v1/*`. Key route groups:
 6. Add to parent command in `init()`
 7. Write tests: flag parsing, success output, error handling
 8. If agents or scripts need to know about it (output, prompts, exit codes, waiting), update `cmd/agent_guide.md`
+9. If the command depends on a new route or server behavior, add it to `docs/claude/api-reference.md`. A new file goes in `docs/claude/structure.md`
