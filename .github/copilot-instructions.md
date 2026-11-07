@@ -9,7 +9,7 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 - All code lives under `cli/` — the Go module root (`cli/go.mod`). Run Go commands from `cli/`.
 - Go version: see `cli/go.mod` (1.27.3 or later). CI uses `go-version-file: cli/go.mod`.
 - Commands: `cli/cmd/` (one file per command group, subcommands registered in `init()`)
-- HTTP client: `cli/pkg/client/client.go` (REST), `cli/pkg/client/auth.go` (session renewal), `cli/pkg/client/websocket.go` (deployment log streaming, stream dial, close codes, keepalive), `cli/pkg/client/portforward.go` (port-forward tunnel)
+- HTTP client: `cli/pkg/client/client.go` (REST), `cli/pkg/client/auth.go` (session renewal), `cli/pkg/client/websocket.go` (deployment log streaming, stream dial, close codes, keepalive), `cli/pkg/client/portforward.go` (port-forward tunnel), `cli/pkg/client/exec.go` (stack exec stream), `cli/pkg/client/useragent.go` (User-Agent header)
 - Types: `cli/pkg/types/types.go` (client-side structs matching API responses)
 - Output: `cli/pkg/output/output.go` (table, JSON, YAML, quiet formatters)
 - Config: `cli/pkg/config/config.go` (YAML via `gopkg.in/yaml.v3`, `~/.stackmanager/config.yaml`), `cli/pkg/config/token.go` (token files), `lock_unix.go`, `lock_windows.go` and `lock_other.go` (file locks)
@@ -22,7 +22,7 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 | `config` | set, get, list, use-context, current-context, delete-context | config.go |
 | `login`/`logout`/`whoami` | top-level; supports password + OIDC loopback flow; `logout --all` ends every session of the user | login.go |
 | `auth` | register | login.go |
-| `stack` | list, get, create, update, deploy, stop, clean, delete, status, logs, clone, extend, values, compare, history, rollback, history-values, watch, preview, pods, recent, follow, unfollow, action (list, run, log), port-forward | stack.go; preview/pods/recent: stack_inspect.go; follow/unfollow: stack_followers.go; action: stack_action.go; port-forward: stack_portforward.go; TTL and stop-time helpers: ttl.go |
+| `stack` | list, get, create, update, deploy, stop, clean, delete, status, logs, clone, extend, values, compare, history, rollback, history-values, watch, preview, pods, recent, follow, unfollow, action (list, run, log), port-forward, exec | stack.go; preview/pods/recent: stack_inspect.go; follow/unfollow: stack_followers.go; action: stack_action.go; port-forward: stack_portforward.go; exec: stack_exec.go; TTL and stop-time helpers: ttl.go |
 | `template` | list, get, create, update, delete, clone, instantiate, quick-deploy, publish, unpublish, update-chart, add-chart, remove-chart, versions (list, get, diff) | template.go; add-chart/remove-chart: chart_changes.go |
 | `definition` | list, get, create, update, delete, export, import, update-chart, add-chart, remove-chart, check-upgrade, upgrade, link-template | definition.go; add-chart/remove-chart/check-upgrade/upgrade/link-template: chart_changes.go |
 | `override` | list, get, set, unset, delete, branch (list/get/set/delete), quota (get/set/delete) | override.go |
@@ -41,6 +41,7 @@ stackctl is a Go CLI tool (Cobra) for managing Kubernetes stack deployments. It 
 | `completion` | bash, zsh, fish, powershell | completion.go |
 | `server` | info | server.go |
 | `version` | top-level | version.go |
+| `agent-guide` | top-level; prints the embedded guide for agents and scripts (`agent_guide.md`) | agent_guide.go |
 
 Helper (non-command) files in `cli/cmd/`:
 - `browser.go` — `openBrowser()` for OIDC loopback flow. Override `browserOpener` in tests.
@@ -51,6 +52,7 @@ Helper (non-command) files in `cli/cmd/`:
 - `token.go` — token storage helpers (load/save/delete JWT under `~/.stackmanager/tokens/`).
 - `version.go` — the `version` command and build-time version variables.
 - `root.go` — global flags, `newClient()`, `resolveAPIURL()`, `resolveAPIKey()`, `applyInsecureTLS()`.
+- `exitcode.go` — `ExitError` carries an exit code to `main.go`. `stack exec` exits with the remote command's code, or 124 (time limit), 130 (interrupted), 255 (stackctl error); other errors exit 1.
 
 ## Code Review Guidelines
 
@@ -65,6 +67,13 @@ When reviewing PRs for this project, check:
 - Flag precedence: flag > env var (`STACKCTL_*`) > config file
 - Stack-scoped commands accept name or ID via `resolveStackID()`; commands that take non-name sub-resource IDs (chart IDs, cluster IDs) use `parseID()`
 - New `stackctl-<name>` plugin-style executables on PATH are discovered automatically — do not hardcode plugin paths
+
+### Streams (`stack port-forward`, `stack exec`)
+- Stream dials go through `pkg/client` (`dialWSOpts` with `stream`): auth by header only, never a `?token=` query, no `Origin` header. A 401 gets one forced `RenewSession` and one more dial.
+- Refusals arrive as an HTTP status with `{"error","code"}` (`WSHandshakeError`, `StreamCode*`). Map each code to a user hint; a 404 without a code means an older server, so the hint names the minimum version (`client.PortForwardServerVersion`, `client.ExecServerVersion`).
+- Before using an API key on a stream, check `UIConfig.StreamAPIKeysAllowed` (nil means an older server).
+- Commands return errors (`ExitError` for a specific code). Only `main.go`, plugin pass-through and the forced exit of `stack exec` call `os.Exit`.
+- When a change alters output, prompts, exit codes or waiting, `cli/cmd/agent_guide.md` must change too.
 
 ### Security
 - Token files must be `0600` — never world-readable
