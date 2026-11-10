@@ -68,7 +68,8 @@ stackctl stack pods my-app                # live pods and warning events
 # "-" none listed (none accepts exec, or the server could not check them, for example a failed read or a check over
 # 3 s). Only Kubernetes container names are shown. Without hints there is no EXEC column; -q asks for no hints.
 # Agents: read `stackctl stack pods my-app -o json` instead: exec_hints (true), per chart exec_containers and
-# exec_default_container (as received from the server).
+# exec_default_container (as received from the server), and exec_pods (the pod that `stack exec -c <name>` picks;
+# k8s-stack-manager v0.17.0 or later).
 stackctl stack logs my-app                # latest deployment log
 stackctl stack values my-app              # merged Helm values
 stackctl stack preview my-app             # values that the next deploy uses
