@@ -1328,6 +1328,9 @@ type ChartStatus struct {
 	// ExecDefaultContainer is the container that "stack exec" uses without
 	// -c. Set only when that call would be accepted.
 	ExecDefaultContainer string `json:"exec_default_container,omitempty" yaml:"exec_default_container,omitempty"`
+	// ExecPods maps each container of ExecContainers to the pod that
+	// "stack exec -c <name>" picks (k8s-stack-manager v0.17.0 or later).
+	ExecPods map[string]string `json:"exec_pods,omitempty" yaml:"exec_pods,omitempty"`
 }
 
 // PodStatus is the status of one Kubernetes pod (k8s.PodInfo).

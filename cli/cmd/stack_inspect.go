@@ -139,15 +139,16 @@ or stopped, for example CrashLoopBackOff or ImagePullBackOff.
 The last column, EXEC, lists the containers of the pod that
 'stackctl stack exec' accepts with -c; "*" marks the container that it
 uses without -c (for example "web*, worker"). A container is shown only on
-the pod that 'stack exec' picks for it: the first pod by name that is
-Running and Ready and runs the container. A pod shows "-" when the command
-picks it for no container: for example a finished Job pod, a pod that is
-not ready, a pod without such a container, or a chart where no container
-accepts exec or the server could not check them (for example a failed read
-or a check over 3 s). A container that no listed pod gets is shown on a
-line under the table. The column can be wrong for a pod that is shutting
-down, or for an init container with the name of an exec container: the
-server does not send these details. The column appears only when
+the pod that 'stack exec' picks for it: the pod that the server names
+(k8s-stack-manager v0.17.0 or later). With an older server, stackctl picks
+the first pod by name that is Running and Ready and runs the container;
+this can be wrong for a pod that is shutting down, or for an init
+container with the name of an exec container. A pod shows "-" when the
+command picks it for no container: for example a finished Job pod, a pod
+that is not ready, a pod without such a container, or a chart where no
+container accepts exec or the server could not check them (for example a
+failed read or a check over 3 s). A container that no listed pod gets is
+shown on a line under the table. The column appears only when
 the server sends exec hints: ` + client.ExecServerVersion + `,
 a user who may change the stack, exec turned on, a cluster that allows
 exec and, with an API key, a server that allows API keys for exec
@@ -160,7 +161,7 @@ characters) are shown; any other name from the server is left out.
 does not ask for the exec hints). -o json and -o yaml print the full
 response, with the container states, the pod conditions, all events and
 the exec hints as received (exec_hints, exec_containers,
-exec_default_container).
+exec_default_container, exec_pods).
 
 Examples:
   stackctl stack pods my-stack
@@ -283,33 +284,26 @@ func printPodsTable(status *types.InstanceStatus, allEvents bool) error {
 
 // execColumn returns the EXEC cell of each pod of a chart, in the order of
 // ch.Pods, and the valid hint names that no pod gets. Each container goes
-// only to the pod that "stack exec -c <name>" picks (#186): the first pod by
-// name that is Running and Ready and runs the container. The default
-// container gets a trailing "*"; a pod without a container gets "-".
+// only to the pod that "stack exec -c <name>" picks (#186): the pod named in
+// exec_pods (#189), or, from an older server, the first pod by name that is
+// Running and Ready and runs the container. The default container gets a
+// trailing "*"; a pod without a container gets "-".
 func execColumn(ch types.ChartStatus) (cells, unplaced []string) {
-	ready := make([]int, 0, len(ch.Pods))
-	for i, p := range ch.Pods {
-		if podExecReady(p) {
-			ready = append(ready, i)
-		}
+	pick := clientExecPod(ch)
+	if ch.ExecPods != nil {
+		pick = serverExecPod(ch)
 	}
-	sort.SliceStable(ready, func(a, b int) bool { return ch.Pods[ready[a]].Name < ch.Pods[ready[b]].Name })
 
 	byPod := make([][]string, len(ch.Pods))
 	for _, name := range client.ExecContainerNames(ch.ExecContainers) {
+		label := name
 		if name == ch.ExecDefaultContainer {
-			name += "*"
+			label += "*"
 		}
-		placed := false
-		for _, i := range ready {
-			if podRunsContainer(ch.Pods[i], strings.TrimSuffix(name, "*")) {
-				byPod[i] = append(byPod[i], name)
-				placed = true
-				break
-			}
-		}
-		if !placed {
-			unplaced = append(unplaced, name)
+		if i, ok := pick(name); ok {
+			byPod[i] = append(byPod[i], label)
+		} else {
+			unplaced = append(unplaced, label)
 		}
 	}
 	cells = make([]string, len(ch.Pods))
@@ -320,6 +314,44 @@ func execColumn(ch types.ChartStatus) (cells, unplaced []string) {
 		}
 	}
 	return cells, unplaced
+}
+
+// serverExecPod returns the index in ch.Pods of the pod that exec_pods
+// names for a container.
+func serverExecPod(ch types.ChartStatus) func(string) (int, bool) {
+	return func(name string) (int, bool) {
+		pod, ok := ch.ExecPods[name]
+		if !ok || pod == "" {
+			return 0, false
+		}
+		for i, p := range ch.Pods {
+			if p.Name == pod {
+				return i, true
+			}
+		}
+		return 0, false
+	}
+}
+
+// clientExecPod returns the index in ch.Pods of the first pod by name that
+// is Running and Ready and runs the container. It cannot see a pod that is
+// shutting down or tell init containers apart (servers without exec_pods).
+func clientExecPod(ch types.ChartStatus) func(string) (int, bool) {
+	ready := make([]int, 0, len(ch.Pods))
+	for i, p := range ch.Pods {
+		if podExecReady(p) {
+			ready = append(ready, i)
+		}
+	}
+	sort.SliceStable(ready, func(a, b int) bool { return ch.Pods[ready[a]].Name < ch.Pods[ready[b]].Name })
+	return func(name string) (int, bool) {
+		for _, i := range ready {
+			if podRunsContainer(ch.Pods[i], name) {
+				return i, true
+			}
+		}
+		return 0, false
+	}
 }
 
 // podExecReady reports whether "stack exec" can pick the pod: phase Running
