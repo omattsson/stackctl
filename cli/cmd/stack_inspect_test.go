@@ -550,7 +550,9 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 		// received (nil: absent).
 		wantContainers [][]any
 		wantDefault    []any
-		wantPods       []string
+		// wantExecPods is exec_pods per chart as received (nil: absent).
+		wantExecPods []any
+		wantPods     []string
 	}{
 		{
 			name:           "one container with default",
@@ -625,6 +627,32 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 			wantDefault:    []any{"web", nil, nil, nil},
 			wantPods:       []string{"web-0", "web-1", "db-0", "cache-0"},
 		},
+		// exec_pods (#189): the client rule would pick web-0 for both containers.
+		{
+			name: "exec_pods: the server pick differs from the client rule",
+			charts: `[{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0", "web", "worker") + `,` + podsHintsPod("web-1", "web", "worker") +
+				`],"exec_containers":["web","worker"],"exec_default_container":"web","exec_pods":{"web":"web-1","worker":"web-0"}}]`,
+			wantRows:       [][3]string{{"web", "web-0", "worker"}, {"web", "web-1", "web*"}},
+			wantContainers: [][]any{{"web", "worker"}},
+			wantDefault:    []any{"web"},
+			wantExecPods:   []any{map[string]any{"web": "web-1", "worker": "web-0"}},
+			wantPods:       []string{"web-0", "web-1"},
+		},
+		{
+			name: "exec_pods: one chart with it, one without",
+			charts: `[` +
+				`{"chart_name":"web","release_name":"web","pods":[` + podsHintsPod("web-0", "web") + `,` + podsHintsPod("web-1", "web") + `],"exec_containers":["web"],"exec_pods":{"web":"web-1"}},` +
+				`{"chart_name":"cache","release_name":"cache","pods":[` + podsHintsPod("cache-0", "redis") + `,` + podsHintsPod("cache-1", "redis") + `],"exec_containers":["redis"]}` +
+				`]`,
+			wantRows: [][3]string{
+				{"web", "web-0", "-"}, {"web", "web-1", "web"},
+				{"cache", "cache-0", "redis"}, {"cache", "cache-1", "-"},
+			},
+			wantContainers: [][]any{{"web"}, {"redis"}},
+			wantDefault:    []any{nil, nil},
+			wantExecPods:   []any{map[string]any{"web": "web-1"}, nil},
+			wantPods:       []string{"web-0", "web-1", "cache-0", "cache-1"},
+		},
 	}
 	for _, tt := range tests {
 		body := `{"namespace":"stack-demo","exec_hints":true,"charts":` + tt.charts + `}`
@@ -655,14 +683,14 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 			out, queries := runPods(t, body, "json")
 			var got map[string]any
 			require.NoError(t, json.Unmarshal([]byte(out), &got), out)
-			assertExecFields(t, got, tt.wantContainers, tt.wantDefault)
+			assertExecFields(t, got, tt.wantContainers, tt.wantDefault, tt.wantExecPods)
 			assert.Equal(t, url.Values{"exec_hints": {"true"}}, queries()[0])
 		})
 		t.Run(tt.name+"/yaml", func(t *testing.T) {
 			out, queries := runPods(t, body, "yaml")
 			var got map[string]any
 			require.NoError(t, yaml.Unmarshal([]byte(out), &got), out)
-			assertExecFields(t, got, tt.wantContainers, tt.wantDefault)
+			assertExecFields(t, got, tt.wantContainers, tt.wantDefault, tt.wantExecPods)
 			assert.Equal(t, url.Values{"exec_hints": {"true"}}, queries()[0])
 		})
 		t.Run(tt.name+"/quiet", func(t *testing.T) {
@@ -677,7 +705,7 @@ func TestStackPodsCmd_ExecHints(t *testing.T) {
 
 // assertExecFields checks the exec fields of a decoded -o json or -o yaml
 // output of stack pods.
-func assertExecFields(t *testing.T, got map[string]any, wantContainers [][]any, wantDefault []any) {
+func assertExecFields(t *testing.T, got map[string]any, wantContainers [][]any, wantDefault, wantExecPods []any) {
 	t.Helper()
 	assert.Equal(t, true, got["exec_hints"])
 	charts, ok := got["charts"].([]any)
@@ -697,6 +725,12 @@ func assertExecFields(t *testing.T, got map[string]any, wantContainers [][]any, 
 			assert.False(t, has, "chart %d has no exec_default_container: %v", i, gotDefault)
 		} else {
 			assert.Equal(t, wantDefault[i], gotDefault, "exec_default_container of chart %d", i)
+		}
+		gotPods, has := ch["exec_pods"]
+		if wantExecPods == nil || wantExecPods[i] == nil {
+			assert.False(t, has, "chart %d has no exec_pods: %v", i, gotPods)
+		} else {
+			assert.Equal(t, wantExecPods[i], gotPods, "exec_pods of chart %d", i)
 		}
 	}
 }
