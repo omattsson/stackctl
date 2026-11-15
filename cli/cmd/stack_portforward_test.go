@@ -294,7 +294,7 @@ func TestPortForwardCmd_TwoParallelConnections(t *testing.T) {
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	assert.Equal(t, int32(2), srv.upgrades.Load(), "one WebSocket per local connection")
+	assert.Equal(t, int32(3), srv.upgrades.Load(), "the probe, then one WebSocket per local connection")
 
 	cancel()
 	require.NoError(t, waitDone(t, done))
@@ -332,7 +332,15 @@ func TestPortForwardCmd_ForbiddenStopsCommand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := newPFTestServer(t, jsonRefusal(tt.status, tt.code, "refused"))
+			// The probe passes; the server refuses the first connection (for
+			// example a changed access).
+			var dials atomic.Int32
+			srv := newPFTestServer(t, func(w http.ResponseWriter) bool {
+				if dials.Add(1) == 1 {
+					return false
+				}
+				return jsonRefusal(tt.status, tt.code, "refused")(w)
+			})
 			stdout, _ := setupPortForwardTest(t, srv.URL)
 			flagAPIKey = tt.apiKey
 			done := startPortForward(context.Background(), "42", "mysql", "0:3306")
@@ -352,10 +360,10 @@ func TestPortForwardCmd_ForbiddenStopsCommand(t *testing.T) {
 }
 
 func TestPortForwardCmd_PerConnectionErrorKeepsListening(t *testing.T) {
-	var first atomic.Bool
-	first.Store(true)
+	// The probe passes; the first connection is refused.
+	var dials atomic.Int32
 	srv := newPFTestServer(t, func(w http.ResponseWriter) bool {
-		if first.Swap(false) {
+		if dials.Add(1) == 2 {
 			return jsonRefusal(http.StatusServiceUnavailable, "no_ready_pod", "No ready pod")(w)
 		}
 		return false
@@ -532,7 +540,7 @@ func TestPortForwardCmd_ConnectionLimit(t *testing.T) {
 	_, err = over.Read(make([]byte, 1))
 	assert.Error(t, err, "the connection over the limit is closed")
 	assert.Contains(t, stderr.String(), "refused: 2 tunnels are open (the limit)")
-	assert.Equal(t, int32(2), srv.upgrades.Load(), "no WebSocket for the refused connection")
+	assert.Equal(t, int32(3), srv.upgrades.Load(), "the probe and 2 connections; no WebSocket for the refused one")
 
 	// A closed tunnel frees its slot.
 	_ = open[0].Close()
@@ -747,7 +755,7 @@ func TestPortForwardCmd_Repeated429StopsCommand(t *testing.T) {
 	err := waitDone(t, done)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "the server refused 3 connections in a row with 429 (rate limit or tunnel limit) while no other connection was open; wait and try again")
-	assert.Equal(t, int32(3*(1+len(portForward429Delays))), dials.Load(), "each connection retries the dial")
+	assert.Equal(t, int32(1+3*(1+len(portForward429Delays))), dials.Load(), "the probe is not retried; each connection retries the dial")
 	assert.Equal(t, int32(0), srv.upgrades.Load())
 	assert.Equal(t, 2, strings.Count(stderr.String(), "HTTP 429"), "one line for each refused connection below the limit")
 
@@ -859,7 +867,7 @@ func TestPortForwardCmd_RateLimiter429NotRetried(t *testing.T) {
 
 	dialUntilClosed(t, addr)
 	require.Eventually(t, func() bool { return strings.Contains(stderr.String(), "HTTP 429") }, 5*time.Second, 10*time.Millisecond)
-	assert.Equal(t, int32(1), dials.Load())
+	assert.Equal(t, int32(2), dials.Load(), "the probe and the connection, no retry")
 	cancel()
 	require.NoError(t, waitDone(t, done))
 }
@@ -892,4 +900,120 @@ func TestPortForwardCmd_InsecureTextsUnchanged(t *testing.T) {
 		require.NoError(t, waitDone(t, done))
 		assert.Contains(t, stderr.String(), "Warning: --allow-insecure-stream: the tunnel data is not protected against a man in the middle\n")
 	})
+}
+
+func TestPortForwardCmd_PreflightRefusalStopsBeforeListening(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		code    string
+		msg     string
+		wantMsg string
+	}{
+		{"unknown service", http.StatusNotFound, "service_not_found", "Service not found. Check the service name and the service port (not the container port).", "Service not found"},
+		{"unknown port", http.StatusNotFound, "port_not_found", "Port 3306 not found on the service", "Port 3306 not found on the service"},
+		{"not deployed", http.StatusConflict, "instance_not_deployed", "not deployed", "HTTP 409"},
+		{"forbidden", http.StatusForbidden, "forbidden", "refused", "HTTP 403"},
+	}
+	for _, tt := range tests {
+		for _, quiet := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s quiet=%v", tt.name, quiet), func(t *testing.T) {
+				srv := newPFTestServer(t, jsonRefusal(tt.status, tt.code, tt.msg))
+				stdout, _ := setupPortForwardTest(t, srv.URL)
+				printer.Quiet = quiet
+				t.Cleanup(func() { printer.Quiet = false })
+
+				// An explicit free port, so the test can check that the
+				// listener is closed again.
+				probe, err := net.Listen("tcp", "127.0.0.1:0")
+				require.NoError(t, err)
+				port := portOf(t, probe.Addr().String())
+				require.NoError(t, probe.Close())
+
+				err = waitDone(t, startPortForward(context.Background(), "42", "no-such-svc", fmt.Sprintf("%d:3306", port)))
+				require.Error(t, err)
+				_, dialErr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+				assert.Error(t, dialErr, "the listener is closed")
+				assert.Contains(t, err.Error(), tt.wantMsg)
+				assert.Empty(t, stdout.String(), "nothing is bound, no Forwarding line")
+				assert.Equal(t, int32(1), srv.requests.Load(), "one probe, no connection")
+			})
+		}
+	}
+}
+
+func TestPortForwardCmd_PreflightOpensOneTunnelAndClosesIt(t *testing.T) {
+	srv := newPFTestServer(t, nil)
+	stdout, stderr := setupPortForwardTest(t, srv.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := startPortForward(ctx, "42", "mysql", "0:3306")
+	waitForwarding(t, stdout, done)
+	assert.Equal(t, int32(1), srv.upgrades.Load(), "the probe tunnel, before any local connection")
+	assert.NotContains(t, stderr.String(), "Connection", "the probe is not a connection")
+	cancel()
+	require.NoError(t, waitDone(t, done))
+}
+
+func TestPortForwardCmd_PreflightNonFatalRefusalStillListens(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		code   string
+	}{
+		{"no ready pod", http.StatusServiceUnavailable, "no_ready_pod"},
+		{"tunnel limit", http.StatusTooManyRequests, "tunnel_limit"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var first atomic.Bool
+			first.Store(true)
+			srv := newPFTestServer(t, func(w http.ResponseWriter) bool {
+				if first.Swap(false) {
+					return jsonRefusal(tt.status, tt.code, "refused")(w)
+				}
+				return false
+			})
+			stdout, _ := setupPortForwardTest(t, srv.URL)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := startPortForward(ctx, "42", "mysql", "0:3306")
+			addr := waitForwarding(t, stdout, done)
+
+			conn, err := net.Dial("tcp", addr)
+			require.NoError(t, err)
+			defer conn.Close()
+			_, err = conn.Write([]byte("ok"))
+			require.NoError(t, err)
+			got := make([]byte, 2)
+			_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			_, err = io.ReadFull(conn, got)
+			require.NoError(t, err)
+			cancel()
+			require.NoError(t, waitDone(t, done))
+			assert.Equal(t, int32(2), srv.requests.Load(), "the probe is not retried, then the connection dials once")
+		})
+	}
+}
+
+func TestPortForwardCmd_CancelDuringPreflightExitsWithoutBinding(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	srv := newPFTestServer(t, func(w http.ResponseWriter) bool {
+		close(entered)
+		<-release
+		return true
+	})
+	t.Cleanup(func() { close(release) }) // before srv.Close
+	stdout, _ := setupPortForwardTest(t, srv.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := startPortForward(ctx, "42", "mysql", "0:3306")
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the probe did not reach the server")
+	}
+	cancel()
+	require.NoError(t, waitDone(t, done))
+	assert.Empty(t, stdout.String())
 }

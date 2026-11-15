@@ -322,11 +322,13 @@ func TestPortForwardCmd_APIKeyPreCheck(t *testing.T) {
 				}
 				require.NoError(t, err)
 				assert.True(t, listened)
-				assert.Equal(t, []string{uiConfigPath, stackListPath, pfTestPath}, srv.paths(), "the check comes first, then resolve and dial")
-				assert.Equal(t, int32(1), srv.upgrades.Load())
+				assert.Equal(t, []string{uiConfigPath, stackListPath, pfTestPath, pfTestPath}, srv.paths(), "the check comes first, then resolve, the probe dial and the dial of the connection")
+				assert.Equal(t, int32(2), srv.upgrades.Load(), "the probe tunnel and the tunnel of the connection")
 				dial := srv.requestsTo(pfTestPath)
-				require.Len(t, dial, 1)
-				assert.Equal(t, testStreamAPIKey, dial[0].Header.Get("X-API-Key"), "the dial still uses the API key")
+				require.Len(t, dial, 2)
+				for _, d := range dial {
+					assert.Equal(t, testStreamAPIKey, d.Header.Get("X-API-Key"), "every dial still uses the API key")
+				}
 			})
 		}
 	}
@@ -351,7 +353,7 @@ func TestPortForwardCmd_APIKeyPreCheckSlowUIConfig(t *testing.T) {
 	listened, err := runPortForwardAPIKey(t, stdout)
 	require.NoError(t, err)
 	assert.True(t, listened, "a timeout of the check lets the server decide")
-	assert.Equal(t, int32(1), srv.upgrades.Load())
+	assert.Equal(t, int32(2), srv.upgrades.Load(), "the probe tunnel and the tunnel of the connection")
 }
 
 func TestPortForwardCmd_APIKeyPreCheckInterrupted(t *testing.T) {
@@ -434,11 +436,13 @@ func TestPortForwardCmd_SessionMakesNoUIConfigCall(t *testing.T) {
 	listened, err := runPortForwardAPIKey(t, stdout)
 	require.NoError(t, err)
 	assert.True(t, listened)
-	assert.Equal(t, []string{stackListPath, pfTestPath}, srv.paths(), "no /ui-config call with a session")
+	assert.Equal(t, []string{stackListPath, pfTestPath, pfTestPath}, srv.paths(), "no /ui-config call with a session; the probe and the connection dial")
 	dial := srv.requestsTo(pfTestPath)
-	require.Len(t, dial, 1)
-	assert.Equal(t, "Bearer "+testSessionToken, dial[0].Header.Get("Authorization"))
-	assert.Empty(t, dial[0].Header.Get("X-API-Key"))
+	require.Len(t, dial, 2)
+	for _, d := range dial {
+		assert.Equal(t, "Bearer "+testSessionToken, d.Header.Get("Authorization"))
+		assert.Empty(t, d.Header.Get("X-API-Key"))
+	}
 }
 
 func TestPortForwardCmd_NoCredentialsMakesNoUIConfigCall(t *testing.T) {
