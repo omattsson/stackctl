@@ -2,3 +2,6 @@
 .vscode/
 sonar-project.properties
 cli/coverage_output.out
+
+# Specs of running work (ship-issue): local state, never committed
+.claude/work/
