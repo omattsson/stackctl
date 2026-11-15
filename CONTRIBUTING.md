@@ -4,7 +4,7 @@ Thanks for helping. The project rules for code, tests and documentation are in [
 
 ## Prerequisites
 
-- Go version: see `cli/go.mod` (1.27.3 or later)
+- Go version: see `cli/go.mod` (1.27.4 or later)
 - A running [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager) backend for integration/e2e tests (`make dev` in that repo)
 
 ## Getting Started
