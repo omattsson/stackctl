@@ -4,7 +4,7 @@
 
 Go CLI tool (Cobra + yaml.v3) for managing Kubernetes stack deployments. Pure API client — talks to the [k8s-stack-manager](https://github.com/omattsson/k8s-stack-manager) backend. No backend logic, no frontend, no database, no direct K8s interaction.
 
-Go version: see `cli/go.mod` (1.27.3 or later); the Dockerfile builder image may be newer.
+Go version: see `cli/go.mod` (1.27.4 or later); the Dockerfile builder image may be newer.
 
 **Map.** The Go module root is `cli/`; run go commands there.
 
