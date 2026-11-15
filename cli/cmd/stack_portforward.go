@@ -70,6 +70,12 @@ port). LOCAL is the local port:
     use, the command tries the next 20 ports, then any free port.
   - An explicit LOCAL port that is in use stops the command.
 
+Before the command prints the address, it opens one tunnel and closes it at
+once (one extra tunnel and audit row on the server), so an unknown service
+or port stops the command (exit 1) at the start, not at the first
+connection. A refusal that can pass (429, 5xx, a network error) does not
+stop it there: the connections report it.
+
 Each local connection opens its own tunnel, so one failed connection does
 not stop the others. At most 16 tunnels are open at the same time: the
 command closes a further local connection at once and writes a line to
@@ -428,9 +434,20 @@ func runPortForward(ctx context.Context, cmd *cobra.Command, args []string) erro
 		return nil
 	}
 
+	// Bind first: a port that is in use stops the command without a probe
+	// tunnel. Nothing accepts a connection, and nothing prints the address,
+	// until the probe has passed.
 	listeners, err := bindPortForward(addrs, spec)
 	if err != nil {
 		return err
+	}
+	if err := portForwardPreflight(ctx, c, id, service, spec.remote); err != nil {
+		closeListeners(listeners)
+		return err
+	}
+	if ctx.Err() != nil {
+		closeListeners(listeners)
+		return nil
 	}
 	warnNonLoopback(stderr, listeners)
 	for _, l := range listeners {
@@ -448,6 +465,27 @@ func runPortForward(ctx context.Context, cmd *cobra.Command, args []string) erro
 		slots: make(chan struct{}, portForwardConnLimit),
 	}
 	return pf.serve(ctx, listeners)
+}
+
+// portForwardPreflight opens one tunnel and closes it at once, before the
+// command accepts a connection. The server checks the service and the port
+// when a tunnel opens, so an unknown service or port stops the command now
+// and not at the first local connection. Only an error that stops the command (see
+// portForwardFatal) is returned, with the text of a refused connection. Any
+// other failure (429, 5xx, a network error) and a cancel by ctx return nil:
+// the connections report the failure, and the caller checks ctx.
+func portForwardPreflight(ctx context.Context, c *client.Client, id, service string, port int) error {
+	ws, err := c.DialPortForward(ctx, id, service, port)
+	if err != nil {
+		if ctx.Err() == nil && portForwardFatal(err) {
+			return err
+		}
+		return nil
+	}
+	_ = ws.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(client.CloseNormal, ""), time.Now().Add(time.Second))
+	_ = ws.Close()
+	return nil
 }
 
 // warnNonLoopback warns for each listener on an address that is not

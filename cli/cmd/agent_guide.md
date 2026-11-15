@@ -77,6 +77,9 @@ stackctl stack history my-app
 
 # Reach a service of the stack: runs until interrupted, so start it in the background
 stackctl stack port-forward my-app mysql 0:3306 -q   # stdout: 127.0.0.1:<port>; exit 1 on 403/404/409
+# Before it prints the address it opens one tunnel and closes it at once: an unknown service or port exits 1 at the
+# start, with nothing on stdout. When the probe cannot decide (429, 5xx, network error) the address is printed anyway and
+# the first connection reports the error.
 # SIGTERM or Ctrl-C ends it with exit 0. At most 16 open connections; more are closed at once.
 # After a local EOF the tunnel passes server data until the server closes or 2 s pass without data.
 # A 429 closes only that connection (the server tunnel limit is retried 3 times first).
