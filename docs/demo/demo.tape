@@ -23,13 +23,15 @@ Set WaitTimeout 120s
 
 # Setup (hidden).
 Hide
-Type@1ms "export STACKCTL_CONFIG_DIR=$HOME/.ksm-demo/stackctl-video; source docs/demo/lib.sh; source $STACKCTL_CONFIG_DIR/passwords.env; say_init" Enter
+Type@1ms "source docs/demo/lib.sh; export STACKCTL_CONFIG_DIR=$DEMO_CONFIG_DIR; source $DEMO_CONFIG_DIR/passwords.env; say_init" Enter
 Sleep 500ms
+Sleep 300ms
 Show
 
 # 1. Sign in as the admin
 Hide
 Type@1ms "clear; say '1. Sign in as the admin; a definition says which Helm charts make a stack'; export STACKCTL_PASSWORD=$ADMIN_PASSWORD" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl login --username admin"
@@ -42,6 +44,7 @@ Sleep 6s
 # 2. Users
 Hide
 Type@1ms "clear; say '2. The admin has added two users: alice (user) and devon (devops)'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl user list"
@@ -51,6 +54,7 @@ Sleep 6s
 # 3. Alice
 Hide
 Type@1ms "clear; say '3. Switch to alice, a plain user: other people'\''s stacks are visible'; export STACKCTL_PASSWORD=$ALICE_PASSWORD" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl config use-context alice"
@@ -66,6 +70,7 @@ Sleep 6s
 # 4. Create
 Hide
 Type@1ms "clear; say '4. Create your own stack from a definition'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type 'stackctl stack create --definition "Hello World" --name my-first-stack --ttl 480'
@@ -75,6 +80,7 @@ Sleep 6s
 # 5. Deploy
 Hide
 Type@1ms "clear; say '5. Deploy: the charts are installed with Helm, and --follow shows the log'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl stack deploy my-first-stack --follow"
@@ -85,6 +91,7 @@ Sleep 6s
 # 6. One answer, three formats
 Hide
 Type@1ms "clear; say '6. The same data as a table, as JSON, or as IDs only'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl stack get my-first-stack"
@@ -100,6 +107,7 @@ Sleep 4s
 # 7. Pods
 Hide
 Type@1ms "clear; say '7. Live pod status, and the container you may exec into (*)'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl stack pods my-first-stack"
@@ -109,6 +117,7 @@ Sleep 6s
 # 8. Port-forward
 Hide
 Type@1ms "clear; say '8. Reach the app on localhost with port-forward'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl stack port-forward my-first-stack podinfo 9898 >/dev/null 2>&1 &"
@@ -124,6 +133,7 @@ Sleep 3s
 # 9. Exec
 Hide
 Type@1ms "clear; say '9. Run a command in the pod'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl stack exec my-first-stack podinfo -- hostname"
@@ -132,7 +142,8 @@ Sleep 6s
 
 # 10. Logs
 Hide
-Type@1ms "clear; say '10. Every deploy is kept: history, and the log of each'" Enter
+Type@1ms "clear; say '10. Every deploy is kept: the history'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl stack history my-first-stack"
@@ -141,7 +152,8 @@ Sleep 6s
 
 # 11. Scripting
 Hide
-Type@1ms "clear; say '11. Made for scripts: IDs only with -q, exit codes that mean something'" Enter
+Type@1ms "clear; say '11. Made for scripts: JSON for jq, exit codes that mean something'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl stack list -o json | jq -r '.data[].name'"
@@ -154,6 +166,7 @@ Sleep 6s
 # 12. Clean up
 Hide
 Type@1ms "clear; say '12. Destructive commands ask first; --yes skips the prompt'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "stackctl stack clean my-first-stack"
@@ -173,6 +186,7 @@ Sleep 4s
 # Closing
 Hide
 Type@1ms "clear; say 'Try it yourself: make demo'" Enter
+Sleep 300ms
 Show
 Sleep 1s
 Type "# brew install --cask omattsson/tap/stackctl"

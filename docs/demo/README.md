@@ -21,8 +21,12 @@ You need `vhs` (with `ttyd`), `ffmpeg`, `jq`, `curl`, `kubectl` and `stackctl`
 ```bash
 (cd ../k8s-stack-manager && scripts/demo.sh up)   # kind cluster ksm-demo, API on localhost:8080
 docs/demo/setup.sh                                 # run before every render
-vhs docs/demo/demo.tape                            # writes docs/demo/stackctl-demo.webm (about 4 minutes)
+rm -f docs/demo/stackctl-demo.webm
+vhs docs/demo/demo.tape                            # writes docs/demo/stackctl-demo.webm; takes about 4 minutes
 ```
+
+If `vhs` exits non-zero (for example a `Wait` timed out because a deploy hung),
+the webm is incomplete: do not use it, fix the cause and render again.
 
 `setup.sh` is safe to run again; the tape ends with `stack clean`, so run it
 before each render. It uses its own stackctl configuration directory
@@ -35,7 +39,7 @@ Remove everything with `scripts/demo.sh down` in k8s-stack-manager.
 
 ## Publish
 
-The webm is not committed (about 15 MB, `.gitignore`). Upload it to GitHub (for
+The webm is not committed (about 1.5 MB, `.gitignore`). Upload it to GitHub (for
 example by dragging it into an issue or a README edit in the browser) and put
 the link under a `## Demo` heading in the README, like k8s-stack-manager does.
 

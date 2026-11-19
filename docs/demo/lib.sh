@@ -10,6 +10,8 @@ DEMO_DIR="${KSM_DEMO_DIR:-${HOME}/.ksm-demo}"
 DEMO_CONFIG_DIR="${DEMO_DIR}/stackctl-video"
 DEMO_API="http://localhost:${KSM_DEMO_PORT:-8080}"
 DEMO_STACK="my-first-stack"
+DEMO_KUBE_CONTEXT="kind-${KSM_DEMO_CLUSTER:-ksm-demo}"
+DEMO_NAMESPACE="stack-${DEMO_STACK}-alice"
 
 # say "<n>. text": a caption pill on the last terminal row, in the style of
 # the ksm demo video. say_init reserves that row (scroll region), so the

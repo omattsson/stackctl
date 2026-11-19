@@ -16,16 +16,14 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${HERE}/lib.sh"
 
-CONTEXT="kind-${KSM_DEMO_CLUSTER:-ksm-demo}"
-NAMESPACE="stack-${DEMO_STACK}-alice"
 
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
-kc() { kubectl --context "${CONTEXT}" "$@"; }
+kc() { kubectl --context "${DEMO_KUBE_CONTEXT}" "$@"; }
 
 for cmd in stackctl kubectl curl openssl awk sed; do
   command -v "${cmd}" &>/dev/null || die "${cmd} is not installed."
 done
-curl -sf "${DEMO_API}/health/live" >/dev/null ||
+curl -sf --max-time 5 "${DEMO_API}/health/live" >/dev/null ||
   die "the API does not answer on ${DEMO_API}; run scripts/demo.sh up in k8s-stack-manager first."
 [ -f "${DEMO_DIR}/secrets.yaml" ] || die "${DEMO_DIR}/secrets.yaml is missing; run scripts/demo.sh up first."
 
@@ -60,10 +58,10 @@ login admin "${ADMIN_PASSWORD}"
 ADMIN_TOKEN="$(sed -n 's/.*"token": *"\([^"]*\)".*/\1/p' "${DEMO_CONFIG_DIR}/tokens/admin.json")"
 
 # A leftover stack of an earlier run goes first: it belongs to alice.
-if stackctl stack list | awk 'NR>1{print $2}' | grep -qx "${DEMO_STACK}"; then
+if stackctl stack get "${DEMO_STACK}" >/dev/null 2>&1; then
   stackctl stack delete "${DEMO_STACK}" --yes >/dev/null
 fi
-kc delete namespace "${NAMESPACE}" --ignore-not-found --wait >/dev/null
+kc delete namespace "${DEMO_NAMESPACE}" --ignore-not-found --wait >/dev/null
 
 user_id() { stackctl user list | awk -v u="$1" 'NR>1 && $2==u {print $1}'; }
 
@@ -91,11 +89,11 @@ login alice "${ALICE_PASSWORD}"
 login devon "${DEVON_PASSWORD}"
 stackctl config use-context admin >/dev/null
 
-kc create namespace "${NAMESPACE}" >/dev/null
+kc create namespace "${DEMO_NAMESPACE}" >/dev/null
 for _ in $(seq 1 30); do
-  kc -n "${NAMESPACE}" get serviceaccount default &>/dev/null && break
+  kc -n "${DEMO_NAMESPACE}" get serviceaccount default &>/dev/null && break
   sleep 1
 done
-kc -n "${NAMESPACE}" patch serviceaccount default -p '{"automountServiceAccountToken": false}' >/dev/null
+kc -n "${DEMO_NAMESPACE}" patch serviceaccount default -p '{"automountServiceAccountToken": false}' >/dev/null
 
 printf 'Ready. Config directory of the video: %s\n' "${DEMO_CONFIG_DIR}"
