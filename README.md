@@ -18,7 +18,7 @@ stackctl talks to the K8s Stack Manager API, so you need a K8s Stack Manager ser
 
 A three-minute walkthrough: sign in, create a stack from a definition, deploy it, then `get`, `stack pods`, `port-forward`, `exec`, `history` and `clean`. It runs against the demo cluster of `make demo` in k8s-stack-manager. To record it again, see [docs/demo](docs/demo/README.md).
 
-[stackctl-demo.webm](https://github.com/user-attachments/assets/066375d3-74c0-46ba-868d-1239d49762e3)
+[stackctl-demo.webm](https://github.com/user-attachments/assets/33775582-a704-4144-be49-35c88f3970e7)
 
 ## Installation
 
