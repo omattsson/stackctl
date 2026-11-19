@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -493,4 +494,196 @@ func TestAuditHelp_UsesServerNames(t *testing.T) {
 	}
 	assert.Contains(t, auditLogCmd.PersistentFlags().Lookup("entity-type").Usage, "stack_instance")
 	assert.NotContains(t, auditLogCmd.PersistentFlags().Lookup("action").Usage, "stack.deploy")
+}
+
+// ---------- k8s-stack-manager v0.18.0: new fields, filters, actions ----------
+
+// auditPageNewAndOld is what a v0.18.0 server returns: a new entry with every
+// new field (keys in a different order than the CLI prints them) and an entry
+// from before the upgrade without any.
+const auditPageNewAndOld = `{"total":2,"limit":25,"offset":0,"data":[
+ {"username":"alice","user_id":"u1","timestamp":"2026-11-18T10:00:00Z","id":"a2","action":"deploy",
+  "entity_type":"stack_instance","entity_id":"s-1","entity_name":"my-first-stack","details":"deployed via API",
+  "auth_method":"api_key","api_key_id":"k-9","client_ip":"203.0.113.7","request_id":"req-1",
+  "trace_id":"0af7651916cd43dd8448eb211c80319c"},
+ {"id":"a1","timestamp":"2026-05-01T10:00:00Z","user_id":"u2","username":"bob","action":"create",
+  "entity_type":"deploy","entity_id":"s-0","details":""}]}`
+
+func auditServerReturning(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+}
+
+func TestBuildAuditListParams_UsernameAndAPIKeyID(t *testing.T) {
+	resetAuditFlagsForTest()
+	defer resetAuditFlagsForTest()
+	auditFlagUsername = "alice"
+	auditFlagAPIKeyID = "k-9"
+
+	p, err := buildAuditListParams()
+	require.NoError(t, err)
+	assert.Equal(t, "alice", p.Username)
+	assert.Equal(t, "k-9", p.APIKeyID)
+}
+
+func TestAuditLogCmds_ForwardUsernameAndAPIKeyID(t *testing.T) {
+	for _, name := range []string{"username", "api-key-id"} {
+		require.NotNil(t, auditLogCmd.PersistentFlags().Lookup(name), "--%s is shared by list and export", name)
+	}
+	for name, cmd := range map[string]*cobra.Command{"list": auditLogListCmd, "export": auditLogExportCmd} {
+		t.Run(name, func(t *testing.T) {
+			var gotQuery url.Values
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.Query()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+
+			_ = setupStackTestCmd(t, server.URL)
+			resetAuditFlagsForTest()
+			defer resetAuditFlagsForTest()
+			auditFlagUsername = "alice"
+			auditFlagAPIKeyID = "k-9"
+
+			require.NoError(t, cmd.RunE(cmd, []string{}))
+			assert.Equal(t, "alice", gotQuery.Get("username"))
+			assert.Equal(t, "k-9", gotQuery.Get("api_key_id"))
+			assert.Empty(t, gotQuery.Get("user_id"))
+		})
+	}
+}
+
+func TestAuditLogListCmd_NewAndOldEntries_JSONGolden(t *testing.T) {
+	server := auditServerReturning(t, auditPageNewAndOld)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetAuditFlagsForTest()
+	defer resetAuditFlagsForTest()
+	printer.Format = output.FormatJSON
+	require.NoError(t, auditLogListCmd.RunE(auditLogListCmd, []string{}))
+
+	want, err := os.ReadFile(filepath.Join("testdata", "audit_log_list.golden.json"))
+	require.NoError(t, err)
+	assert.Equal(t, string(want), buf.String(),
+		"JSON output must match testdata/audit_log_list.golden.json byte-for-byte")
+}
+
+func TestAuditLogListCmd_NewAndOldEntries_YAMLKeepsNewFields(t *testing.T) {
+	server := auditServerReturning(t, auditPageNewAndOld)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetAuditFlagsForTest()
+	defer resetAuditFlagsForTest()
+	printer.Format = output.FormatYAML
+	require.NoError(t, auditLogListCmd.RunE(auditLogListCmd, []string{}))
+
+	out := buf.String()
+	for _, want := range []string{"entity_name: my-first-stack", "client_ip: 203.0.113.7", "request_id: req-1",
+		"trace_id: 0af7651916cd43dd8448eb211c80319c", "auth_method: api_key", "api_key_id: k-9"} {
+		assert.Contains(t, out, want)
+	}
+	assert.Equal(t, 1, strings.Count(out, "auth_method:"), "the old entry has no auth_method key")
+}
+
+func TestAuditLogListCmd_NewAndOldEntries_TableGolden(t *testing.T) {
+	server := auditServerReturning(t, auditPageNewAndOld)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetAuditFlagsForTest()
+	defer resetAuditFlagsForTest()
+	require.NoError(t, auditLogListCmd.RunE(auditLogListCmd, []string{}))
+
+	want, err := os.ReadFile(filepath.Join("testdata", "audit_log_list_table.golden.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, string(want), buf.String(),
+		"the table must match testdata/audit_log_list_table.golden.txt")
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	require.Len(t, lines, 3)
+	assert.Contains(t, lines[0], "AUTH")
+	assert.NotContains(t, lines[0], "ENTITY ID")
+	assert.Contains(t, lines[1], "my-first-stack", "the entity name is shown when it is set")
+	assert.Contains(t, lines[1], "api_key")
+	assert.Contains(t, lines[2], "s-0", "an entry without entity_name shows the entity ID")
+	assert.NotContains(t, lines[2], "my-first-stack")
+}
+
+func TestAuditEntityAndAuthLabels(t *testing.T) {
+	assert.Equal(t, "my-first-stack", auditEntityLabel(types.AuditLogEntry{EntityName: "my-first-stack", EntityID: "s-1"}))
+	assert.Equal(t, "s-1", auditEntityLabel(types.AuditLogEntry{EntityID: "s-1"}))
+	assert.Equal(t, "-", auditEntityLabel(types.AuditLogEntry{}))
+	assert.Equal(t, "oidc", auditAuthLabel(types.AuditLogEntry{AuthMethod: "oidc"}))
+	assert.Equal(t, "-", auditAuthLabel(types.AuditLogEntry{}))
+}
+
+func TestAuditLogExportCmd_JSONKeepsNewFields(t *testing.T) {
+	want := `[{"action":"login","auth_method":"password","client_ip":"203.0.113.7","entity_name":"alice","id":"a3","request_id":"req-2","trace_id":"0af7651916cd43dd8448eb211c80319c"}]`
+	server := auditServerReturning(t, want)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetAuditFlagsForTest()
+	defer resetAuditFlagsForTest()
+	require.NoError(t, auditLogExportCmd.RunE(auditLogExportCmd, []string{}))
+	assert.Equal(t, want, buf.String(), "the export body passes through unchanged")
+}
+
+func TestAuditHelp_ListsSignInActionsAndNewFilters(t *testing.T) {
+	for _, cmd := range []*cobra.Command{auditLogListCmd, auditLogExportCmd} {
+		for _, action := range []string{"login", "login_failed", "oidc_login", "logout", "logout_all", "refresh_reuse_revoked"} {
+			assert.Contains(t, cmd.Long, action)
+		}
+		assert.Contains(t, cmd.Long, "--username")
+		assert.Contains(t, cmd.Long, "--api-key-id")
+		assert.Contains(t, cmd.Long, "v0.18.0", "older servers ignore the new filters")
+		assert.Contains(t, cmd.Long, "ignore", "the help says what an older server does with them")
+	}
+	for _, name := range []string{"username", "api-key-id"} {
+		assert.Contains(t, auditLogCmd.PersistentFlags().Lookup(name).Usage, "v0.18.0")
+	}
+}
+
+// entity_name and auth_method come from the server and can hold text a user
+// chose (a template or stack name); a control sequence in them must not reach
+// the terminal through the table.
+func TestAuditLogListCmd_TableSanitizesNameAndAuth(t *testing.T) {
+	server := auditServerReturning(t, `{"total":1,"limit":25,"offset":0,"data":[
+ {"id":"a1","timestamp":"2026-11-18T10:00:00Z","user_id":"u1","username":"alice","action":"create",
+  "entity_type":"stack_template","entity_id":"t-1","entity_name":"evil\u001b[2J\u001b]0;pwned\u0007name",
+  "auth_method":"jwt\u001b[31m"}]}`)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetAuditFlagsForTest()
+	defer resetAuditFlagsForTest()
+	require.NoError(t, auditLogListCmd.RunE(auditLogListCmd, []string{}))
+
+	out := buf.String()
+	assert.NotContains(t, out, "\x1b", "no escape sequence in the table")
+	assert.NotContains(t, out, "\x07")
+	assert.Contains(t, out, "evil")
+	assert.Contains(t, out, "name")
+}
+
+// Entries from before v0.18.0 have no entity_name: the NAME column falls back
+// to the entity ID, which an old server derived from the request route.
+func TestAuditLogListCmd_TableSanitizesEntityIDFallback(t *testing.T) {
+	server := auditServerReturning(t, `{"total":1,"limit":25,"offset":0,"data":[
+ {"id":"a1","timestamp":"2026-05-01T10:00:00Z","user_id":"u1","username":"alice","action":"create",
+  "entity_type":"deploy","entity_id":"s-\u001b[2J0"}]}`)
+	defer server.Close()
+
+	buf := setupStackTestCmd(t, server.URL)
+	resetAuditFlagsForTest()
+	defer resetAuditFlagsForTest()
+	require.NoError(t, auditLogListCmd.RunE(auditLogListCmd, []string{}))
+	assert.NotContains(t, buf.String(), "\x1b")
+	assert.Contains(t, buf.String(), "s-")
 }

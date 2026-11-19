@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/omattsson/stackctl/cli/pkg/client"
 	"github.com/omattsson/stackctl/cli/pkg/output"
 	"github.com/omattsson/stackctl/cli/pkg/types"
 	"github.com/spf13/cobra"
@@ -37,6 +38,8 @@ var auditLogCmd = &cobra.Command{
 // the user passes --user / --action / etc.
 var (
 	auditFlagUser       string
+	auditFlagUsername   string
+	auditFlagAPIKeyID   string
 	auditFlagAction     string
 	auditFlagEntityType string
 	auditFlagEntityID   string
@@ -59,7 +62,9 @@ Filter values (exact match, k8s-stack-manager v0.7.0 or later):
                  extend_ttl, clone, invoke_action, publish, unpublish,
                  instantiate, import, upgrade, test, test_connection,
                  set_default, run, disable, enable, reset_password,
-                 quick_deploy, expired, cleanup_policy_executed
+                 quick_deploy, expired, cleanup_policy_executed,
+                 login, login_failed, oidc_login, logout, logout_all,
+                 refresh_reuse_revoked
   --entity-type  stack_instance, stack_definition, stack_template,
                  chart_config, value_override, branch_override,
                  quota_override, user, api_key, cluster, quota,
@@ -69,6 +74,10 @@ Filter values (exact match, k8s-stack-manager v0.7.0 or later):
 Older servers (and entries written before v0.7.0) use the HTTP method as
 the action and the last route segment as the entity type. For example, an
 old deploy entry has --action create --entity-type deploy.
+
+--username and --api-key-id filter by the name of the user and by the ID of
+the API key (k8s-stack-manager v0.18.0 or later). An older server ignores
+both and returns the entries unfiltered.
 `
 
 var auditLogListCmd = &cobra.Command{
@@ -85,6 +94,8 @@ negated and added to time.Now() before being sent to the backend as RFC3339.
 Examples:
   stackctl audit log list
   stackctl audit log list --user u-123 --action deploy
+  stackctl audit log list --username alice --action login_failed --since 24h
+  stackctl audit log list --api-key-id 6f1c... --since 24h
   stackctl audit log list --entity-type stack_instance --since 24h
   stackctl audit log list --entity-type stack_template --action publish
   stackctl audit log list --since 2026-05-01T00:00:00Z --limit 100
@@ -122,15 +133,16 @@ Examples:
 				printer.PrintMessage("No audit log entries found.")
 				return nil
 			}
-			headers := []string{"TIMESTAMP", "USER", "ACTION", "ENTITY", "ENTITY ID", "DETAILS"}
+			headers := []string{"TIMESTAMP", "USER", "AUTH", "ACTION", "ENTITY", "NAME", "DETAILS"}
 			rows := make([][]string, len(page.Data))
 			for i, e := range page.Data {
 				rows[i] = []string{
 					e.Timestamp.UTC().Format(time.RFC3339),
 					auditUserLabel(e),
+					auditAuthLabel(e),
 					e.Action,
 					e.EntityType,
-					e.EntityID,
+					auditEntityLabel(e),
 					truncate(e.Details, 60),
 				}
 			}
@@ -226,6 +238,8 @@ Examples:
 func buildAuditListParams() (types.AuditLogListParams, error) {
 	p := types.AuditLogListParams{
 		UserID:     auditFlagUser,
+		Username:   auditFlagUsername,
+		APIKeyID:   auditFlagAPIKeyID,
 		Action:     auditFlagAction,
 		EntityType: auditFlagEntityType,
 		EntityID:   auditFlagEntityID,
@@ -286,6 +300,27 @@ func auditUserLabel(e types.AuditLogEntry) string {
 	return "-"
 }
 
+// auditEntityLabel returns the name of the entity when the server sent one
+// (v0.18.0 or later), else its ID. The ID is what older entries have.
+func auditEntityLabel(e types.AuditLogEntry) string {
+	if e.EntityName != "" {
+		return client.SanitizeServerText(e.EntityName)
+	}
+	if e.EntityID != "" {
+		return client.SanitizeServerText(e.EntityID)
+	}
+	return "-"
+}
+
+// auditAuthLabel returns how the request was authenticated (jwt, api_key,
+// password, oidc, refresh_token, system), or "-" for an entry from before v0.18.0.
+func auditAuthLabel(e types.AuditLogEntry) string {
+	if e.AuthMethod != "" {
+		return client.SanitizeServerText(e.AuthMethod)
+	}
+	return "-"
+}
+
 // truncate shortens s to at most n runes, appending an ellipsis when cut.
 // Used to keep audit-log "details" column readable in table mode without
 // hard-wrapping; JSON/YAML output is never truncated.
@@ -307,6 +342,8 @@ func init() {
 	// to two distinct Flags() sets (which would silently override defaults
 	// and share state across commands within one Execute()).
 	auditLogCmd.PersistentFlags().StringVar(&auditFlagUser, "user", "", "Filter by user ID")
+	auditLogCmd.PersistentFlags().StringVar(&auditFlagUsername, "username", "", "Filter by username (k8s-stack-manager v0.18.0 or later)")
+	auditLogCmd.PersistentFlags().StringVar(&auditFlagAPIKeyID, "api-key-id", "", "Filter by API key ID (k8s-stack-manager v0.18.0 or later)")
 	auditLogCmd.PersistentFlags().StringVar(&auditFlagAction, "action", "", "Filter by action (e.g. deploy, create, publish)")
 	auditLogCmd.PersistentFlags().StringVar(&auditFlagEntityType, "entity-type", "", "Filter by entity type (e.g. stack_instance, stack_template)")
 	auditLogCmd.PersistentFlags().StringVar(&auditFlagEntityID, "entity-id", "", "Filter by entity ID")
@@ -340,6 +377,8 @@ func init() {
 // remains available within the cmd package itself.
 func ResetAuditFlagsForTest() {
 	auditFlagUser = ""
+	auditFlagUsername = ""
+	auditFlagAPIKeyID = ""
 	auditFlagAction = ""
 	auditFlagEntityType = ""
 	auditFlagEntityID = ""

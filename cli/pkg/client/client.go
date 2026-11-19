@@ -2112,6 +2112,12 @@ func auditLogParamsToQuery(p types.AuditLogListParams) map[string]string {
 	if p.UserID != "" {
 		q["user_id"] = p.UserID
 	}
+	if p.Username != "" {
+		q["username"] = p.Username
+	}
+	if p.APIKeyID != "" {
+		q["api_key_id"] = p.APIKeyID
+	}
 	if p.EntityType != "" {
 		q["entity_type"] = p.EntityType
 	}
