@@ -5,3 +5,6 @@ cli/coverage_output.out
 
 # Specs of running work (ship-issue): local state, never committed
 .claude/work/
+
+# Rendered demo video (docs/demo): about 1.5 MB, not committed
+docs/demo/*.webm
