@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -349,6 +350,60 @@ func TestYAML_EmbeddedStructsAreInline(t *testing.T) {
 			var j map[string]any
 			require.NoError(t, json.Unmarshal(data, &j))
 			assert.Equal(t, "id-1", j["id"])
+		})
+	}
+}
+
+func TestAuditLogEntry_DecodesNewFields(t *testing.T) {
+	t.Parallel()
+	body := `{"id":"a1","timestamp":"2026-11-18T10:00:00Z","user_id":"u1","username":"alice",
+		"action":"login","entity_type":"user","entity_id":"u1","details":"",
+		"entity_name":"alice","client_ip":"203.0.113.7","request_id":"req-1",
+		"trace_id":"0af7651916cd43dd8448eb211c80319c","auth_method":"password","api_key_id":"k-9"}`
+	var e AuditLogEntry
+	require.NoError(t, json.Unmarshal([]byte(body), &e))
+	assert.Equal(t, "alice", e.EntityName)
+	assert.Equal(t, "203.0.113.7", e.ClientIP)
+	assert.Equal(t, "req-1", e.RequestID)
+	assert.Equal(t, "0af7651916cd43dd8448eb211c80319c", e.TraceID)
+	assert.Equal(t, "password", e.AuthMethod)
+	assert.Equal(t, "k-9", e.APIKeyID)
+
+	// The keys come back out in alphabetical order, so golden files stay stable.
+	out, err := json.Marshal(e)
+	require.NoError(t, err)
+	keys := []string{"action", "api_key_id", "auth_method", "client_ip", "details", "entity_id",
+		"entity_name", "entity_type", "id", "request_id", "timestamp", "trace_id", "user_id", "username"}
+	last := -1
+	for _, k := range keys {
+		i := strings.Index(string(out), `"`+k+`"`)
+		require.GreaterOrEqual(t, i, 0, "missing key %s in %s", k, out)
+		assert.Greater(t, i, last, "key %s out of order in %s", k, out)
+		last = i
+	}
+}
+
+func TestAuditLogEntry_OldEntryOmitsNewFields(t *testing.T) {
+	t.Parallel()
+	// An entry from before the server upgrade has no new keys; a server that
+	// sends them as null must decode the same way.
+	for name, body := range map[string]string{
+		"absent": `{"id":"a1","timestamp":"2026-05-01T10:00:00Z","user_id":"u1","username":"alice","action":"deploy","entity_type":"stack_instance","entity_id":"s1","details":""}`,
+		"null":   `{"id":"a1","timestamp":"2026-05-01T10:00:00Z","user_id":"u1","username":"alice","action":"deploy","entity_type":"stack_instance","entity_id":"s1","details":"","entity_name":null,"client_ip":null,"request_id":null,"trace_id":null,"auth_method":null,"api_key_id":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var e AuditLogEntry
+			require.NoError(t, json.Unmarshal([]byte(body), &e))
+			assert.Empty(t, e.AuthMethod)
+			asJSON, err := json.Marshal(e)
+			require.NoError(t, err)
+			asYAML, err := yaml.Marshal(e)
+			require.NoError(t, err)
+			for _, k := range []string{"entity_name", "client_ip", "request_id", "trace_id", "auth_method", "api_key_id"} {
+				assert.NotContains(t, string(asJSON), k)
+				assert.NotContains(t, string(asYAML), k)
+			}
 		})
 	}
 }

@@ -3276,6 +3276,31 @@ func TestListAuditLogs_ForwardsFilters(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// username and api_key_id are filters of k8s-stack-manager v0.18.0; list and
+// export build their query with the same function.
+func TestAuditLogs_ForwardsUsernameAndAPIKeyID(t *testing.T) {
+	t.Parallel()
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		q := r.URL.Query()
+		assert.Equal(t, "alice", q.Get("username"))
+		assert.Equal(t, "k-9", q.Get("api_key_id"))
+		assert.Empty(t, q.Get("user_id"), "an unset filter is not sent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+	p := types.AuditLogListParams{Username: "alice", APIKeyID: "k-9"}
+	_, err := c.ListAuditLogs(p)
+	require.NoError(t, err)
+	_, err = c.ExportAuditLogs("json", p)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/api/v1/audit-logs", "/api/v1/audit-logs/export"}, paths)
+}
+
 func TestExportAuditLogs_CSVStreamsRawBody(t *testing.T) {
 	t.Parallel()
 	// Build a CSV that exercises the standard CSV quoting tokens: embedded

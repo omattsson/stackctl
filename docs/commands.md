@@ -297,11 +297,19 @@ The stack owner, admin and devops can set a quota override. A user without the a
 stackctl audit log list --entity-type stack_instance --action deploy --since 24h
 stackctl audit log list --entity-type stack_template --action publish
 stackctl audit log export --since 168h --format csv --output-file weekly.csv
+stackctl audit log list --username alice --action login_failed --since 24h
+stackctl audit log list --api-key-id <key-id> --since 24h
 ```
 
 Use hours for `--since`, for example `168h` for 7 days. `7d` is not accepted.
 
 `--action` and `--entity-type` match the stored value exactly. `stackctl audit log list --help` lists the values (for example `deploy`, `rollback`, `extend_ttl`, `quick_deploy`; `stack_instance`, `stack_definition`, `stack_template`, `quota_override`). Older servers, and older entries, use the HTTP method and the last route segment, for example `--action create --entity-type deploy` for a deploy.
+
+Sign-ins are in the log too: `--action login`, `login_failed`, `oidc_login`, `logout`, `logout_all` and `refresh_reuse_revoked`. `--username <name>` lists the entries of one user by name (`--user` takes the ID); `--api-key-id <id>` lists what one API key did. Both apply to `audit log export` as well.
+
+The table has an `AUTH` column (how the request was authenticated: `jwt`, `api_key`, `password`, `oidc`, `refresh_token` or `system`) and a `NAME` column (the name of the entity, else its ID). `-o json` and `-o yaml` also show `entity_name`, `client_ip`, `request_id`, `trace_id`, `auth_method` and `api_key_id`. The export is the server's own output and has the same fields. Entries written before k8s-stack-manager v0.18.0 do not have these fields: the table shows `-` in `AUTH`, and the keys are missing in `-o json` and `-o yaml`.
+
+`--username` and `--api-key-id` need k8s-stack-manager v0.18.0 or later. An older server ignores them and returns the entries unfiltered. `stackctl server info` does not show the server version, so look at the result. With `--username`, entries of other users mean the server is older than v0.18.0 and the filter did nothing. With `--api-key-id` the table does not show the key; use `-o json` and look at `api_key_id`. An `AUTH` of `-` on every row means only that the entries are older than v0.18.0.
 
 ## Bulk Operations
 

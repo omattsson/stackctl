@@ -599,13 +599,24 @@ type UserStats struct {
 // Field declaration order is ALPHABETICAL by json tag so encoding/json
 // emits keys in stable alphabetical order — required for golden-file
 // JSON comparisons in tests. Do not reorder.
+//
+// APIKeyID, AuthMethod, ClientIP, EntityName, RequestID and TraceID come from
+// k8s-stack-manager v0.18.0. Entries written before the upgrade do not have
+// them, so they are omitempty: the keys are absent from -o json and -o yaml.
+// AuthMethod is jwt, api_key, password, oidc, refresh_token or system.
 type AuditLogEntry struct {
 	Action     string    `json:"action" yaml:"action"`
+	APIKeyID   string    `json:"api_key_id,omitempty" yaml:"api_key_id,omitempty"`
+	AuthMethod string    `json:"auth_method,omitempty" yaml:"auth_method,omitempty"`
+	ClientIP   string    `json:"client_ip,omitempty" yaml:"client_ip,omitempty"`
 	Details    string    `json:"details" yaml:"details"`
 	EntityID   string    `json:"entity_id" yaml:"entity_id"`
+	EntityName string    `json:"entity_name,omitempty" yaml:"entity_name,omitempty"`
 	EntityType string    `json:"entity_type" yaml:"entity_type"`
 	ID         string    `json:"id" yaml:"id"`
+	RequestID  string    `json:"request_id,omitempty" yaml:"request_id,omitempty"`
 	Timestamp  time.Time `json:"timestamp" yaml:"timestamp"`
+	TraceID    string    `json:"trace_id,omitempty" yaml:"trace_id,omitempty"`
 	UserID     string    `json:"user_id" yaml:"user_id"`
 	Username   string    `json:"username" yaml:"username"`
 }
@@ -642,6 +653,8 @@ type AuditLogListParams struct {
 	StartDate  *time.Time `json:"start_date,omitempty" yaml:"start_date,omitempty"`
 	EndDate    *time.Time `json:"end_date,omitempty" yaml:"end_date,omitempty"`
 	UserID     string     `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+	Username   string     `json:"username,omitempty" yaml:"username,omitempty"`
+	APIKeyID   string     `json:"api_key_id,omitempty" yaml:"api_key_id,omitempty"`
 	EntityType string     `json:"entity_type,omitempty" yaml:"entity_type,omitempty"`
 	EntityID   string     `json:"entity_id,omitempty" yaml:"entity_id,omitempty"`
 	Action     string     `json:"action,omitempty" yaml:"action,omitempty"`

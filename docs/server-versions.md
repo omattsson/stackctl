@@ -12,9 +12,11 @@ Some stackctl features need a newer k8s-stack-manager server. The table shows th
 | Actions limited to some stacks (`applies_to`) and the `scope_incomplete` hint of `stack action list` (omattsson/k8s-stack-manager#720) | v0.15.0 or later |
 | `stack port-forward` (omattsson/k8s-stack-manager#722) and `stack exec` (omattsson/k8s-stack-manager#723) | v0.15.0 or later |
 | The `EXEC` column of `stack pods`, the containers in `stack exec` refusals, the API-key pre-check of `stack exec` and `stack port-forward` (omattsson/k8s-stack-manager#728) | v0.15.0 or later |
+| `audit log` fields `entity_name`, `client_ip`, `request_id`, `trace_id`, `auth_method`, `api_key_id`; the filters `--username` and `--api-key-id`; the sign-in actions (omattsson/k8s-stack-manager#790) | v0.18.0 or later |
 
 ## With an older server
 
+- `audit log list|export --username` and `--api-key-id`: an older server ignores them and returns the entries unfiltered. Entries written before v0.18.0 have none of the new fields (`AUTH` shows `-`).
 - `--stop-at` and `--until`: an older server ignores them. stackctl shows the result and exits with code 1. The local TTL check uses 30 days as the limit.
 - `applies_to`: an older server lists every action for every stack.
 - `stack port-forward` and `stack exec`: an older server answers 404 without an error code. stackctl says "upgrade the server to k8s-stack-manager v0.15.0 or later".
