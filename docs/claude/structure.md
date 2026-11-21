@@ -7,7 +7,8 @@ The full file tree of stackctl, with the role of each file. `CLAUDE.md` has the 
   workflows/                  # ci.yml, docker.yml, live-tests.yml, release.yml, security.yml
   instructions/               # Copilot path instructions
 .claude/agents/               # Claude Code agent definitions
-.claude/skills/               # Claude Code skills (ship-issue)
+.claude/skills/               # Claude Code skills (ship-issue, new-command, refresh-contract)
+.claude/hooks/                # Hook scripts wired in .claude/settings.json (gofmt-on-edit, protect-generated)
 .goreleaser.yml               # Release config (GoReleaser)
 Dockerfile                    # Container image
 install.sh                    # Install script (honours INSTALL_DIR)
